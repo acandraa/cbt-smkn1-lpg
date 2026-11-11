@@ -259,15 +259,43 @@ const DB = {
       this.initLocalData();
       return JSON.parse(localStorage.getItem('CBT_LOCAL_KELAS')) || [];
     } else {
-      const { data, error } = await window.supabaseClient
-        .from('kelas')
-        .select('*')
-        .order('nama_kelas', { ascending: true });
-      if (error) {
-        console.warn("Tabel kelas belum tersedia di Supabase:", error);
-        return [];
+      const shards = (window.getSupabaseShards && window.getSupabaseShards()) || [];
+      let merged = [];
+      if (shards.length > 1) {
+        const results = await Promise.allSettled(shards.map(s => s.client && s.client.from('kelas').select('*')));
+        const set = new Set();
+        results.forEach(r => {
+          if (r.status === 'fulfilled' && Array.isArray(r.value.data)) {
+            r.value.data.forEach(item => {
+              const name = (item.nama_kelas || item.nama || '').toUpperCase();
+              if (name && !set.has(name)) {
+                set.add(name);
+                merged.push(item);
+              }
+            });
+          }
+        });
       }
-      return data || [];
+      if (merged.length === 0 && window.supabaseClient) {
+        try {
+          const { data } = await window.supabaseClient.from('kelas').select('*').order('nama_kelas', { ascending: true });
+          merged = data || [];
+        } catch (e) {}
+      }
+      // Pastikan kelas-kelas dari 5 jurusan selalu tersedia
+      const defaultKelasNames = [
+        'X TKJ 1', 'X TKJ 2',
+        'X ATP 1', 'X ATP 2',
+        'X TKRO 1', 'X TKRO 2',
+        'X TBSM 1', 'X TBSM 2',
+        'X AKL 1', 'X AKL 2'
+      ];
+      defaultKelasNames.forEach(dKelas => {
+        if (!merged.some(k => (k.nama_kelas || k.nama || '').toUpperCase() === dKelas)) {
+          merged.push({ id: `kelas-${dKelas.toLowerCase().replace(/\s+/g, '-')}`, nama_kelas: dKelas });
+        }
+      });
+      return merged;
     }
   },
 
@@ -289,6 +317,26 @@ const DB = {
       localStorage.setItem('CBT_LOCAL_KELAS', JSON.stringify(list));
       return { nama_kelas: cleanNama };
     } else {
+      const shards = (window.getSupabaseShards && window.getSupabaseShards()) || [];
+      if (shards.length > 1) {
+        const results = await Promise.allSettled(shards.map(async (shard) => {
+          if (!shard.client) return null;
+          if (id) {
+            const { error } = await shard.client.from('kelas').update({ nama_kelas: cleanNama }).eq('id', id);
+            if (error) throw error;
+          } else {
+            const { error } = await shard.client.from('kelas').insert({ nama_kelas: cleanNama });
+            if (error) throw error;
+          }
+          return true;
+        }));
+        const anySuccess = results.some(r => r.status === 'fulfilled' && r.value);
+        if (!anySuccess) {
+          const firstErr = results.find(r => r.status === 'rejected')?.reason;
+          if (firstErr) throw firstErr;
+        }
+        return { nama_kelas: cleanNama };
+      }
       if (id) {
         const { data, error } = await window.supabaseClient.from('kelas').update({ nama_kelas: cleanNama }).eq('id', id);
         if (error) throw error;
@@ -307,6 +355,11 @@ const DB = {
       list = list.filter(k => k.id !== id);
       localStorage.setItem('CBT_LOCAL_KELAS', JSON.stringify(list));
     } else {
+      const shards = (window.getSupabaseShards && window.getSupabaseShards()) || [];
+      if (shards.length > 1) {
+        await Promise.allSettled(shards.map(s => s.client && s.client.from('kelas').delete().eq('id', id)));
+        return;
+      }
       const { error } = await window.supabaseClient.from('kelas').delete().eq('id', id);
       if (error) throw error;
     }
@@ -317,15 +370,37 @@ const DB = {
       this.initLocalData();
       return JSON.parse(localStorage.getItem('CBT_LOCAL_JURUSAN')) || [];
     } else {
-      const { data, error } = await window.supabaseClient
-        .from('jurusan')
-        .select('*')
-        .order('nama_jurusan', { ascending: true });
-      if (error) {
-        console.warn("Tabel jurusan belum tersedia di Supabase:", error);
-        return [];
+      const shards = (window.getSupabaseShards && window.getSupabaseShards()) || [];
+      let merged = [];
+      if (shards.length > 1) {
+        const results = await Promise.allSettled(shards.map(s => s.client && s.client.from('jurusan').select('*')));
+        const set = new Set();
+        results.forEach(r => {
+          if (r.status === 'fulfilled' && Array.isArray(r.value.data)) {
+            r.value.data.forEach(item => {
+              const name = (item.nama_jurusan || item.nama || '').toUpperCase();
+              if (name && !set.has(name)) {
+                set.add(name);
+                merged.push(item);
+              }
+            });
+          }
+        });
       }
-      return data || [];
+      if (merged.length === 0 && window.supabaseClient) {
+        try {
+          const { data } = await window.supabaseClient.from('jurusan').select('*').order('nama_jurusan', { ascending: true });
+          merged = data || [];
+        } catch (e) {}
+      }
+      // Pastikan 5 jurusan server selalu tersedia
+      const defaultJurusanNames = ['TKJ', 'ATP', 'TKRO', 'TBSM', 'AKUNTANSI'];
+      defaultJurusanNames.forEach(dName => {
+        if (!merged.some(j => (j.nama_jurusan || j.nama || '').toUpperCase() === dName)) {
+          merged.push({ id: `jurusan-${dName.toLowerCase()}`, nama_jurusan: dName });
+        }
+      });
+      return merged;
     }
   },
 
@@ -347,6 +422,26 @@ const DB = {
       localStorage.setItem('CBT_LOCAL_JURUSAN', JSON.stringify(list));
       return { nama_jurusan: cleanNama };
     } else {
+      const shards = (window.getSupabaseShards && window.getSupabaseShards()) || [];
+      if (shards.length > 1) {
+        const results = await Promise.allSettled(shards.map(async (shard) => {
+          if (!shard.client) return null;
+          if (id) {
+            const { error } = await shard.client.from('jurusan').update({ nama_jurusan: cleanNama }).eq('id', id);
+            if (error) throw error;
+          } else {
+            const { error } = await shard.client.from('jurusan').insert({ nama_jurusan: cleanNama });
+            if (error) throw error;
+          }
+          return true;
+        }));
+        const anySuccess = results.some(r => r.status === 'fulfilled' && r.value);
+        if (!anySuccess) {
+          const firstErr = results.find(r => r.status === 'rejected')?.reason;
+          if (firstErr) throw firstErr;
+        }
+        return { nama_jurusan: cleanNama };
+      }
       if (id) {
         const { data, error } = await window.supabaseClient.from('jurusan').update({ nama_jurusan: cleanNama }).eq('id', id);
         if (error) throw error;
@@ -365,6 +460,11 @@ const DB = {
       list = list.filter(j => j.id !== id);
       localStorage.setItem('CBT_LOCAL_JURUSAN', JSON.stringify(list));
     } else {
+      const shards = (window.getSupabaseShards && window.getSupabaseShards()) || [];
+      if (shards.length > 1) {
+        await Promise.allSettled(shards.map(s => s.client && s.client.from('jurusan').delete().eq('id', id)));
+        return;
+      }
       const { error } = await window.supabaseClient.from('jurusan').delete().eq('id', id);
       if (error) throw error;
     }

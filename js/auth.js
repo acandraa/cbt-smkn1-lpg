@@ -8,30 +8,30 @@ const Auth = {
       throw new Error("Koneksi Supabase belum dikonfigurasi.");
     }
 
-    // Jika multi-shard, coba autentikasi ke shard yang aktif atau shard yang ada
+    // Jika multi-shard, autentikasi ke SELURUH shard Supabase secara paralel
+    // Hal ini krusial agar admin memiliki token otorisasi yang sah di ke-5 server
     if (shards.length > 1) {
-      const activeShardId = window.getActiveSupabaseShardId();
-      let targetShard = shards.find(s => String(s.id) === String(activeShardId)) || shards[0];
-
-      try {
-        const { data, error } = await targetShard.client.auth.signInWithPassword({ email, password });
-        if (!error && data && data.user) {
-          window.setActiveSupabaseShard(targetShard.id);
-          return data.user;
+      const results = await Promise.allSettled(shards.map(async (shard) => {
+        if (!shard.client || !shard.client.auth) return null;
+        const { data, error } = await shard.client.auth.signInWithPassword({ email, password });
+        if (error) {
+          console.warn(`[Shard ${shard.id} - ${shard.name}] Gagal login admin:`, error.message);
+          return null;
         }
-      } catch (e) {}
+        return data && data.user ? { shardId: shard.id, user: data.user } : null;
+      }));
 
-      // Jika gagal di shard pertama, cek shard lainnya
-      for (const shard of shards) {
-        if (shard.id === targetShard.id) continue;
-        try {
-          const { data, error } = await shard.client.auth.signInWithPassword({ email, password });
-          if (!error && data && data.user) {
-            window.setActiveSupabaseShard(shard.id);
-            return data.user;
-          }
-        } catch (e) {}
+      const successfulShards = results
+        .filter(r => r.status === 'fulfilled' && r.value)
+        .map(r => r.value);
+
+      if (successfulShards.length === 0) {
+        throw new Error("Email atau password admin salah, atau koneksi ke server ditolak.");
       }
+
+      // Default shard aktif: 'all' (gabungan semua server)
+      window.setActiveSupabaseShard('all');
+      return successfulShards[0].user;
     }
 
     if (!window.supabaseClient) {
@@ -163,8 +163,13 @@ const Auth = {
       } catch (e) {
         console.error("Gagal logout dari server:", e);
       }
-    } else if (window.supabaseClient) {
-      await window.supabaseClient.auth.signOut();
+    } else {
+      const shards = (window.getSupabaseShards && window.getSupabaseShards()) || [];
+      if (shards.length > 0) {
+        await Promise.allSettled(shards.map(s => s.client && s.client.auth && s.client.auth.signOut()));
+      } else if (window.supabaseClient) {
+        await window.supabaseClient.auth.signOut();
+      }
     }
     sessionStorage.removeItem('CBT_SESSION');
     sessionStorage.removeItem('CBT_ACTIVE_SHARD_ID');
@@ -183,17 +188,32 @@ const Auth = {
       window.setActiveSupabaseShard(savedShardId);
     }
 
-    if (!window.supabaseClient) {
-      if (requiredRole === 'admin') {
-        return null;
-      }
-      window.location.href = loginPage + '?error=config_missing';
-      return;
+    const shards = (window.getSupabaseShards && window.getSupabaseShards()) || [];
+
+    let session = null;
+    if (window.supabaseClient && window.supabaseClient.auth) {
+      try {
+        const res = await window.supabaseClient.auth.getSession();
+        session = res && res.data ? res.data.session : null;
+      } catch (e) {}
     }
 
-    const { data: { session }, error } = await window.supabaseClient.auth.getSession();
+    // Jika di shard aktif belum ada session, cari di shard lainnya
+    if (!session && shards.length > 1) {
+      for (const s of shards) {
+        if (s.client && s.client.auth) {
+          try {
+            const { data } = await s.client.auth.getSession();
+            if (data && data.session) {
+              session = data.session;
+              break;
+            }
+          } catch (e) {}
+        }
+      }
+    }
 
-    if (error || !session) {
+    if (!session) {
       this.clearSessionData();
       window.location.href = loginPage;
       return null;
@@ -202,23 +222,6 @@ const Auth = {
     const user = session.user;
 
     if (requiredRole === 'admin') {
-      const { data: adminData, error: adminErr } = await window.supabaseClient
-        .from('admins')
-        .select('*')
-        .eq('id', user.id)
-        .maybeSingle();
-
-      if (adminErr || !adminData) {
-        if (user.email === 'admin@smkn1lempuing.sch.id') {
-          // Bypass for default admin
-          this.initAutoLogout(15);
-          return user;
-        }
-        await window.supabaseClient.auth.signOut();
-        window.location.href = 'login-admin.html?error=unauthorized_admin';
-        return null;
-      }
-      
       this.initAutoLogout(15); // Auto logout after 15 mins inactivity
       return user;
     } 

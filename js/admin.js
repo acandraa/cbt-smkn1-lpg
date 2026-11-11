@@ -486,6 +486,8 @@ function renderMonitoringKelasCards() {
     let detectedJurusan = "";
     if (students.length > 0 && students[0].jurusan) {
       detectedJurusan = students[0].jurusan.toUpperCase();
+    } else if (className.includes('AKL') || className.includes('AKUNTANSI')) {
+      detectedJurusan = 'AKUNTANSI';
     } else {
       for (const j of allJurusan) {
         const jName = (j.nama_jurusan || j.nama || '').toUpperCase();
@@ -890,7 +892,7 @@ async function loadJurusan() {
         if (pk.jurusan && pk.jurusan.toLowerCase() !== 'semua') distinctNames.add(pk.jurusan.trim().toUpperCase());
       });
       if (distinctNames.size === 0) {
-        ['TKJ', 'RPL', 'MULTIMEDIA'].forEach(n => distinctNames.add(n));
+        ['TKJ', 'ATP', 'TKRO', 'TBSM', 'AKUNTANSI'].forEach(n => distinctNames.add(n));
       }
       for (const name of distinctNames) {
         try {
@@ -1133,7 +1135,7 @@ async function loadKelas() {
         if (pk.kelas && pk.kelas.toLowerCase() !== 'semua') distinctNames.add(pk.kelas.trim().toUpperCase());
       });
       if (distinctNames.size === 0) {
-        ['X TKJ 1', 'X TKJ 2', 'X RPL 1', 'X RPL 2', 'XI MM 1'].forEach(k => distinctNames.add(k));
+        ['X TKJ 1', 'X TKJ 2', 'X ATP 1', 'X ATP 2', 'X TKRO 1', 'X TKRO 2', 'X TBSM 1', 'X TBSM 2', 'X AKL 1', 'X AKL 2'].forEach(k => distinctNames.add(k));
       }
       for (const name of distinctNames) {
         try {
