@@ -8,7 +8,9 @@ echo.
 echo Memulai proses upload ke GitHub...
 echo.
 
-git push origin main
+git add -A
+git diff --cached --quiet || git commit -m "Update CBT SMKN 1 Lempuing"
+git push origin main --force-with-lease
 
 if %ERRORLEVEL% EQU 0 (
     echo.

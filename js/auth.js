@@ -198,18 +198,21 @@ const Auth = {
       } catch (e) {}
     }
 
-    // Jika di shard aktif belum ada session, cari di shard lainnya
-    if (!session && shards.length > 1) {
-      for (const s of shards) {
-        if (s.client && s.client.auth) {
-          try {
-            const { data } = await s.client.auth.getSession();
-            if (data && data.session) {
-              session = data.session;
-              break;
-            }
-          } catch (e) {}
-        }
+    // Untuk admin pada mode multi-shard: pastikan seluruh server memiliki sesi login aktif
+    // Jika ada server (seperti Server 2) yang belum terautentikasi, arahkan login ulang agar ke-5 server sinkron
+    if (requiredRole === 'admin' && shards.length > 1) {
+      const checks = await Promise.allSettled(
+        shards.map(s => (s.client && s.client.auth) ? s.client.auth.getSession() : Promise.resolve(null))
+      );
+      const anyMissing = checks.some(c => {
+        if (c.status !== 'fulfilled' || !c.value || !c.value.data) return true;
+        return !c.value.data.session;
+      });
+      if (anyMissing) {
+        session = null;
+      } else if (!session) {
+        const firstValid = checks.find(c => c.status === 'fulfilled' && c.value && c.value.data && c.value.data.session);
+        if (firstValid) session = firstValid.value.data.session;
       }
     }
 

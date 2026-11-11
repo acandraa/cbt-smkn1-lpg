@@ -260,14 +260,18 @@ const DB = {
       return JSON.parse(localStorage.getItem('CBT_LOCAL_KELAS')) || [];
     } else {
       const shards = (window.getSupabaseShards && window.getSupabaseShards()) || [];
-      let merged = [];
-      if (shards.length > 1) {
-        const results = await Promise.allSettled(shards.map(s => s.client && s.client.from('kelas').select('*')));
+      const isUnified = window.isUnifiedSupabaseMode && window.isUnifiedSupabaseMode();
+
+      if (isUnified && shards.length > 1) {
+        const results = await Promise.allSettled(
+          shards.map(s => s.client && s.client.from('kelas').select('*').order('nama_kelas', { ascending: true }))
+        );
         const set = new Set();
+        const merged = [];
         results.forEach(r => {
-          if (r.status === 'fulfilled' && Array.isArray(r.value.data)) {
+          if (r.status === 'fulfilled' && r.value && Array.isArray(r.value.data)) {
             r.value.data.forEach(item => {
-              const name = (item.nama_kelas || item.nama || '').toUpperCase();
+              const name = (item.nama_kelas || item.nama || '').trim().toUpperCase();
               if (name && !set.has(name)) {
                 set.add(name);
                 merged.push(item);
@@ -275,27 +279,21 @@ const DB = {
             });
           }
         });
+        return merged.sort((a, b) => (a.nama_kelas || '').localeCompare(b.nama_kelas || ''));
       }
-      if (merged.length === 0 && window.supabaseClient) {
-        try {
-          const { data } = await window.supabaseClient.from('kelas').select('*').order('nama_kelas', { ascending: true });
-          merged = data || [];
-        } catch (e) {}
-      }
-      // Pastikan kelas-kelas dari 5 jurusan selalu tersedia
-      const defaultKelasNames = [
-        'X TKJ 1', 'X TKJ 2',
-        'X ATP 1', 'X ATP 2',
-        'X TKRO 1', 'X TKRO 2',
-        'X TBSM 1', 'X TBSM 2',
-        'X AKL 1', 'X AKL 2'
-      ];
-      defaultKelasNames.forEach(dKelas => {
-        if (!merged.some(k => (k.nama_kelas || k.nama || '').toUpperCase() === dKelas)) {
-          merged.push({ id: `kelas-${dKelas.toLowerCase().replace(/\s+/g, '-')}`, nama_kelas: dKelas });
+
+      if (window.supabaseClient) {
+        const { data, error } = await window.supabaseClient
+          .from('kelas')
+          .select('*')
+          .order('nama_kelas', { ascending: true });
+        if (error) {
+          console.warn("Gagal memuat tabel kelas:", error.message);
+          return [];
         }
-      });
-      return merged;
+        return data || [];
+      }
+      return [];
     }
   },
 
@@ -318,15 +316,25 @@ const DB = {
       return { nama_kelas: cleanNama };
     } else {
       const shards = (window.getSupabaseShards && window.getSupabaseShards()) || [];
-      if (shards.length > 1) {
+      const isUnified = window.isUnifiedSupabaseMode && window.isUnifiedSupabaseMode();
+
+      if (isUnified && shards.length > 1) {
+        const sharedId = id || this.uuidv4();
         const results = await Promise.allSettled(shards.map(async (shard) => {
           if (!shard.client) return null;
           if (id) {
             const { error } = await shard.client.from('kelas').update({ nama_kelas: cleanNama }).eq('id', id);
             if (error) throw error;
           } else {
-            const { error } = await shard.client.from('kelas').insert({ nama_kelas: cleanNama });
-            if (error) throw error;
+            const { data: existing } = await shard.client
+              .from('kelas')
+              .select('id')
+              .ilike('nama_kelas', cleanNama)
+              .maybeSingle();
+            if (!existing) {
+              const { error } = await shard.client.from('kelas').insert({ id: sharedId, nama_kelas: cleanNama });
+              if (error) throw error;
+            }
           }
           return true;
         }));
@@ -335,8 +343,9 @@ const DB = {
           const firstErr = results.find(r => r.status === 'rejected')?.reason;
           if (firstErr) throw firstErr;
         }
-        return { nama_kelas: cleanNama };
+        return { id: sharedId, nama_kelas: cleanNama };
       }
+
       if (id) {
         const { data, error } = await window.supabaseClient.from('kelas').update({ nama_kelas: cleanNama }).eq('id', id);
         if (error) throw error;
@@ -349,19 +358,41 @@ const DB = {
     }
   },
 
-  async deleteKelas(id) {
+  async deleteKelas(id, namaKelas = '') {
+    const cleanNama = (namaKelas || '').trim();
     if (this.isLocal()) {
       let list = JSON.parse(localStorage.getItem('CBT_LOCAL_KELAS')) || [];
-      list = list.filter(k => k.id !== id);
+      list = list.filter(k => k.id !== id && (!cleanNama || (k.nama_kelas || '').toUpperCase() !== cleanNama.toUpperCase()));
       localStorage.setItem('CBT_LOCAL_KELAS', JSON.stringify(list));
     } else {
+      const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(String(id || ''));
+      const deleteOnClient = async (client) => {
+        if (!client) return null;
+        if (cleanNama) {
+          const { error } = await client.from('kelas').delete().ilike('nama_kelas', cleanNama);
+          if (error) throw error;
+        }
+        if (isUuid) {
+          const { error } = await client.from('kelas').delete().eq('id', id);
+          if (error) throw error;
+        }
+        return true;
+      };
+
       const shards = (window.getSupabaseShards && window.getSupabaseShards()) || [];
-      if (shards.length > 1) {
-        await Promise.allSettled(shards.map(s => s.client && s.client.from('kelas').delete().eq('id', id)));
+      const isUnified = window.isUnifiedSupabaseMode && window.isUnifiedSupabaseMode();
+
+      if (isUnified && shards.length > 1) {
+        const results = await Promise.allSettled(shards.map(s => deleteOnClient(s.client)));
+        const anySuccess = results.some(r => r.status === 'fulfilled' && r.value);
+        if (!anySuccess) {
+          const firstErr = results.find(r => r.status === 'rejected')?.reason;
+          if (firstErr) throw firstErr;
+        }
         return;
       }
-      const { error } = await window.supabaseClient.from('kelas').delete().eq('id', id);
-      if (error) throw error;
+
+      await deleteOnClient(window.supabaseClient);
     }
   },
 
@@ -371,14 +402,18 @@ const DB = {
       return JSON.parse(localStorage.getItem('CBT_LOCAL_JURUSAN')) || [];
     } else {
       const shards = (window.getSupabaseShards && window.getSupabaseShards()) || [];
-      let merged = [];
-      if (shards.length > 1) {
-        const results = await Promise.allSettled(shards.map(s => s.client && s.client.from('jurusan').select('*')));
+      const isUnified = window.isUnifiedSupabaseMode && window.isUnifiedSupabaseMode();
+
+      if (isUnified && shards.length > 1) {
+        const results = await Promise.allSettled(
+          shards.map(s => s.client && s.client.from('jurusan').select('*').order('nama_jurusan', { ascending: true }))
+        );
         const set = new Set();
+        const merged = [];
         results.forEach(r => {
-          if (r.status === 'fulfilled' && Array.isArray(r.value.data)) {
+          if (r.status === 'fulfilled' && r.value && Array.isArray(r.value.data)) {
             r.value.data.forEach(item => {
-              const name = (item.nama_jurusan || item.nama || '').toUpperCase();
+              const name = (item.nama_jurusan || item.nama || '').trim().toUpperCase();
               if (name && !set.has(name)) {
                 set.add(name);
                 merged.push(item);
@@ -386,21 +421,21 @@ const DB = {
             });
           }
         });
+        return merged.sort((a, b) => (a.nama_jurusan || '').localeCompare(b.nama_jurusan || ''));
       }
-      if (merged.length === 0 && window.supabaseClient) {
-        try {
-          const { data } = await window.supabaseClient.from('jurusan').select('*').order('nama_jurusan', { ascending: true });
-          merged = data || [];
-        } catch (e) {}
-      }
-      // Pastikan 5 jurusan server selalu tersedia
-      const defaultJurusanNames = ['TKJ', 'ATP', 'TKRO', 'TBSM', 'AKUNTANSI'];
-      defaultJurusanNames.forEach(dName => {
-        if (!merged.some(j => (j.nama_jurusan || j.nama || '').toUpperCase() === dName)) {
-          merged.push({ id: `jurusan-${dName.toLowerCase()}`, nama_jurusan: dName });
+
+      if (window.supabaseClient) {
+        const { data, error } = await window.supabaseClient
+          .from('jurusan')
+          .select('*')
+          .order('nama_jurusan', { ascending: true });
+        if (error) {
+          console.warn("Gagal memuat tabel jurusan:", error.message);
+          return [];
         }
-      });
-      return merged;
+        return data || [];
+      }
+      return [];
     }
   },
 
@@ -423,15 +458,25 @@ const DB = {
       return { nama_jurusan: cleanNama };
     } else {
       const shards = (window.getSupabaseShards && window.getSupabaseShards()) || [];
-      if (shards.length > 1) {
+      const isUnified = window.isUnifiedSupabaseMode && window.isUnifiedSupabaseMode();
+
+      if (isUnified && shards.length > 1) {
+        const sharedId = id || this.uuidv4();
         const results = await Promise.allSettled(shards.map(async (shard) => {
           if (!shard.client) return null;
           if (id) {
             const { error } = await shard.client.from('jurusan').update({ nama_jurusan: cleanNama }).eq('id', id);
             if (error) throw error;
           } else {
-            const { error } = await shard.client.from('jurusan').insert({ nama_jurusan: cleanNama });
-            if (error) throw error;
+            const { data: existing } = await shard.client
+              .from('jurusan')
+              .select('id')
+              .ilike('nama_jurusan', cleanNama)
+              .maybeSingle();
+            if (!existing) {
+              const { error } = await shard.client.from('jurusan').insert({ id: sharedId, nama_jurusan: cleanNama });
+              if (error) throw error;
+            }
           }
           return true;
         }));
@@ -440,8 +485,9 @@ const DB = {
           const firstErr = results.find(r => r.status === 'rejected')?.reason;
           if (firstErr) throw firstErr;
         }
-        return { nama_jurusan: cleanNama };
+        return { id: sharedId, nama_jurusan: cleanNama };
       }
+
       if (id) {
         const { data, error } = await window.supabaseClient.from('jurusan').update({ nama_jurusan: cleanNama }).eq('id', id);
         if (error) throw error;
@@ -454,19 +500,41 @@ const DB = {
     }
   },
 
-  async deleteJurusan(id) {
+  async deleteJurusan(id, namaJurusan = '') {
+    const cleanNama = (namaJurusan || '').trim();
     if (this.isLocal()) {
       let list = JSON.parse(localStorage.getItem('CBT_LOCAL_JURUSAN')) || [];
-      list = list.filter(j => j.id !== id);
+      list = list.filter(j => j.id !== id && (!cleanNama || (j.nama_jurusan || '').toUpperCase() !== cleanNama.toUpperCase()));
       localStorage.setItem('CBT_LOCAL_JURUSAN', JSON.stringify(list));
     } else {
+      const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(String(id || ''));
+      const deleteOnClient = async (client) => {
+        if (!client) return null;
+        if (cleanNama) {
+          const { error } = await client.from('jurusan').delete().ilike('nama_jurusan', cleanNama);
+          if (error) throw error;
+        }
+        if (isUuid) {
+          const { error } = await client.from('jurusan').delete().eq('id', id);
+          if (error) throw error;
+        }
+        return true;
+      };
+
       const shards = (window.getSupabaseShards && window.getSupabaseShards()) || [];
-      if (shards.length > 1) {
-        await Promise.allSettled(shards.map(s => s.client && s.client.from('jurusan').delete().eq('id', id)));
+      const isUnified = window.isUnifiedSupabaseMode && window.isUnifiedSupabaseMode();
+
+      if (isUnified && shards.length > 1) {
+        const results = await Promise.allSettled(shards.map(s => deleteOnClient(s.client)));
+        const anySuccess = results.some(r => r.status === 'fulfilled' && r.value);
+        if (!anySuccess) {
+          const firstErr = results.find(r => r.status === 'rejected')?.reason;
+          if (firstErr) throw firstErr;
+        }
         return;
       }
-      const { error } = await window.supabaseClient.from('jurusan').delete().eq('id', id);
-      if (error) throw error;
+
+      await deleteOnClient(window.supabaseClient);
     }
   },
 
@@ -781,16 +849,25 @@ const DB = {
     } else {
       const shards = (window.getSupabaseShards && window.getSupabaseShards()) || [];
       if (shards.length > 1) {
-        // Broadcast ke semua server Supabase agar paket soal selalu seragam
-        await Promise.allSettled(shards.map(async (shard) => {
-          if (!shard.client) return;
+        const insertPayload = id ? payload : { ...payload, id: payload.id || this.uuidv4() };
+        // Broadcast ke semua server Supabase agar paket soal selalu seragam dengan ID yang sama
+        const results = await Promise.allSettled(shards.map(async (shard) => {
+          if (!shard.client) return null;
           if (id) {
-            await shard.client.from('paket_soal').update(payload).eq('id', id);
+            const { error } = await shard.client.from('paket_soal').update(payload).eq('id', id);
+            if (error) throw error;
           } else {
-            await shard.client.from('paket_soal').insert(payload);
+            const { error } = await shard.client.from('paket_soal').insert(insertPayload);
+            if (error) throw error;
           }
+          return true;
         }));
-        return payload;
+        const anySuccess = results.some(r => r.status === 'fulfilled' && r.value);
+        if (!anySuccess) {
+          const firstErr = results.find(r => r.status === 'rejected')?.reason;
+          if (firstErr) throw firstErr;
+        }
+        return insertPayload;
       }
       if (id) {
         const { error } = await window.supabaseClient.from('paket_soal').update(payload).eq('id', id);
@@ -857,16 +934,25 @@ const DB = {
     } else {
       const shards = (window.getSupabaseShards && window.getSupabaseShards()) || [];
       if (shards.length > 1) {
-        // Broadcast ke seluruh server Supabase agar butir soal seragam
-        await Promise.allSettled(shards.map(async (shard) => {
-          if (!shard.client) return;
+        const insertPayload = id ? payload : { ...payload, id: payload.id || this.uuidv4() };
+        // Broadcast ke seluruh server Supabase agar butir soal seragam dengan ID yang sama
+        const results = await Promise.allSettled(shards.map(async (shard) => {
+          if (!shard.client) return null;
           if (id) {
-            await shard.client.from('soal').update(payload).eq('id', id);
+            const { error } = await shard.client.from('soal').update(payload).eq('id', id);
+            if (error) throw error;
           } else {
-            await shard.client.from('soal').insert(payload);
+            const { error } = await shard.client.from('soal').insert(insertPayload);
+            if (error) throw error;
           }
+          return true;
         }));
-        return payload;
+        const anySuccess = results.some(r => r.status === 'fulfilled' && r.value);
+        if (!anySuccess) {
+          const firstErr = results.find(r => r.status === 'rejected')?.reason;
+          if (firstErr) throw firstErr;
+        }
+        return insertPayload;
       }
       if (id) {
         const { error } = await window.supabaseClient.from('soal').update(payload).eq('id', id);

@@ -431,35 +431,35 @@ function populateMonitoringFilterDropdowns() {
 
   // 1. Dropdown Jurusan di atas Card Kelas
   const selCardJur = document.getElementById('monitor-card-filter-jurusan');
-  if (selCardJur && selCardJur.options.length <= 1) {
+  if (selCardJur) {
     const cur = selCardJur.value;
     selCardJur.innerHTML = '<option value="">Semua Jurusan</option>';
     sortedJurusan.forEach(j => {
       selCardJur.innerHTML += `<option value="${escapeHtml(j)}">${escapeHtml(j)}</option>`;
     });
-    if (cur) selCardJur.value = cur;
+    if (cur && sortedJurusan.includes(cur)) selCardJur.value = cur;
   }
 
   // 2. Dropdown Jurusan di atas Tabel
   const selTblJur = document.getElementById('monitor-table-filter-jurusan');
-  if (selTblJur && selTblJur.options.length <= 1) {
+  if (selTblJur) {
     const cur = selTblJur.value;
     selTblJur.innerHTML = '<option value="">Semua Jurusan</option>';
     sortedJurusan.forEach(j => {
       selTblJur.innerHTML += `<option value="${escapeHtml(j)}">${escapeHtml(j)}</option>`;
     });
-    if (cur) selTblJur.value = cur;
+    if (cur && sortedJurusan.includes(cur)) selTblJur.value = cur;
   }
 
   // 3. Dropdown Kelas di atas Tabel
   const selTblKls = document.getElementById('monitor-table-filter-kelas');
-  if (selTblKls && selTblKls.options.length <= 1) {
+  if (selTblKls) {
     const cur = selTblKls.value;
     selTblKls.innerHTML = '<option value="">Semua Kelas</option>';
     sortedKelas.forEach(k => {
       selTblKls.innerHTML += `<option value="${escapeHtml(k)}">${escapeHtml(k)}</option>`;
     });
-    if (cur) selTblKls.value = cur;
+    if (cur && sortedKelas.includes(cur)) selTblKls.value = cur;
   }
 }
 
@@ -486,8 +486,6 @@ function renderMonitoringKelasCards() {
     let detectedJurusan = "";
     if (students.length > 0 && students[0].jurusan) {
       detectedJurusan = students[0].jurusan.toUpperCase();
-    } else if (className.includes('AKL') || className.includes('AKUNTANSI')) {
-      detectedJurusan = 'AKUNTANSI';
     } else {
       for (const j of allJurusan) {
         const jName = (j.nama_jurusan || j.nama || '').toUpperCase();
@@ -495,6 +493,9 @@ function renderMonitoringKelasCards() {
           detectedJurusan = jName;
           break;
         }
+      }
+      if (!detectedJurusan && (className.includes('AKL') || className.includes('AKUNTANSI'))) {
+        detectedJurusan = 'AKL';
       }
     }
 
@@ -884,27 +885,10 @@ async function loadJurusan() {
     const list = await DB.getJurusanList();
     allJurusan = Array.isArray(list) ? list : [];
 
-    // Jika list kosong, kumpulkan dari peserta & paket yang sudah ada
-    if (allJurusan.length === 0) {
-      const distinctNames = new Set();
-      (allPeserta || []).forEach(p => { if (p.jurusan) distinctNames.add(p.jurusan.trim().toUpperCase()); });
-      (allPaket || []).forEach(pk => {
-        if (pk.jurusan && pk.jurusan.toLowerCase() !== 'semua') distinctNames.add(pk.jurusan.trim().toUpperCase());
-      });
-      if (distinctNames.size === 0) {
-        ['TKJ', 'ATP', 'TKRO', 'TBSM', 'AKUNTANSI'].forEach(n => distinctNames.add(n));
-      }
-      for (const name of distinctNames) {
-        try {
-          await DB.saveJurusan(null, name);
-        } catch (e) {}
-      }
-      const refetched = await DB.getJurusanList();
-      allJurusan = Array.isArray(refetched) ? refetched : [];
-    }
-
     renderJurusanTable();
     populateJurusanDropdowns();
+    populateMonitoringFilterDropdowns();
+    renderMonitoringKelasCards();
   } catch (err) {
     console.error("Gagal memuat master jurusan:", err);
   }
@@ -1041,7 +1025,7 @@ async function deleteJurusan(id, nama, fromModal = false) {
 
   if (result.isConfirmed) {
     try {
-      await DB.deleteJurusan(id);
+      await DB.deleteJurusan(id, nama);
       await loadJurusan();
       if (fromModal) renderJurusanModalList();
       Swal.fire('Dihapus', `Jurusan ${nama} telah dihapus.`, 'success');
@@ -1127,27 +1111,10 @@ async function loadKelas() {
     const list = await DB.getKelasList();
     allKelas = Array.isArray(list) ? list : [];
 
-    // Jika list kosong, kumpulkan dari peserta & paket yang sudah ada
-    if (allKelas.length === 0) {
-      const distinctNames = new Set();
-      (allPeserta || []).forEach(p => { if (p.kelas) distinctNames.add(p.kelas.trim().toUpperCase()); });
-      (allPaket || []).forEach(pk => {
-        if (pk.kelas && pk.kelas.toLowerCase() !== 'semua') distinctNames.add(pk.kelas.trim().toUpperCase());
-      });
-      if (distinctNames.size === 0) {
-        ['X TKJ 1', 'X TKJ 2', 'X ATP 1', 'X ATP 2', 'X TKRO 1', 'X TKRO 2', 'X TBSM 1', 'X TBSM 2', 'X AKL 1', 'X AKL 2'].forEach(k => distinctNames.add(k));
-      }
-      for (const name of distinctNames) {
-        try {
-          await DB.saveKelas(null, name);
-        } catch (e) {}
-      }
-      const refetched = await DB.getKelasList();
-      allKelas = Array.isArray(refetched) ? refetched : [];
-    }
-
     renderKelasTable();
     populateKelasDropdowns();
+    populateMonitoringFilterDropdowns();
+    renderMonitoringKelasCards();
   } catch (err) {
     console.error("Gagal memuat master kelas:", err);
   }
@@ -1278,7 +1245,7 @@ async function deleteKelas(id, nama, fromModal = false) {
 
   if (result.isConfirmed) {
     try {
-      await DB.deleteKelas(id);
+      await DB.deleteKelas(id, nama);
       await loadKelas();
       if (fromModal) renderKelasModalList();
       Swal.fire('Dihapus', `Kelas ${nama} telah dihapus.`, 'success');
