@@ -41,7 +41,7 @@ window.CBT_SUPABASE_SHARDS = [
     id: 2,
     name: "Server 2 (ATP / Sesi 2)",
     url: "https://uecyjrkpjzajhutmhuld.supabase.co",
-    key: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InFvemV1ZXd1c3ZvZWZjbW9ma2d0Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODE2OTI4NzQsImV4cCI6MjA5NzI2ODg3NH0.MiF4BYgPruvW8tlqZqn8_ZZ2IFNXPP1VsEqVSHNWB7E"
+    key: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InVlY3lqcmtwanphamh1dG1odWxkIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODE2NzkxMTcsImV4cCI6MjA5NzI1NTExN30.R4ZCEsS2neePedTTNR6Du3loBANkInfegJuQ-jLeKek"
   },
   {
     id: 3,
