@@ -1,0 +1,557 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Outfit:wght@400;500;600;700;800&display=swap');
+
+:root {
+  --primary-color: #0d6efd;
+  --primary-dark: #0a58ca;
+  --primary-light: #e7f1ff;
+  --secondary-color: #6c757d;
+  --success-color: #198754;
+  --warning-color: #ffc107;
+  --danger-color: #dc3545;
+  --light-color: #f8f9fa;
+  --dark-color: #212529;
+  
+  --bg-gradient: linear-gradient(135deg, #f0f4f8 0%, #d7e3fc 100%);
+  --admin-gradient: linear-gradient(135deg, #1e3c72 0%, #2a5298 100%);
+  
+  --card-shadow: 0 8px 30px rgba(0, 0, 0, 0.05);
+  --glass-bg: rgba(255, 255, 255, 0.85);
+  --glass-border: rgba(255, 255, 255, 0.4);
+  
+  --font-heading: 'Outfit', sans-serif;
+  --font-body: 'Inter', sans-serif;
+}
+
+body {
+  font-family: var(--font-body);
+  background: var(--bg-gradient);
+  background-attachment: fixed;
+  color: var(--dark-color);
+  min-height: 100vh;
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+h1, h2, h3, h4, h5, h6 {
+  font-family: var(--font-heading);
+  font-weight: 600;
+}
+
+/* Glassmorphism Card style */
+.glass-card {
+  background: var(--glass-bg);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  border: 1px solid var(--glass-border);
+  border-radius: 16px;
+  box-shadow: var(--card-shadow);
+  transition: all 0.3s ease;
+}
+
+.glass-card:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.08);
+}
+
+/* Unified Navbar */
+.navbar-custom {
+  background: var(--glass-bg);
+  backdrop-filter: blur(8px);
+  border-bottom: 1px solid var(--glass-border);
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.03);
+}
+
+.navbar-brand-custom {
+  font-family: var(--font-heading);
+  font-weight: 700;
+  color: var(--primary-color);
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+/* Custom Buttons */
+.btn-primary-custom {
+  background: var(--primary-color);
+  border: none;
+  border-radius: 8px;
+  padding: 10px 24px;
+  font-weight: 500;
+  box-shadow: 0 4px 15px rgba(13, 110, 253, 0.2);
+  transition: all 0.2s ease;
+}
+
+.btn-primary-custom:hover {
+  background: var(--primary-dark);
+  transform: translateY(-1px);
+  box-shadow: 0 6px 20px rgba(13, 110, 253, 0.3);
+}
+
+/* Exam Timer HUD */
+.timer-hud {
+  font-family: var(--font-heading);
+  font-size: 1.5rem;
+  font-weight: 700;
+  color: var(--danger-color);
+  background: rgba(220, 53, 69, 0.1);
+  padding: 8px 16px;
+  border-radius: 30px;
+  border: 1px solid rgba(220, 53, 69, 0.2);
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.timer-normal {
+  color: var(--primary-color);
+  background: rgba(13, 110, 253, 0.1);
+  border: 1px solid rgba(13, 110, 253, 0.2);
+}
+
+/* Question Navigation Grid */
+.question-nav-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(45px, 1fr));
+  gap: 8px;
+  max-height: 300px;
+  overflow-y: auto;
+  padding: 5px;
+}
+
+.question-nav-btn {
+  height: 45px;
+  width: 100%;
+  border-radius: 8px;
+  font-weight: 600;
+  font-size: 0.95rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid rgba(0, 0, 0, 0.15);
+  background-color: #fff;
+  color: var(--dark-color);
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.question-nav-btn:hover {
+  transform: scale(1.05);
+  border-color: var(--primary-color);
+}
+
+.question-nav-btn.active {
+  background-color: var(--primary-color);
+  color: #fff;
+  border-color: var(--primary-color);
+  box-shadow: 0 4px 10px rgba(13, 110, 253, 0.3);
+}
+
+.question-nav-btn.answered {
+  background-color: var(--success-color);
+  color: #fff;
+  border-color: var(--success-color);
+}
+
+.question-nav-btn.flagged {
+  background-color: var(--warning-color);
+  color: #212529;
+  border-color: var(--warning-color);
+  box-shadow: 0 2px 8px rgba(255, 193, 7, 0.3);
+}
+
+.question-nav-btn.active.flagged {
+  border: 2px solid var(--primary-color);
+}
+
+/* Option Selections */
+.option-container {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin-top: 20px;
+}
+
+.option-item {
+  display: flex;
+  align-items: center;
+  padding: 14px 20px;
+  border-radius: 12px;
+  background: #fff;
+  border: 1px solid rgba(0, 0, 0, 0.1);
+  cursor: pointer;
+  transition: all 0.2s ease;
+  font-weight: 500;
+}
+
+.option-item:hover {
+  background: var(--primary-light);
+  border-color: var(--primary-color);
+}
+
+.option-item.selected {
+  background: var(--primary-color);
+  color: #fff;
+  border-color: var(--primary-color);
+  box-shadow: 0 4px 12px rgba(13, 110, 253, 0.15);
+}
+
+.option-badge {
+  display: inline-flex;
+  justify-content: center;
+  align-items: center;
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  background: #f1f3f5;
+  color: var(--dark-color);
+  margin-right: 15px;
+  font-weight: 700;
+  transition: all 0.2s ease;
+}
+
+.option-item:hover .option-badge {
+  background: #fff;
+  color: var(--primary-color);
+}
+
+.option-item.selected .option-badge {
+  background: #fff;
+  color: var(--primary-color);
+}
+
+/* PDF Kartu Peserta Styling (A4 printable layout) */
+.kartu-peserta-container {
+  max-width: 500px;
+  margin: 0 auto;
+  border: 2px solid #000;
+  padding: 20px;
+  background-color: #fff;
+  color: #000;
+  border-radius: 8px;
+  box-shadow: 0 4px 10px rgba(0,0,0,0.1);
+}
+
+.kartu-header {
+  display: flex;
+  align-items: center;
+  border-bottom: 3px double #000;
+  padding-bottom: 12px;
+  margin-bottom: 15px;
+}
+
+.kartu-logo {
+  width: 65px;
+  height: auto;
+  margin-right: 15px;
+}
+
+.kartu-school-info {
+  flex-grow: 1;
+  text-align: center;
+}
+
+.kartu-school-info h4 {
+  margin: 0;
+  font-size: 1.1rem;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.kartu-school-info p {
+  margin: 2px 0 0 0;
+  font-size: 0.75rem;
+}
+
+.kartu-title {
+  text-align: center;
+  font-size: 1rem;
+  font-weight: 700;
+  margin-bottom: 15px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.kartu-table {
+  width: 100%;
+  margin-bottom: 15px;
+  font-size: 0.85rem;
+}
+
+.kartu-table td {
+  padding: 5px 0;
+  vertical-align: top;
+}
+
+.kartu-table td.label-td {
+  width: 32%;
+  font-weight: 600;
+}
+
+.kartu-table td.colon-td {
+  width: 3%;
+}
+
+.kartu-footer {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-end;
+  margin-top: 20px;
+  font-size: 0.8rem;
+}
+
+.kartu-qr {
+  width: 75px;
+  height: 75px;
+  border: 1px solid #ccc;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.kartu-sign {
+  text-align: center;
+  width: 180px;
+}
+
+.kartu-sign-space {
+  height: 50px;
+}
+
+/* Custom Admin Layout styles */
+.admin-sidebar {
+  min-height: calc(100vh - 56px);
+  background-color: #1e293b;
+  color: #f8fafc;
+}
+
+.admin-nav-link {
+  color: #94a3b8;
+  padding: 12px 20px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  text-decoration: none;
+  font-weight: 500;
+  border-radius: 8px;
+  margin: 4px 8px;
+  transition: all 0.2s ease;
+}
+
+.admin-nav-link:hover, .admin-nav-link.active {
+  background-color: var(--primary-color);
+  color: #fff;
+}
+
+/* Table Design overrides */
+.custom-table {
+  background: white;
+  border-radius: 12px;
+  box-shadow: 0 4px 15px rgba(0,0,0,0.02);
+  width: 100%;
+  min-width: 860px;
+}
+
+.custom-table th {
+  background-color: #f1f5f9;
+  font-weight: 600;
+  color: #475569;
+  border: none;
+  white-space: nowrap;
+}
+
+.custom-table td {
+  vertical-align: middle;
+  border-bottom: 1px solid #e2e8f0;
+  white-space: nowrap;
+}
+
+.custom-table td.cell-wrap {
+  white-space: normal;
+  word-break: break-word;
+}
+
+/* Smooth horizontal scroll without clipping */
+.table-responsive {
+  min-height: 350px;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+}
+
+/* Utility classes */
+.avatar-circle {
+  width: 45px;
+  height: 45px;
+  border-radius: 50%;
+  background: var(--primary-light);
+  color: var(--primary-color);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: bold;
+}
+
+/* Excel Preview Box */
+.excel-preview-container {
+  max-height: 350px;
+  overflow-y: auto;
+  border: 1px solid #dee2e6;
+  border-radius: 8px;
+  background: #fff;
+  padding: 0;
+}
+
+.loader-spinner {
+  width: 3rem;
+  height: 3rem;
+}
+
+/* Anti-Cheat: Non-selectable text when exam is active */
+body.exam-active {
+  user-select: none;
+  -webkit-user-select: none;
+  -moz-user-select: none;
+  -ms-user-select: none;
+  -webkit-touch-callout: none; /* Cegah popup menu di iOS/Android saat ditahan lama */
+}
+body.exam-active img {
+  pointer-events: none; /* Cegah tahan-lama pada gambar untuk di-download di mobile */
+}
+body.exam-active input, 
+body.exam-active textarea {
+  user-select: auto;
+  -webkit-user-select: auto;
+  -moz-user-select: auto;
+  -ms-user-select: auto;
+}
+
+/* ========================================================= */
+/* DARK MODE THEME */
+/* ========================================================= */
+body.dark-mode {
+  background-color: #121212;
+  color: #e0e0e0;
+}
+body.dark-mode .bg-light {
+  background-color: #1e1e1e !important;
+}
+body.dark-mode .bg-white {
+  background-color: #1e1e1e !important;
+}
+body.dark-mode .text-dark {
+  color: #f8f9fa !important;
+}
+body.dark-mode .glass-card {
+  background: rgba(30, 30, 30, 0.85);
+  border-color: rgba(255, 255, 255, 0.1);
+  box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.5);
+}
+body.dark-mode .navbar.bg-white {
+  background-color: #1e1e1e !important;
+  border-bottom-color: rgba(255,255,255,0.1) !important;
+}
+body.dark-mode .navbar-light .navbar-brand,
+body.dark-mode .navbar-light .navbar-text {
+  color: #f8f9fa !important;
+}
+body.dark-mode .admin-sidebar {
+  background-color: #1a1a1a;
+  border-right-color: rgba(255,255,255,0.1);
+}
+body.dark-mode .admin-nav-link {
+  color: #adb5bd;
+}
+body.dark-mode .admin-nav-link:hover {
+  background-color: #2b2b2b;
+}
+body.dark-mode .admin-nav-link.active {
+  background-color: rgba(13, 110, 253, 0.2);
+  color: #0d6efd;
+}
+body.dark-mode .table {
+  color: #e0e0e0;
+}
+body.dark-mode .table-hover tbody tr:hover {
+  background-color: #2b2b2b;
+}
+body.dark-mode .table> :not(caption)>*>* {
+  background-color: transparent;
+  border-bottom-color: rgba(255,255,255,0.1);
+}
+body.dark-mode .form-control,
+body.dark-mode .form-select,
+body.dark-mode .input-group-text {
+  background-color: #2b2b2b;
+  border-color: rgba(255,255,255,0.1);
+  color: #e0e0e0;
+}
+body.dark-mode .form-control:focus,
+body.dark-mode .form-select:focus {
+  background-color: #333;
+  color: #fff;
+}
+body.dark-mode .option-item {
+  background: #2b2b2b;
+  border-color: rgba(255,255,255,0.1);
+}
+body.dark-mode .option-item:hover {
+  background: #333;
+}
+body.dark-mode .option-item.selected {
+  background-color: rgba(13, 110, 253, 0.2);
+  border-color: var(--primary-color);
+}
+body.dark-mode .question-nav-btn {
+  background: #2b2b2b;
+  color: #e0e0e0;
+  border-color: rgba(255,255,255,0.1);
+}
+body.dark-mode .question-nav-btn.answered {
+  background-color: rgba(25, 135, 84, 0.2);
+  color: #20c997;
+  border-color: var(--success-color);
+}
+body.dark-mode .question-nav-btn.flagged {
+  background-color: rgba(255, 193, 7, 0.2);
+  color: #ffc107;
+  border-color: var(--warning-color);
+}
+body.dark-mode .modal-content {
+  background-color: #1e1e1e;
+  color: #e0e0e0;
+}
+body.dark-mode .modal-header,
+body.dark-mode .modal-footer {
+  border-color: rgba(255,255,255,0.1);
+}
+body.dark-mode .text-muted {
+  color: #adb5bd !important;
+}
+body.dark-mode .list-group-item {
+  background-color: #1e1e1e;
+  color: #e0e0e0;
+  border-color: rgba(255,255,255,0.1);
+}
+body.dark-mode .list-group-item:hover {
+  background-color: #2b2b2b;
+}
+body.dark-mode .list-group-item.active {
+  background-color: var(--primary-color);
+  color: #fff;
+}
+body.dark-mode .card {
+  background-color: #1e1e1e;
+  border-color: rgba(255,255,255,0.1);
+}
+
+@keyframes spinSlow {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+.spin-animation {
+  animation: spinSlow 0.8s linear infinite;
+  display: inline-block;
+}
+.cursor-pointer {
+  cursor: pointer;
+}

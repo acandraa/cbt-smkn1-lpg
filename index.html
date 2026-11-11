@@ -1,0 +1,150 @@
+<!DOCTYPE html>
+<html lang="id">
+
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Login Peserta - CBT SMK Negeri 1 Lempuing</title>
+  <meta name="description" content="Portal Login Peserta Ujian CBT Online SMK Negeri 1 Lempuing.">
+  <!-- Bootstrap 5 CSS -->
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
+  <!-- Bootstrap Icons -->
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.1/font/bootstrap-icons.css" rel="stylesheet">
+  <!-- SweetAlert2 -->
+  <link href="https://cdn.jsdelivr.net/npm/sweetalert2@11/dist/sweetalert2.min.css" rel="stylesheet">
+  <!-- Custom Styles -->
+  <link rel="stylesheet" href="css/styles.css">
+  <style>
+    .login-wrapper {
+      min-height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 24px 16px;
+    }
+
+    .login-card-container {
+      width: 100%;
+      max-width: 440px;
+    }
+  </style>
+</head>
+
+<body class="bg-light">
+
+  <div class="login-wrapper">
+    <div class="login-card-container">
+
+      <!-- Main Login Glass Card -->
+      <div class="glass-card p-4 p-md-5 shadow-sm border-0 rounded-4 bg-white">
+
+        <!-- School Logo & Header -->
+        <div class="text-center mb-4">
+          <svg width="65" height="65" viewBox="0 0 100 100" fill="none" xmlns="http://www.w3.org/2000/svg" class="mb-3">
+            <circle cx="50" cy="50" r="45" fill="#0d6efd" stroke="#ffffff" stroke-width="4" />
+            <path d="M50 20 L25 40 L35 40 L35 75 L65 75 L65 40 L75 40 Z" fill="#ffffff" />
+            <circle cx="50" cy="50" r="8" fill="#ffc107" />
+          </svg>
+          <h4 class="fw-bold mb-1" style="color: #1e3c72;">CBT SMKN 1 Lempuing</h4>
+          <p class="text-muted small mb-0">Portal Login Peserta Ujian CBT</p>
+        </div>
+
+        <!-- Form Login Peserta -->
+        <form id="form-peserta" autocomplete="off">
+          <div class="mb-3">
+            <label for="peserta-username" class="form-label font-heading fw-semibold small text-muted">Nomor Peserta /
+              Username</label>
+            <div class="input-group">
+              <span class="input-group-text bg-light border-end-0 text-muted"><i class="bi bi-person-fill"></i></span>
+              <input type="text" class="form-control border-start-0 ps-0" id="peserta-username"
+                placeholder="Masukkan nomor peserta" required autocomplete="off">
+            </div>
+          </div>
+          <div class="mb-4">
+            <label for="peserta-password" class="form-label font-heading fw-semibold small text-muted">Password</label>
+            <div class="input-group">
+              <span class="input-group-text bg-light border-end-0 text-muted"><i class="bi bi-lock-fill"></i></span>
+              <input type="password" class="form-control border-start-0 border-end-0 ps-0" id="peserta-password"
+                placeholder="Masukkan password" required autocomplete="new-password">
+              <button class="btn btn-outline-secondary border-start-0" type="button"
+                onclick="togglePassword('peserta-password')">
+                <i class="bi bi-eye" id="peserta-password-eye"></i>
+              </button>
+            </div>
+          </div>
+          <div class="d-grid mb-3">
+            <button type="submit" class="btn btn-primary-custom text-white py-2 rounded-3 fw-semibold shadow-sm"
+              id="btn-login-peserta">
+              Masuk Ujian <i class="bi bi-box-arrow-in-right ms-1"></i>
+            </button>
+          </div>
+        </form>
+
+        <div class="text-center pt-3 border-top mt-4">
+
+        </div>
+
+      </div>
+
+      <!-- Footer Info -->
+      <div class="text-center mt-3 text-muted small">
+        &copy; CBT SMK Negeri 1 Lempuing
+      </div>
+
+    </div>
+  </div>
+
+  <!-- Scripts -->
+  <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
+  <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="js/config.js?v=16"></script>
+  <script src="js/supabase-config.js?v=16"></script>
+  <script src="js/db-adapter.js?v=16"></script>
+  <script src="js/auth.js?v=16"></script>
+
+  <script>
+    // Toggle Password Visibility
+    function togglePassword(id) {
+      const field = document.getElementById(id);
+      const eye = document.getElementById(id + '-eye');
+      if (field.type === 'password') {
+        field.type = 'text';
+        eye.classList.replace('bi-eye', 'bi-eye-slash');
+      } else {
+        field.type = 'password';
+        eye.classList.replace('bi-eye-slash', 'bi-eye');
+      }
+    }
+
+    // Handle Peserta Login
+    document.getElementById('form-peserta').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const num = document.getElementById('peserta-username').value.trim();
+      const pass = document.getElementById('peserta-password').value.trim();
+      const btn = document.getElementById('btn-login-peserta');
+
+      btn.innerHTML = `<span class="spinner-border spinner-border-sm me-1"></span> Memproses...`;
+      btn.disabled = true;
+
+      try {
+        const data = await DB.loginPeserta(num, pass);
+        Swal.fire({
+          icon: 'success',
+          title: 'Login Berhasil',
+          text: `Selamat datang, ${data.profile.nama_lengkap}!`,
+          timer: 1300,
+          showConfirmButton: false
+        }).then(() => {
+          window.location.href = 'ujian.html';
+        });
+      } catch (err) {
+        Swal.fire('Login Gagal', err.message || 'Username atau password salah.', 'error');
+        btn.innerHTML = `Masuk Ujian <i class="bi bi-box-arrow-in-right ms-1"></i>`;
+        btn.disabled = false;
+      }
+    });
+  </script>
+</body>
+
+</html>

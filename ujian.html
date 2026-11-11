@@ -1,0 +1,350 @@
+<!DOCTYPE html>
+<html lang="id">
+
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Portal Ujian CBT - SMK Negeri 1 Lempuing</title>
+  <!-- Bootstrap 5 CSS -->
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
+  <!-- Bootstrap Icons -->
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.1/font/bootstrap-icons.css" rel="stylesheet">
+  <!-- SweetAlert2 -->
+  <link href="https://cdn.jsdelivr.net/npm/sweetalert2@11/dist/sweetalert2.min.css" rel="stylesheet">
+  <!-- Custom Styles -->
+  <link rel="stylesheet" href="css/styles.css?v=9">
+  <style>
+    .exam-header {
+      border-bottom: 2px solid rgba(0, 0, 0, 0.05);
+      background-color: #fff;
+    }
+  </style>
+</head>
+
+<body>
+
+  <!-- Loading Overlay -->
+  <div id="loading-overlay"
+    class="position-fixed top-0 start-0 w-100 h-100 bg-white d-flex flex-column justify-content-center align-items-center"
+    style="z-index: 9999;">
+    <div class="spinner-border text-primary loader-spinner mb-3" role="status"></div>
+    <h5 class="fw-bold font-heading text-dark">Memvalidasi Sesi Ujian...</h5>
+    <p class="text-muted small">Mohon tunggu sebentar.</p>
+  </div>
+
+  <!-- Navbar -->
+  <nav class="navbar navbar-expand-lg navbar-custom sticky-top">
+    <div class="container">
+      <span class="navbar-brand navbar-brand-custom">
+        <svg width="35" height="35" viewBox="0 0 100 100" fill="none" xmlns="http://www.w3.org/2000/svg">
+          <circle cx="50" cy="50" r="45" fill="#0d6efd" stroke="#ffffff" stroke-width="4" />
+          <path d="M50 20 L25 40 L35 40 L35 75 L65 75 L65 40 L75 40 Z" fill="#ffffff" />
+          <circle cx="50" cy="50" r="8" fill="#ffc107" />
+        </svg>
+        <span>Portal CBT SMKN 1 Lempuing</span>
+      </span>
+      <div class="d-flex align-items-center ms-auto">
+        <button id="theme-toggle-ujian" class="btn btn-sm btn-outline-light me-3 border-0" title="Toggle Dark Mode">
+          <i class="bi bi-moon-fill"></i>
+        </button>
+        <button class="btn btn-outline-light btn-sm" onclick="Auth.logout()">
+          <i class="bi bi-box-arrow-left me-1"></i> Keluar
+        </button>
+      </div>
+    </div>
+  </nav>
+
+  <div class="container py-4 flex-grow-1 d-flex flex-column">
+
+    <!-- VIEW 1: DASHBOARD PESERTA -->
+    <div id="view-dashboard" class="row justify-content-center my-auto d-none">
+      <div class="col-md-9 col-lg-8">
+
+        <!-- Welcome Card -->
+        <div class="glass-card p-4 mb-4">
+          <div class="row align-items-center">
+            <div class="col-md-3 text-center mb-3 mb-md-0">
+              <div class="avatar-circle mx-auto font-heading" style="width: 80px; height: 80px; font-size: 2.2rem;"
+                id="dash-avatar">L</div>
+            </div>
+            <div class="col-md-9">
+              <h4 class="fw-bold mb-1" id="dash-nama">Nama Peserta</h4>
+              <p class="text-muted mb-0 small"><i class="bi bi-person-badge me-1"></i> Username: <span
+                  id="dash-username" class="fw-bold">U001</span></p>
+              <p class="text-muted mb-0 small"><i class="bi bi-building me-1"></i> Jurusan: <span
+                  id="dash-jurusan">Jurusan</span> | Kelas: <span id="dash-kelas">Kelas</span></p>
+              <p class="text-muted mb-0 small"><i class="bi bi-geo-alt-fill me-1"></i> Ruang: <span
+                  id="dash-ruang">Ruang</span> | Sesi: <span id="dash-sesi">Sesi</span></p>
+            </div>
+          </div>
+        </div>
+
+        <!-- Exam Details & Info -->
+        <div class="glass-card p-4 mb-4">
+          <h5 class="fw-bold mb-3" style="color: #1e3c72;"><i class="bi bi-info-circle-fill me-2"></i>Informasi
+            Pelaksanaan Seleksi</h5>
+
+          <div class="table-responsive">
+            <table class="table table-bordered mb-0 small">
+              <tbody>
+                <tr>
+                  <td class="fw-semibold bg-light" style="width: 35%;">Mata Ujian</td>
+                  <td>Tes Potensi Akademik & Kelayakan (CBT)</td>
+                </tr>
+                <tr>
+                  <td class="fw-semibold bg-light">Jadwal Ujian</td>
+                  <td><span id="dash-jadwal" class="fw-bold text-primary">Belum Ditentukan</span></td>
+                </tr>
+                <tr>
+                  <td class="fw-semibold bg-light">Jumlah Soal</td>
+                  <td><span id="dash-soal-count">0</span> Soal Pilihan Ganda</td>
+                </tr>
+                <tr>
+                  <td class="fw-semibold bg-light">Durasi Ujian</td>
+                  <td><span id="dash-duration">60</span> Menit</td>
+                </tr>
+                <tr>
+                  <td class="fw-semibold bg-light">Status Pengerjaan</td>
+                  <td><span id="dash-status" class="badge bg-secondary">Belum Ujian</span></td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+
+          <!-- Alert for already completed exams -->
+          <div id="alert-already-done" class="alert alert-success d-none mt-3 mb-0 p-3 rounded-3 shadow-sm" role="alert">
+            <div class="d-flex align-items-center justify-content-between flex-wrap gap-2">
+              <div>
+                <h6 class="alert-heading fw-bold mb-1"><i class="bi bi-check-circle-fill text-success me-2"></i>Ujian Telah Selesai</h6>
+                <p class="mb-0 small" id="completed-alert-text">Selamat, Anda telah menyelesaikan ujian mata pelajaran ini. Terima kasih telah mengikuti ujian dengan tertib.</p>
+              </div>
+              <div>
+                <button type="button" class="btn btn-outline-success btn-sm fw-semibold rounded-pill px-3" onclick="Auth.logout()">
+                  <i class="bi bi-box-arrow-left me-1"></i> Kembali ke Login
+                </button>
+              </div>
+            </div>
+          </div>
+
+          <!-- Action buttons -->
+          <div class="row g-3 mt-4">
+            <div class="col-md-7 col-12">
+              <button class="btn btn-primary-custom text-white w-100 py-3 rounded-3 shadow-sm" id="btn-mulai-ujian"
+                onclick="mulaiUjianCBT()">
+                Mulai Ujian <i class="bi bi-play-circle-fill ms-2"></i>
+              </button>
+            </div>
+            <div class="col-md-5 col-12">
+              <button class="btn btn-outline-primary w-100 py-3 rounded-3 shadow-sm fw-semibold" id="btn-cetak-kartu-siswa"
+                onclick="cetakKartuPesertaPDF()">
+                <i class="bi bi-printer me-2"></i> Cetak Kartu
+              </button>
+            </div>
+          </div>
+        </div>
+
+      </div>
+    </div>
+
+    <!-- VIEW 2: ACTIVE EXAM INTERFACE -->
+    <div id="view-exam" class="row g-4 flex-grow-1 d-none">
+
+      <!-- Left side: Question Area -->
+      <div class="col-lg-8 d-flex flex-column">
+        <div class="glass-card p-4 flex-grow-1 d-flex flex-column shadow-sm">
+
+          <!-- Exam HUD Header -->
+          <div class="d-flex justify-content-between align-items-center mb-4 pb-3 border-bottom flex-wrap gap-2">
+            <div>
+              <span class="badge bg-primary fs-6 font-heading mb-1" id="exam-soal-index">Soal 1 dari 40</span>
+              <div class="text-muted small d-flex align-items-center gap-1">
+                <i class="bi bi-cloud-check-fill text-success" id="sync-icon"></i>
+                <span id="sync-text">Jawaban disimpan otomatis</span>
+              </div>
+            </div>
+
+            <!-- Countdown Timer -->
+            <div class="timer-hud timer-normal" id="timer-box">
+              <i class="bi bi-hourglass-split"></i>
+              <span id="countdown-timer">00:00:00</span>
+            </div>
+          </div>
+
+          <!-- Question Body -->
+          <div class="flex-grow-1 mb-4">
+            <div class="mb-3 text-center">
+              <img id="exam-gambar" class="img-fluid rounded d-none" style="max-height: 300px;" alt="Lampiran Soal">
+            </div>
+            <h5 class="fw-semibold text-dark mb-4" id="exam-pertanyaan"
+              style="line-height: 1.6; white-space: pre-wrap;">Memuat pertanyaan...</h5>
+
+            <!-- Option Selections -->
+            <div class="option-container" id="exam-options-container">
+              <!-- options dynamic inject -->
+            </div>
+          </div>
+
+          <!-- Question Controls Footer -->
+          <div class="d-flex justify-content-between align-items-center pt-3 border-top mt-auto flex-wrap gap-3">
+            <button class="btn btn-outline-secondary px-4 py-2" id="btn-prev-soal" onclick="prevSoal()">
+              <i class="bi bi-chevron-left me-1"></i> Sebelumnya
+            </button>
+
+            <!-- Flag question checkbox -->
+            <div class="form-check">
+              <input class="form-check-input" type="checkbox" id="check-ragu" onchange="toggleRaguRagu(this)">
+              <label class="form-check-label fw-semibold text-warning" for="check-ragu">
+                <i class="bi bi-flag-fill"></i> Ragu-Ragu
+              </label>
+            </div>
+
+            <button class="btn btn-primary px-4 py-2" id="btn-next-soal" onclick="nextSoal()">
+              Berikutnya <i class="bi bi-chevron-right ms-1"></i>
+            </button>
+
+            <button class="btn btn-success px-4 py-2 d-none" id="btn-submit-ujian" onclick="confirmSelesaiUjian()">
+              Selesai Ujian <i class="bi bi-check-circle-fill ms-1"></i>
+            </button>
+          </div>
+
+        </div>
+      </div>
+
+      <!-- Right side: Nav Grid -->
+      <div class="col-lg-4">
+        <div class="glass-card p-4 shadow-sm h-100 d-flex flex-column">
+          <h5 class="fw-bold mb-3"><i class="bi bi-grid-3x3-gap-fill me-2 text-primary"></i>Navigasi Soal</h5>
+
+          <p class="text-muted small">Warna tombol menunjukkan status pengerjaan soal:</p>
+          <div class="d-flex flex-wrap gap-2 small text-muted mb-4">
+            <span class="badge bg-success"><i class="bi bi-check-circle-fill me-1"></i> Terjawab</span>
+            <span class="badge bg-warning text-dark"><i class="bi bi-flag-fill me-1"></i> Ragu-Ragu</span>
+            <span class="badge bg-white text-dark border"><i class="bi bi-circle me-1"></i> Belum diisi</span>
+          </div>
+
+          <!-- Grid buttons -->
+          <div class="question-nav-grid mb-4" id="exam-nav-grid">
+            <!-- buttons dynamic inject -->
+          </div>
+
+          <div class="mt-auto border-top pt-3 text-center">
+            <h6 class="fw-bold text-dark mb-1">CBT SMK Negeri 1 Lempuing</h6>
+            <small class="text-muted">Apabila menemui kendala teknis, segera hubungi pengawas ujian di ruang kelas
+              Anda.</small>
+          </div>
+        </div>
+      </div>
+
+    </div>
+
+  </div>
+
+  <!-- HIDDEN CARD FOR PDF PRINTING -->
+  <div id="kartu-peserta-print-template" class="d-none">
+    <div class="kartu-peserta-container">
+      <div class="kartu-header">
+        <!-- SVG School logo centered for PDF quality -->
+        <svg width="65" height="65" viewBox="0 0 100 100" fill="none" xmlns="http://www.w3.org/2000/svg"
+          class="kartu-logo">
+          <circle cx="50" cy="50" r="45" fill="#0d6efd" stroke="#ffffff" stroke-width="4" />
+          <path d="M50 20 L25 40 L35 40 L35 75 L65 75 L65 40 L75 40 Z" fill="#ffffff" />
+          <circle cx="50" cy="50" r="8" fill="#ffc107" />
+        </svg>
+        <div class="kartu-school-info text-center">
+          <h4>Panitia PPDB CBT</h4>
+          <h4 style="font-size: 1.2rem; color: #0d6efd; margin-top: 1px;">SMK Negeri 1 Lempuing</h4>
+          <p>Kec. Lempuing, Kab. Ogan Komering Ilir, Sumatera Selatan</p>
+        </div>
+      </div>
+
+      <div class="kartu-title">Kartu Peserta Ujian Seleksi Masuk</div>
+
+      <table class="kartu-table">
+        <tr>
+          <td class="label-td">Username</td>
+          <td class="colon-td">:</td>
+          <td><strong id="pdf-username" style="font-size: 1rem; color: #0d6efd;">U001</strong></td>
+        </tr>
+        <tr>
+          <td class="label-td">Nama Lengkap</td>
+          <td class="colon-td">:</td>
+          <td><strong id="pdf-nama">NAMA LENGKAP</strong></td>
+        </tr>
+        <tr>
+          <td class="label-td">Jurusan</td>
+          <td class="colon-td">:</td>
+          <td id="pdf-jurusan">TKJ</td>
+        </tr>
+        <tr>
+          <td class="label-td">Kelas</td>
+          <td class="colon-td">:</td>
+          <td id="pdf-kelas">X TKJ 1</td>
+        </tr>
+        <tr>
+          <td class="label-td">Ruang</td>
+          <td class="colon-td">:</td>
+          <td id="pdf-ruang">Ruang 1</td>
+        </tr>
+        <tr>
+          <td class="label-td">Sesi</td>
+          <td class="colon-td">:</td>
+          <td id="pdf-sesi">Sesi 1</td>
+        </tr>
+      </table>
+
+      <div class="kartu-footer">
+        <!-- Dynamic QR Server QR code -->
+        <div class="kartu-qr">
+          <img id="pdf-qr-img" src="" alt="QR Verification" width="70" height="70" onerror="this.style.display='none'">
+        </div>
+        <div class="kartu-sign">
+          <div>Lempuing, Juni 2026</div>
+          <div>Panitia Pelaksana,</div>
+          <div class="kartu-sign-space"></div>
+          <div style="text-decoration: underline; font-weight: bold;">PPDB SMKN 1 Lempuing</div>
+          <small class="text-muted">NIP. 198205122009041002</small>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- SCRIPTS -->
+  <!-- SweetAlert2 -->
+  <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
+  <!-- html2pdf.js bundle -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"></script>
+  <!-- Bootstrap Bundle JS -->
+  <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
+  <!-- Supabase -->
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+
+  <!-- CBT Modules -->
+  <script src="js/config.js?v=16"></script>
+  <script src="js/supabase-config.js?v=16"></script>
+  <script src="js/db-adapter.js?v=16"></script>
+  <script src="js/auth.js?v=16"></script>
+  <script src="js/ujian.js?v=16"></script>
+
+  <script>
+    // Dark mode logic
+    const themeToggleBtn = document.getElementById('theme-toggle-ujian');
+    const isDarkMode = localStorage.getItem('CBT_DARK_MODE') === 'true';
+    if (isDarkMode) {
+      document.body.classList.add('dark-mode');
+      themeToggleBtn.innerHTML = '<i class="bi bi-sun-fill text-warning"></i>';
+    }
+    
+    themeToggleBtn.addEventListener('click', () => {
+      document.body.classList.toggle('dark-mode');
+      const isDark = document.body.classList.contains('dark-mode');
+      localStorage.setItem('CBT_DARK_MODE', isDark);
+      if (isDark) {
+        themeToggleBtn.innerHTML = '<i class="bi bi-sun-fill text-warning"></i>';
+      } else {
+        themeToggleBtn.innerHTML = '<i class="bi bi-moon-fill"></i>';
+      }
+    });
+  </script>
+</body>
+
+</html>

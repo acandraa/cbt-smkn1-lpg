@@ -1,0 +1,1268 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Admin Dashboard - CBT SMK Negeri 1 Lempuing</title>
+  <!-- Bootstrap 5 CSS -->
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
+  <!-- Bootstrap Icons -->
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.1/font/bootstrap-icons.css" rel="stylesheet">
+  <!-- SweetAlert2 -->
+  <link href="https://cdn.jsdelivr.net/npm/sweetalert2@11/dist/sweetalert2.min.css" rel="stylesheet">
+  <!-- Custom Styles -->
+  <link rel="stylesheet" href="css/styles.css?v=9">
+</head>
+<body>
+
+  <!-- Supabase Setup Configuration Modal (shows if credentials are not configured) -->
+  <div class="modal fade" id="setupModal" data-bs-backdrop="static" data-bs-keyboard="false" tabindex="-1">
+    <div class="modal-dialog modal-dialog-centered">
+      <div class="modal-content glass-card border-0">
+        <div class="modal-header border-0">
+          <h5 class="modal-title fw-bold text-primary"><i class="bi bi-gear-fill me-2"></i>Konfigurasi Awal Supabase</h5>
+        </div>
+        <div class="modal-body">
+          <p class="small text-muted">Aplikasi ini berjalan client-side. Masukkan URL dan Anon Key project Supabase Anda untuk menghubungkan database.</p>
+          <form id="form-setup-supabase">
+            <div class="mb-3">
+              <label for="setup-url" class="form-label fw-semibold">Supabase URL</label>
+              <input type="url" class="form-control" id="setup-url" placeholder="https://xxxxxxxx.supabase.co" required>
+            </div>
+            <div class="mb-3">
+              <label for="setup-key" class="form-label fw-semibold">Supabase Anon Key</label>
+              <textarea class="form-control" id="setup-key" rows="3" placeholder="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..." required></textarea>
+            </div>
+            <div class="d-grid mt-4">
+              <button type="submit" class="btn btn-primary-custom text-white">Simpan & Hubungkan <i class="bi bi-check-circle ms-1"></i></button>
+            </div>
+          </form>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Navbar -->
+  <nav class="navbar navbar-expand-lg navbar-dark bg-dark sticky-top">
+    <div class="container-fluid px-4">
+      <a class="navbar-brand d-flex align-items-center gap-2 fw-bold" href="#">
+        <svg width="30" height="30" viewBox="0 0 100 100" fill="none" xmlns="http://www.w3.org/2000/svg">
+          <circle cx="50" cy="50" r="45" fill="#0d6efd" stroke="#ffffff" stroke-width="4"/>
+          <path d="M50 20 L25 40 L35 40 L35 75 L65 75 L65 40 L75 40 Z" fill="#ffffff"/>
+          <circle cx="50" cy="50" r="8" fill="#ffc107"/>
+        </svg>
+        <span>Panel Admin CBT</span>
+      </a>
+      <div class="d-flex align-items-center ms-auto">
+        <button id="theme-toggle-admin" class="btn btn-sm btn-outline-light me-3 border-0" title="Toggle Dark Mode">
+          <i class="bi bi-moon-fill"></i>
+        </button>
+        <span class="navbar-text text-white fw-semibold me-3 d-none d-md-block" id="admin-email">admin@smkn1lempuing.sch.id</span>
+        <button class="btn btn-outline-light btn-sm" onclick="Auth.logout()"><i class="bi bi-box-arrow-right"></i> Keluar</button>
+      </div>
+    </div>
+  </nav>
+
+  <div class="container-fluid">
+    <div class="row">
+      
+      <!-- Sidebar -->
+      <nav class="col-md-3 col-lg-2 d-md-block admin-sidebar collapse p-0" id="sidebarMenu">
+        <div class="position-sticky pt-3">
+          <div class="text-center py-3 mb-3 border-bottom border-secondary mx-3">
+            <h6 class="fw-bold mb-0 text-white" id="admin-display-name">Administrator</h6>
+            <small class="text-muted">CBT Manager</small>
+          </div>
+          <!-- Multi-Shard Selector (Muncul jika ada lebih dari 1 project Supabase) -->
+          <div class="px-3 mb-3" id="admin-shard-selector-wrapper" style="display: none;">
+            <label class="form-label text-warning small fw-bold mb-1"><i class="bi bi-hdd-network me-1"></i>Server Database:</label>
+            <select class="form-select form-select-sm bg-dark text-white border-warning" id="admin-shard-selector" onchange="handleAdminShardSwitch(this.value)">
+            </select>
+          </div>
+          <ul class="nav flex-column">
+            <li class="nav-item">
+              <a class="admin-nav-link active" href="#" onclick="switchTab('dashboard')">
+                <i class="bi bi-speedometer2"></i> Dashboard
+              </a>
+            </li>
+            <li class="nav-item">
+              <a class="admin-nav-link" href="#" onclick="switchTab('peserta')">
+                <i class="bi bi-people-fill"></i> Data Peserta
+              </a>
+            </li>
+            <li class="nav-item">
+              <a class="admin-nav-link" href="#" onclick="switchTab('soal')">
+                <i class="bi bi-journal-text"></i> Bank Soal
+              </a>
+            </li>
+            <li class="nav-item">
+              <a class="admin-nav-link" href="#" onclick="switchTab('jurusan')">
+                <i class="bi bi-diagram-3-fill"></i> Jurusan & Kelas
+              </a>
+            </li>
+            <li class="nav-item">
+              <a class="admin-nav-link" href="#" onclick="switchTab('nilai')">
+                <i class="bi bi-award-fill"></i> Hasil Ujian
+              </a>
+            </li>
+            <li class="nav-item">
+              <a class="admin-nav-link" href="#" onclick="switchTab('pengaturan')">
+                <i class="bi bi-sliders"></i> Pengaturan
+              </a>
+            </li>
+          </ul>
+        </div>
+      </nav>
+
+      <!-- Main Content Area -->
+      <main class="col-md-9 ms-sm-auto col-lg-10 px-md-4 py-4" id="main-content" style="min-height: calc(100vh - 56px);">
+        
+        <!-- SECTION: DASHBOARD & LIVE MONITORING -->
+        <section id="sec-dashboard">
+          <!-- Header Dashboard -->
+          <div class="d-flex justify-content-between flex-wrap flex-md-nowrap align-items-center pt-3 pb-2 mb-3 border-bottom">
+            <div>
+              <div class="d-flex align-items-center gap-2">
+                <h1 class="h2 text-dark mb-0">Live Monitoring & Statistik</h1>
+                <span class="badge bg-success-subtle text-success border border-success-subtle rounded-pill px-2 py-1 small">
+                  <span class="spinner-grow spinner-grow-sm me-1 text-success" style="width: 0.5rem; height: 0.5rem;" role="status"></span> Live Proktor
+                </span>
+              </div>
+              <p class="text-muted small mb-0 mt-1">Pantau kehadiran, progres pengerjaan ujian siswa per kelas & jurusan secara real-time</p>
+            </div>
+            <div class="d-flex align-items-center gap-2 mt-2 mt-md-0">
+              <div class="form-check form-switch d-inline-flex align-items-center me-1 mb-0">
+                <input class="form-check-input me-1" type="checkbox" id="switch-auto-refresh" onchange="toggleAutoRefresh(this.checked)" checked>
+                <label class="form-check-label small fw-semibold text-muted" for="switch-auto-refresh">Auto-Refresh (10d)</label>
+              </div>
+              <button class="btn btn-outline-primary btn-sm rounded-pill px-3" onclick="loadDashboardStats(true)" id="btn-refresh-dashboard">
+                <i class="bi bi-arrow-clockwise me-1" id="icon-refresh-dashboard"></i> Refresh Data
+              </button>
+            </div>
+          </div>
+
+          <!-- 5 Stats Cards Grid -->
+          <div class="row g-3 mb-4">
+            <div class="col-sm-6 col-xl">
+              <div class="glass-card p-3 d-flex align-items-center justify-content-between">
+                <div>
+                  <h6 class="text-muted small text-uppercase mb-1">Total Peserta</h6>
+                  <h3 class="fw-bold mb-0 text-dark" id="stat-total-peserta">0</h3>
+                </div>
+                <div class="avatar-circle" style="background-color: rgba(13, 110, 253, 0.1); color: var(--primary-color);">
+                  <i class="bi bi-people-fill fs-4"></i>
+                </div>
+              </div>
+            </div>
+            <div class="col-sm-6 col-xl">
+              <div class="glass-card p-3 d-flex align-items-center justify-content-between border-start border-4 border-success">
+                <div>
+                  <h6 class="text-muted small text-uppercase mb-1">Sedang Ujian</h6>
+                  <h3 class="fw-bold mb-0 text-success" id="stat-sedang-ujian">0</h3>
+                  <small class="text-muted" style="font-size: 0.75rem;">Online Aktif</small>
+                </div>
+                <div class="avatar-circle" style="background-color: rgba(25, 135, 84, 0.1); color: var(--success-color);">
+                  <i class="bi bi-laptop-fill fs-4"></i>
+                </div>
+              </div>
+            </div>
+            <div class="col-sm-6 col-xl">
+              <div class="glass-card p-3 d-flex align-items-center justify-content-between">
+                <div>
+                  <h6 class="text-muted small text-uppercase mb-1">Sudah Selesai</h6>
+                  <h3 class="fw-bold mb-0 text-primary" id="stat-sudah-ujian">0</h3>
+                  <small class="text-muted" style="font-size: 0.75rem;">Submit Nilai</small>
+                </div>
+                <div class="avatar-circle" style="background-color: rgba(13, 110, 253, 0.1); color: var(--primary-color);">
+                  <i class="bi bi-check-circle-fill fs-4"></i>
+                </div>
+              </div>
+            </div>
+            <div class="col-sm-6 col-xl">
+              <div class="glass-card p-3 d-flex align-items-center justify-content-between">
+                <div>
+                  <h6 class="text-muted small text-uppercase mb-1">Belum Ujian</h6>
+                  <h3 class="fw-bold mb-0 text-warning" id="stat-belum-ujian">0</h3>
+                  <small class="text-muted" style="font-size: 0.75rem;">Belum Masuk</small>
+                </div>
+                <div class="avatar-circle" style="background-color: rgba(255, 193, 7, 0.1); color: var(--warning-color);">
+                  <i class="bi bi-clock-history fs-4"></i>
+                </div>
+              </div>
+            </div>
+            <div class="col-sm-6 col-xl">
+              <div class="glass-card p-3 d-flex align-items-center justify-content-between border-start border-4 border-danger">
+                <div>
+                  <h6 class="text-muted small text-uppercase mb-1">Terkunci / Warning</h6>
+                  <h3 class="fw-bold mb-0 text-danger" id="stat-terkunci-count">0</h3>
+                  <small class="text-muted" style="font-size: 0.75rem;">Pelanggaran</small>
+                </div>
+                <div class="avatar-circle" style="background-color: rgba(220, 53, 69, 0.1); color: var(--danger-color);">
+                  <i class="bi bi-shield-exclamation fs-4"></i>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Section: Monitoring Status per Kelas -->
+          <div class="glass-card p-4 mb-4">
+            <div class="d-flex justify-content-between align-items-center flex-wrap gap-2 mb-3">
+              <div>
+                <h5 class="fw-bold mb-1"><i class="bi bi-grid-3x3-gap-fill text-primary me-2"></i>Status Pengerjaan per Kelas / Rombel</h5>
+                <p class="text-muted small mb-0">Klik pada kelas untuk menyaring daftar peserta aktif di bawah</p>
+              </div>
+              <!-- Toolbar Filter Card Kelas -->
+              <div class="d-flex align-items-center gap-2">
+                <select class="form-select form-select-sm" id="monitor-card-filter-jurusan" onchange="renderMonitoringKelasCards()" style="min-width: 150px;">
+                  <option value="">Semua Jurusan</option>
+                </select>
+                <button class="btn btn-sm btn-outline-secondary py-1" onclick="resetMonitoringKelasFilter()" title="Tampilkan Semua">
+                  <i class="bi bi-arrow-repeat"></i> Semua
+                </button>
+              </div>
+            </div>
+
+            <!-- Kelas Cards Grid -->
+            <div class="row g-3" id="monitor-kelas-cards-container">
+              <div class="col-12 text-center py-4 text-muted">
+                <span class="spinner-border spinner-border-sm me-1"></span> Menghitung data pengerjaan per kelas...
+              </div>
+            </div>
+          </div>
+
+          <!-- Section: Live Monitoring Table Siswa -->
+          <div class="glass-card p-4 mb-4" id="section-live-peserta">
+            <div class="d-flex justify-content-between align-items-center flex-wrap gap-2 mb-3">
+              <div class="d-flex align-items-center gap-2">
+                <h5 class="fw-bold mb-0"><i class="bi bi-broadcast text-danger me-2"></i>Tabel Monitoring Peserta CBT</h5>
+                <span class="badge bg-danger rounded-pill px-2 py-1 small" id="badge-live-table-count">0 Peserta</span>
+              </div>
+              <div id="monitor-active-class-pill" class="d-none">
+                <span class="badge bg-primary-subtle text-primary border border-primary-subtle px-3 py-1 rounded-pill">
+                  Kelas: <strong id="monitor-active-class-name">-</strong>
+                  <button type="button" class="btn-close btn-close-sm ms-2" style="font-size: 0.65rem;" onclick="clearMonitoringClassFilter()"></button>
+                </span>
+              </div>
+            </div>
+
+            <!-- Toolbar Filter Table -->
+            <div class="row g-2 mb-3">
+              <div class="col-md-3 col-sm-6">
+                <div class="input-group input-group-sm">
+                  <span class="input-group-text"><i class="bi bi-search"></i></span>
+                  <input type="text" class="form-control" id="monitor-search-input" placeholder="Cari nama / username..." oninput="filterMonitoringTable()">
+                </div>
+              </div>
+              <div class="col-md-2 col-sm-6">
+                <select class="form-select form-select-sm" id="monitor-table-filter-jurusan" onchange="onMonitorFilterJurusanChange()">
+                  <option value="">Semua Jurusan</option>
+                </select>
+              </div>
+              <div class="col-md-2 col-sm-6">
+                <select class="form-select form-select-sm" id="monitor-table-filter-kelas" onchange="filterMonitoringTable()">
+                  <option value="">Semua Kelas</option>
+                </select>
+              </div>
+              <div class="col-md-3 col-sm-6">
+                <select class="form-select form-select-sm" id="monitor-table-filter-status" onchange="filterMonitoringTable()">
+                  <option value="Sedang Ujian" selected>🟢 Sedang Ujian (Online)</option>
+                  <option value="Belum Ujian">⚪ Belum Ujian (Belum Masuk)</option>
+                  <option value="Sudah Ujian">🔵 Sudah Ujian (Selesai)</option>
+                  <option value="PELANGGARAN">⚠️ Ada Pelanggaran / Terkunci</option>
+                  <option value="">Semua Status Peserta</option>
+                </select>
+              </div>
+              <div class="col-md-2 col-sm-12 text-end">
+                <button class="btn btn-outline-secondary btn-sm w-100" onclick="resetMonitoringFullFilter()">
+                  <i class="bi bi-x-circle me-1"></i> Reset Filter
+                </button>
+              </div>
+            </div>
+
+            <!-- Live Table -->
+            <div class="table-responsive" style="max-height: 480px; overflow-y: auto;">
+              <table class="table table-hover align-middle mb-0 custom-table">
+                <thead class="sticky-top bg-white">
+                  <tr>
+                    <th style="width: 50px;">No</th>
+                    <th>Nama & Username</th>
+                    <th>Kelas & Jurusan</th>
+                    <th>Ruang & Sesi</th>
+                    <th>Status Ujian</th>
+                    <th>Keamanan / Pelanggaran</th>
+                    <th class="text-center" style="width: 180px;">Aksi Proktor</th>
+                  </tr>
+                </thead>
+                <tbody id="table-live-monitoring-body">
+                  <tr>
+                    <td colspan="7" class="text-center py-4 text-muted">
+                      <span class="spinner-border spinner-border-sm me-1"></span> Memuat data peserta monitoring...
+                    </td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          <!-- Section: Statistik & Distribusi Nilai Ujian (Collapsible Card) -->
+          <div class="glass-card p-4 mb-4">
+            <div class="d-flex justify-content-between align-items-center cursor-pointer mb-3" data-bs-toggle="collapse" data-bs-target="#collapseAnalytics" style="cursor: pointer;">
+              <div class="d-flex align-items-center gap-2">
+                <h5 class="fw-bold mb-0 text-dark"><i class="bi bi-bar-chart-line-fill text-primary me-2"></i>Statistik & Distribusi Nilai Ujian</h5>
+                <span class="badge bg-secondary-subtle text-dark border small">Grafik Distribusi</span>
+              </div>
+              <div class="d-flex align-items-center gap-3">
+                <div class="small text-muted d-none d-md-block">
+                  Nilai Tertinggi: <strong class="text-primary" id="stat-nilai-tertinggi">0</strong> |
+                  Rata-rata: <strong class="text-primary" id="stat-nilai-rata">0</strong>
+                </div>
+                <button class="btn btn-sm btn-outline-secondary py-0 px-2" type="button">
+                  <i class="bi bi-chevron-down"></i>
+                </button>
+              </div>
+            </div>
+
+            <div class="collapse show" id="collapseAnalytics">
+              <div class="row g-4 mt-1">
+                <div class="col-12">
+                  <div class="p-3 border rounded-3 bg-white h-100">
+                    <h6 class="fw-semibold mb-3 text-muted"><i class="bi bi-bar-chart-fill me-2"></i>Distribusi Nilai Peserta (Rentang 0 - 100)</h6>
+                    <div style="position: relative; height: 260px;">
+                      <canvas id="scoreDistributionChart"></canvas>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <!-- SECTION: DATA PESERTA -->
+        <section id="sec-peserta" class="d-none">
+          <div class="d-flex justify-content-between flex-wrap flex-md-nowrap align-items-center pt-3 pb-2 mb-4 border-bottom">
+            <h1 class="h2 text-dark">Data Peserta Seleksi</h1>
+            <div class="btn-toolbar mb-2 mb-md-0 gap-2">
+              <button class="btn btn-warning btn-sm rounded-pill px-3 text-dark fw-semibold" onclick="openCetakKartuModal()">
+                <i class="bi bi-printer-fill me-1"></i> Cetak Kartu Ujian
+              </button>
+              <button class="btn btn-outline-primary btn-sm rounded-pill px-3" onclick="ExcelTemplates.downloadPesertaTemplate()">
+                <i class="bi bi-cloud-download me-1"></i> Unduh Template
+              </button>
+              <button class="btn btn-success btn-sm rounded-pill px-3" onclick="openImportModal('peserta')">
+                <i class="bi bi-file-earmark-excel-fill me-1"></i> Import Excel
+              </button>
+              <button class="btn btn-outline-success btn-sm rounded-pill px-3" onclick="exportPesertaData()">
+                <i class="bi bi-download me-1"></i> Export Excel
+              </button>
+              <button class="btn btn-primary btn-sm rounded-pill px-3" onclick="openPesertaForm()">
+                <i class="bi bi-plus-circle me-1"></i> Tambah Peserta
+              </button>
+              <button class="btn btn-danger btn-sm rounded-pill px-3" onclick="deleteAllPeserta()">
+                <i class="bi bi-trash me-1"></i> Kosongkan Data
+              </button>
+            </div>
+          </div>
+
+          <!-- Filter & Search Toolbar -->
+          <div class="row g-3 mb-4">
+            <div class="col-md-3">
+              <div class="input-group">
+                <span class="input-group-text"><i class="bi bi-search"></i></span>
+                <input type="text" class="form-control" id="search-peserta" placeholder="Cari Nama/Username..." oninput="filterPesertaList()">
+              </div>
+            </div>
+            <div class="col-md-2">
+              <select class="form-select" id="filter-jurusan-peserta" onchange="filterPesertaList()">
+                <option value="">Semua Jurusan</option>
+              </select>
+            </div>
+            <div class="col-md-2">
+              <select class="form-select" id="filter-kelas-peserta" onchange="filterPesertaList()">
+                <option value="">Semua Kelas</option>
+              </select>
+            </div>
+            <div class="col-md-2">
+              <select class="form-select" id="filter-sesi-peserta" onchange="filterPesertaList()">
+                <option value="">Semua Sesi</option>
+                <option value="Sesi 1">Sesi 1</option>
+                <option value="Sesi 2">Sesi 2</option>
+                <option value="Sesi 3">Sesi 3</option>
+              </select>
+            </div>
+            <div class="col-md-3">
+              <select class="form-select" id="filter-status-peserta" onchange="filterPesertaList()">
+                <option value="">Semua Status</option>
+                <option value="Belum Ujian">Belum Ujian</option>
+                <option value="Sedang Ujian">Sedang Ujian</option>
+                <option value="Sudah Ujian">Sudah Ujian</option>
+              </select>
+            </div>
+          </div>
+
+          <!-- Peserta Data Table -->
+          <div class="glass-card p-0 mb-4" style="min-height: 400px;">
+            <div class="table-responsive">
+              <table class="table table-hover align-middle mb-0 custom-table">
+                <thead>
+                  <tr>
+                    <th style="min-width: 110px;">Username</th>
+                    <th style="min-width: 180px;">Nama Lengkap</th>
+                    <th style="min-width: 140px;">Jurusan</th>
+                    <th style="min-width: 90px;">Kelas</th>
+                    <th style="min-width: 70px;">Ruang</th>
+                    <th style="min-width: 70px;">Sesi</th>
+                    <th style="min-width: 110px;">Status</th>
+                    <th style="min-width: 100px;" class="text-center">Pelanggaran</th>
+                    <th style="min-width: 120px;" class="text-center">Aksi</th>
+                  </tr>
+                </thead>
+                <tbody id="table-peserta-body">
+                  <tr>
+                    <td colspan="9" class="text-center py-4">
+                      <span class="spinner-border spinner-border-sm me-1 text-primary"></span> Memuat data peserta...
+                    </td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </section>
+
+        <!-- SECTION: DATA SOAL -->
+        <section id="sec-soal" class="d-none">
+          <div class="d-flex justify-content-between flex-wrap flex-md-nowrap align-items-center pt-3 pb-2 mb-4 border-bottom">
+            <h1 class="h2 text-dark">Bank Soal & Paket Ujian</h1>
+            <div class="btn-toolbar mb-2 mb-md-0 gap-2">
+              <button class="btn btn-outline-primary btn-sm rounded-pill px-3" onclick="ExcelTemplates.downloadSoalTemplate()">
+                <i class="bi bi-cloud-download me-1"></i> Unduh Template Soal
+              </button>
+            </div>
+          </div>
+
+          <div class="row g-4 mb-4">
+            <!-- Paket List -->
+            <div class="col-md-4">
+              <div class="glass-card p-3 h-100">
+                <div class="d-flex justify-content-between align-items-center mb-2">
+                  <h5 class="fw-bold mb-0">Daftar Paket Soal</h5>
+                  <div class="btn-group btn-group-sm">
+                    <button class="btn btn-outline-secondary py-0 px-2" onclick="openJurusanModal()" title="Kelola Master Jurusan">
+                      <i class="bi bi-mortarboard-fill me-1"></i>Jurusan
+                    </button>
+                    <button class="btn btn-outline-secondary py-0 px-2" onclick="openKelasModal()" title="Kelola Master Kelas">
+                      <i class="bi bi-collection-fill me-1"></i>Kelas
+                    </button>
+                  </div>
+                </div>
+                <div class="row g-1 mb-2">
+                  <div class="col-6">
+                    <select class="form-select form-select-sm" id="filter-jurusan-paket" onchange="filterPaketList()">
+                      <option value="">Semua Jurusan</option>
+                    </select>
+                  </div>
+                  <div class="col-6">
+                    <select class="form-select form-select-sm" id="filter-kelas-paket" onchange="filterPaketList()">
+                      <option value="">Semua Kelas</option>
+                    </select>
+                  </div>
+                </div>
+                <button class="btn btn-primary btn-sm w-100 mb-3" onclick="openPaketForm()">
+                  <i class="bi bi-plus-circle me-1"></i> Buat Paket Baru
+                </button>
+                <div class="list-group" id="paket-list-container">
+                  <div class="text-center py-4 text-muted"><span class="spinner-border spinner-border-sm me-1"></span> Memuat paket...</div>
+                </div>
+              </div>
+            </div>
+            
+            <!-- Paket Content -->
+            <div class="col-md-8">
+              <div class="glass-card p-4 h-100 d-none flex-column" id="paket-detail-container">
+                <div class="d-flex justify-content-between align-items-start mb-2">
+                  <div>
+                    <h5 class="fw-bold mb-1 text-primary" id="active-paket-title">Nama Paket</h5>
+                    <p class="small text-muted mb-0" id="active-paket-jadwal"><i class="bi bi-clock"></i> Jadwal: -</p>
+                  </div>
+                  <div>
+                    <button class="btn btn-sm btn-outline-primary" id="btn-edit-paket" onclick="editPaket()"><i class="bi bi-pencil"></i> Edit Paket</button>
+                    <button class="btn btn-sm btn-outline-danger" id="btn-delete-paket" onclick="deletePaket()"><i class="bi bi-trash"></i> Hapus Paket</button>
+                  </div>
+                </div>
+                
+                <hr>
+                
+                <div class="d-flex justify-content-between align-items-center mb-3">
+                  <h6 class="fw-bold mb-0">Daftar Pertanyaan</h6>
+                  <div class="btn-group">
+                    <button class="btn btn-success btn-sm" onclick="openImportModal('soal')">
+                      <i class="bi bi-file-earmark-excel-fill"></i> Import Excel
+                    </button>
+                    <button class="btn btn-primary btn-sm" onclick="openSoalForm()">
+                      <i class="bi bi-plus"></i> Tambah Soal Manual
+                    </button>
+                  </div>
+                </div>
+                
+                <div id="soal-list-container" class="flex-grow-1 overflow-auto" style="max-height: 500px; padding-right: 5px;">
+                  <!-- dynamic soal -->
+                </div>
+              </div>
+              
+              <!-- Empty State -->
+              <div class="glass-card p-5 text-center h-100 text-muted d-flex flex-column justify-content-center align-items-center" id="paket-empty-state">
+                <i class="bi bi-collection text-secondary mb-3" style="font-size: 3rem;"></i>
+                <h5>Pilih Paket Soal</h5>
+                <p>Silakan pilih paket di samping kiri, atau buat paket baru untuk mengelola soal ujian.</p>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <!-- SECTION: DATA JURUSAN & KELAS -->
+        <section id="sec-jurusan" class="d-none">
+          <div class="d-flex justify-content-between flex-wrap flex-md-nowrap align-items-center pt-3 pb-2 mb-4 border-bottom">
+            <div>
+              <h1 class="h2 text-dark">Data Jurusan & Kelas</h1>
+              <p class="text-muted small mb-0">Kelola master jurusan dan kelas agar soal dapat disesuaikan per jurusan maupun per kelas</p>
+            </div>
+            <div class="btn-toolbar mb-2 mb-md-0 gap-2">
+              <button class="btn btn-outline-primary btn-sm rounded-pill px-3" onclick="refreshJurusanDanKelas()">
+                <i class="bi bi-arrow-clockwise me-1"></i> Refresh Data
+              </button>
+            </div>
+          </div>
+
+          <!-- Bagian 1: Data Jurusan -->
+          <div class="row g-4 mb-5">
+            <!-- Form Tambah Jurusan -->
+            <div class="col-md-4">
+              <div class="glass-card p-4 h-100">
+                <h5 class="fw-bold mb-3 text-primary"><i class="bi bi-mortarboard-fill me-2"></i>Tambah Jurusan</h5>
+                <form id="form-jurusan-quick">
+                  <div class="mb-3">
+                    <label for="quick-nama-jurusan" class="form-label fw-semibold">Nama / Singkatan Jurusan</label>
+                    <input type="text" class="form-control" id="quick-nama-jurusan" placeholder="Cth: TKJ, RPL, DKV, Akuntansi" required>
+                    <small class="text-muted">Nama jurusan akan otomatis muncul di dropdown pilihan paket soal & peserta.</small>
+                  </div>
+                  <button type="submit" class="btn btn-primary-custom text-white btn-sm w-100" id="btn-save-jurusan-quick">
+                    <i class="bi bi-save me-1"></i> Simpan Jurusan
+                  </button>
+                </form>
+              </div>
+            </div>
+
+            <!-- Tabel Daftar Jurusan -->
+            <div class="col-md-8">
+              <div class="glass-card p-4 h-100">
+                <div class="d-flex justify-content-between align-items-center mb-3">
+                  <h5 class="fw-bold mb-0"><i class="bi bi-diagram-3-fill me-2 text-primary"></i>Daftar Jurusan Aktif</h5>
+                  <span class="badge bg-primary" id="badge-total-jurusan">0 Jurusan</span>
+                </div>
+                <div class="table-responsive">
+                  <table class="table table-hover align-middle">
+                    <thead class="table-light">
+                      <tr>
+                        <th style="width: 60px;">No</th>
+                        <th>Nama Jurusan</th>
+                        <th>Peserta Terdaftar</th>
+                        <th>Paket Soal</th>
+                        <th style="width: 100px;" class="text-center">Aksi</th>
+                      </tr>
+                    </thead>
+                    <tbody id="jurusan-table-body">
+                      <tr>
+                        <td colspan="5" class="text-center text-muted py-4">
+                          <span class="spinner-border spinner-border-sm me-1"></span> Memuat data jurusan...
+                        </td>
+                      </tr>
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Bagian 2: Data Kelas -->
+          <div class="row g-4">
+            <!-- Form Tambah Kelas -->
+            <div class="col-md-4">
+              <div class="glass-card p-4 h-100">
+                <h5 class="fw-bold mb-3 text-success"><i class="bi bi-collection-fill me-2"></i>Tambah Kelas</h5>
+                <form id="form-kelas-quick">
+                  <div class="mb-3">
+                    <label for="quick-nama-kelas" class="form-label fw-semibold">Nama Kelas / Rombel</label>
+                    <input type="text" class="form-control" id="quick-nama-kelas" placeholder="Cth: X TKJ 1, X TKJ 2, XI RPL 1" required>
+                    <small class="text-muted">Kelas dapat digunakan untuk membedakan soal ujian antar kelas dalam jurusan yang sama.</small>
+                  </div>
+                  <button type="submit" class="btn btn-success text-white btn-sm w-100" id="btn-save-kelas-quick">
+                    <i class="bi bi-save me-1"></i> Simpan Kelas
+                  </button>
+                </form>
+              </div>
+            </div>
+
+            <!-- Tabel Daftar Kelas -->
+            <div class="col-md-8">
+              <div class="glass-card p-4 h-100">
+                <div class="d-flex justify-content-between align-items-center mb-3">
+                  <h5 class="fw-bold mb-0"><i class="bi bi-building-fill me-2 text-success"></i>Daftar Kelas Aktif</h5>
+                  <span class="badge bg-success" id="badge-total-kelas">0 Kelas</span>
+                </div>
+                <div class="table-responsive">
+                  <table class="table table-hover align-middle">
+                    <thead class="table-light">
+                      <tr>
+                        <th style="width: 60px;">No</th>
+                        <th>Nama Kelas</th>
+                        <th>Peserta Terdaftar</th>
+                        <th>Paket Soal</th>
+                        <th style="width: 100px;" class="text-center">Aksi</th>
+                      </tr>
+                    </thead>
+                    <tbody id="kelas-table-body">
+                      <tr>
+                        <td colspan="5" class="text-center text-muted py-4">
+                          <span class="spinner-border spinner-border-sm me-1"></span> Memuat data kelas...
+                        </td>
+                      </tr>
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <!-- SECTION: HASIL & NILAI -->
+        <section id="sec-nilai" class="d-none">
+          <div class="d-flex justify-content-between flex-wrap flex-md-nowrap align-items-center pt-3 pb-2 mb-4 border-bottom">
+            <h1 class="h2 text-dark">Hasil Nilai Ujian Seleksi</h1>
+            <div class="btn-toolbar mb-2 mb-md-0 gap-2">
+              <button class="btn btn-outline-success btn-sm rounded-pill px-3" onclick="exportHasilUjian()">
+                <i class="bi bi-download me-1"></i> Export Nilai (Excel)
+              </button>
+            </div>
+          </div>
+
+          <!-- Filter & Search Results -->
+          <div class="row g-2 mb-4">
+            <div class="col-md-3">
+              <div class="input-group">
+                <span class="input-group-text"><i class="bi bi-search"></i></span>
+                <input type="text" class="form-control" id="search-nilai" placeholder="Cari Username/Nama..." oninput="filterHasilList()">
+              </div>
+            </div>
+            <div class="col-md-3">
+              <select class="form-select fw-semibold text-primary border-primary" id="filter-mapel-hasil" onchange="filterHasilList()">
+                <option value="">📚 Semua Mata Pelajaran</option>
+                <!-- Populated dynamically -->
+              </select>
+            </div>
+            <div class="col-md-3">
+              <select class="form-select" id="filter-jurusan-hasil" onchange="filterHasilList()">
+                <option value="">Semua Jurusan</option>
+                <!-- Populated dynamically -->
+              </select>
+            </div>
+            <div class="col-md-3">
+              <select class="form-select" id="filter-kelas-hasil" onchange="filterHasilList()">
+                <option value="">Semua Kelas</option>
+                <!-- Populated dynamically -->
+              </select>
+            </div>
+          </div>
+
+          <!-- Nilai Table -->
+          <div class="glass-card p-0 mb-4" style="min-height: 400px;">
+            <div class="table-responsive">
+              <table class="table table-hover align-middle mb-0 custom-table">
+                <thead>
+                  <tr>
+                    <th style="min-width: 100px;">Username</th>
+                    <th style="min-width: 170px;">Nama Lengkap</th>
+                    <th style="min-width: 160px;">Mata Pelajaran (Mapel)</th>
+                    <th style="min-width: 90px;">Kelas</th>
+                    <th style="min-width: 130px;">Jurusan</th>
+                    <th class="text-center" style="min-width: 70px;">Benar</th>
+                    <th class="text-center" style="min-width: 70px;">Salah</th>
+                    <th class="text-center" style="min-width: 90px;">Nilai Akhir</th>
+                    <th class="text-center" style="min-width: 110px;">Aksi</th>
+                  </tr>
+                </thead>
+                <tbody id="table-hasil-body">
+                  <tr>
+                    <td colspan="9" class="text-center py-4">
+                      <span class="spinner-border spinner-border-sm me-1 text-primary"></span> Memuat hasil ujian...
+                    </td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </section>
+
+        <!-- SECTION: PENGATURAN -->
+        <section id="sec-pengaturan" class="d-none">
+          <div class="d-flex justify-content-between flex-wrap flex-md-nowrap align-items-center pt-3 pb-2 mb-4 border-bottom">
+            <h1 class="h2 text-dark">Pengaturan CBT</h1>
+          </div>
+
+          <div class="row g-4 mb-4">
+            <!-- Connection Setup & Credentials Settings -->
+            <div class="col-md-6">
+              <div class="glass-card p-4 h-100" id="card-koneksi-db">
+                <h5 class="fw-bold mb-3 text-primary"><i class="bi bi-cloud-check-fill me-2"></i>Koneksi Supabase</h5>
+                <form id="form-update-supabase">
+                  <div class="mb-3">
+                    <label for="settings-supabase-url" class="form-label fw-semibold">Supabase URL</label>
+                    <input type="url" class="form-control" id="settings-supabase-url" placeholder="https://xxxxxxxx.supabase.co" required>
+                  </div>
+                  <div class="mb-3">
+                    <label for="settings-supabase-key" class="form-label fw-semibold">Supabase Anon Public Key</label>
+                    <textarea class="form-control" id="settings-supabase-key" rows="3" placeholder="eyJhbGciOiJIUzI1Ni..." required></textarea>
+                  </div>
+                  <div class="d-grid mt-4">
+                    <button type="submit" class="btn btn-primary-custom text-white btn-sm">Update Koneksi Database <i class="bi bi-save ms-1"></i></button>
+                  </div>
+                </form>
+              </div>
+            </div>
+
+            <!-- Exam Settings & Rules -->
+            <div class="col-md-6">
+              <div class="glass-card p-4 h-100">
+                <h5 class="fw-bold mb-3 text-success"><i class="bi bi-clock-fill me-2"></i>Konfigurasi Ujian</h5>
+                <form id="form-settings-exam">
+                  <div class="mb-3">
+                    <label for="settings-exam-duration" class="form-label fw-semibold">Durasi Ujian (Menit)</label>
+                    <div class="input-group">
+                      <input type="number" class="form-control" id="settings-exam-duration" min="5" max="300" required>
+                      <span class="input-group-text">Menit</span>
+                    </div>
+                  </div>
+                  
+                  <hr class="my-4">
+                  <h6 class="fw-bold text-dark"><i class="bi bi-shield-lock-fill me-1"></i> Pengaturan Keamanan</h6>
+                  
+                  <div class="mb-3 d-flex align-items-center gap-2">
+                    <div class="flex-grow-1">
+                      <label for="settings-exam-token" class="form-label fw-semibold mb-0">Token Ujian Aktif</label>
+                      <div class="input-group mt-2">
+                        <input type="text" class="form-control fw-bold fs-5 text-center text-primary" id="settings-exam-token" readonly>
+                        <button type="button" class="btn btn-outline-secondary" onclick="generateNewToken()" title="Buat Token Baru">
+                          <i class="bi bi-arrow-repeat"></i> Acak
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div class="mb-3 form-check form-switch">
+                    <input class="form-check-input" type="checkbox" role="switch" id="settings-exam-use-token">
+                    <label class="form-check-label fw-semibold" for="settings-exam-use-token">Wajibkan Token Saat Memulai Ujian</label>
+                  </div>
+
+                  <div class="mb-3 form-check form-switch">
+                    <input class="form-check-input" type="checkbox" role="switch" id="settings-exam-randomize" checked>
+                    <label class="form-check-label fw-semibold" for="settings-exam-randomize">Acak Urutan Soal (Randomize)</label>
+                  </div>
+
+                  <div class="mb-3 form-check form-switch">
+                    <input class="form-check-input" type="checkbox" role="switch" id="settings-exam-show-score" checked>
+                    <label class="form-check-label fw-semibold" for="settings-exam-show-score">Tampilkan Nilai Kepada Peserta</label>
+                    <div class="form-text">Jika dimatikan, peserta tidak akan bisa melihat hasil nilainya setelah ujian selesai.</div>
+                  </div>
+                  <div class="d-grid mt-4">
+                    <button type="submit" class="btn btn-success btn-sm btn-primary-custom text-white">Simpan Pengaturan Ujian <i class="bi bi-save ms-1"></i></button>
+                  </div>
+                </form>
+              </div>
+            </div>
+
+            <!-- Database Backup and Restore Utility -->
+            <div class="col-md-6">
+              <div class="glass-card p-4">
+                <h5 class="fw-bold mb-3 text-warning"><i class="bi bi-database-fill-gear me-2"></i>Backup & Restore</h5>
+                <p class="small text-muted mb-4">Cadangkan seluruh bank soal, data peserta, dan hasil ujian dalam format JSON, atau pulihkan dari cadangan sebelumnya.</p>
+                <div class="row g-2">
+                  <div class="col-6">
+                    <button class="btn btn-outline-warning w-100 py-3 d-flex flex-column align-items-center gap-2" onclick="backupDatabaseData()">
+                      <i class="bi bi-cloud-arrow-down-fill fs-3"></i>
+                      <span>Backup ke JSON</span>
+                    </button>
+                  </div>
+                  <div class="col-6">
+                    <button class="btn btn-warning w-100 py-3 d-flex flex-column align-items-center gap-2" onclick="triggerRestoreUpload()">
+                      <i class="bi bi-cloud-arrow-up-fill fs-3"></i>
+                      <span>Restore dari JSON</span>
+                    </button>
+                    <input type="file" id="restore-file-input" class="d-none" accept=".json" onchange="restoreDatabaseData(this)">
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </section>
+
+      </main>
+
+    </div>
+  </div>
+
+  <!-- MODALS -->
+
+  <!-- Modal: Import Excel -->
+  <div class="modal fade" id="importModal" tabindex="-1">
+    <div class="modal-dialog modal-lg">
+      <div class="modal-content glass-card border-0">
+        <div class="modal-header">
+          <h5 class="modal-title fw-bold" id="importModalTitle">Import Excel</h5>
+          <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+        </div>
+        <div class="modal-body">
+          <div class="mb-4 text-center">
+            <p class="text-muted small mb-3">Unduh template Excel resmi terlebih dahulu untuk memastikan susunan kolom data Anda tepat.</p>
+            <button class="btn btn-outline-primary btn-sm rounded-pill px-3" id="btn-download-template" onclick="">
+              <i class="bi bi-download me-1"></i> Unduh Template Excel
+            </button>
+          </div>
+          
+          <div class="mb-4">
+            <label for="excel-file-input" class="form-label fw-semibold">Pilih Berkas Excel (.xlsx)</label>
+            <input class="form-control" type="file" id="excel-file-input" accept=".xlsx" onchange="handleExcelUpload(this)">
+          </div>
+
+          <!-- Preview Area -->
+          <div id="excel-preview-area" class="d-none">
+            <h6 class="fw-bold mb-2">Pratinjau Data (<span id="excel-preview-count">0</span> Data ditemukan):</h6>
+            <div class="excel-preview-container">
+              <table class="table table-striped table-sm text-nowrap align-middle mb-0" id="excel-preview-table" style="font-size: 0.8rem;">
+                <!-- dynamic head/body -->
+              </table>
+            </div>
+            <div class="alert alert-info mt-3 small mb-0">
+              <i class="bi bi-info-circle-fill me-2"></i> Periksa kembali data di atas. Klik tombol di bawah untuk menyimpan langsung ke database Supabase.
+            </div>
+          </div>
+
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Batal</button>
+          <button type="button" class="btn btn-success" id="btn-save-import" disabled onclick="saveImportedData()">
+            <span id="import-btn-text">Simpan ke Database</span>
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Modal: Peserta Form (Add/Edit) -->
+  <div class="modal fade" id="pesertaFormModal" tabindex="-1">
+    <div class="modal-dialog">
+      <div class="modal-content glass-card border-0">
+        <div class="modal-header">
+          <h5 class="modal-title fw-bold" id="pesertaFormTitle">Form Peserta</h5>
+          <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+        </div>
+        <form id="form-peserta-crud">
+          <input type="hidden" id="peserta-id">
+          <div class="modal-body">
+            <div class="mb-3">
+              <label for="crud-peserta-username" class="form-label fw-semibold">Username</label>
+              <input type="text" class="form-control" id="crud-peserta-username" required>
+            </div>
+            <div class="mb-3">
+              <label for="crud-peserta-nama" class="form-label fw-semibold">Nama Lengkap</label>
+              <input type="text" class="form-control" id="crud-peserta-nama" required>
+            </div>
+            <div class="row">
+              <div class="col-md-6 mb-3">
+                <label for="crud-peserta-jurusan" class="form-label fw-semibold">Jurusan</label>
+                <div class="input-group">
+                  <select class="form-select" id="crud-peserta-jurusan">
+                    <option value="">Pilih Jurusan...</option>
+                  </select>
+                  <button class="btn btn-outline-secondary" type="button" onclick="openJurusanModal()" title="Kelola / Tambah Jurusan">
+                    <i class="bi bi-gear-fill"></i>
+                  </button>
+                </div>
+              </div>
+              <div class="col-md-6 mb-3">
+                <label for="crud-peserta-kelas" class="form-label fw-semibold">Kelas</label>
+                <div class="input-group">
+                  <select class="form-select" id="crud-peserta-kelas">
+                    <option value="">Pilih Kelas...</option>
+                  </select>
+                  <button class="btn btn-outline-secondary" type="button" onclick="openKelasModal()" title="Kelola / Tambah Kelas">
+                    <i class="bi bi-gear-fill"></i>
+                  </button>
+                </div>
+              </div>
+            </div>
+            <div class="row">
+              <div class="col-md-6 mb-3">
+                <label for="crud-peserta-ruang" class="form-label fw-semibold">Ruang</label>
+                <input type="text" class="form-control" id="crud-peserta-ruang">
+              </div>
+              <div class="col-md-6 mb-3">
+                <label for="crud-peserta-sesi" class="form-label fw-semibold">Sesi</label>
+                <input type="text" class="form-control" id="crud-peserta-sesi">
+              </div>
+            </div>
+            <div class="mb-3" id="crud-peserta-pass-wrapper">
+              <label for="crud-peserta-pass" class="form-label fw-semibold">Password Akun</label>
+              <input type="password" class="form-control" id="crud-peserta-pass" placeholder="Akan di-hash secara aman">
+              <small class="text-muted d-block mt-1" id="crud-peserta-pass-help">Biarkan kosong saat mengedit jika tidak ingin mengubah password.</small>
+            </div>
+          </div>
+          <div class="modal-footer">
+            <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Batal</button>
+            <button type="submit" class="btn btn-primary" id="btn-save-peserta-crud">Simpan Peserta</button>
+          </div>
+        </form>
+      </div>
+    </div>
+  </div>
+
+  <!-- Modal: Soal Form (Add/Edit) -->
+  <div class="modal fade" id="soalFormModal" tabindex="-1">
+    <div class="modal-dialog modal-lg">
+      <div class="modal-content glass-card border-0">
+        <div class="modal-header">
+          <h5 class="modal-title fw-bold" id="soalFormTitle">Form Soal Ujian</h5>
+          <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+        </div>
+        <form id="form-soal-crud">
+          <input type="hidden" id="soal-id">
+          <div class="modal-body">
+            <div class="row">
+              <div class="col-md-8 mb-3">
+                <label for="crud-soal-nomor" class="form-label fw-semibold">Nomor Urut Soal</label>
+                <input type="number" class="form-control" id="crud-soal-nomor" required min="1">
+              </div>
+              <div class="col-md-4 mb-3">
+                <label for="crud-soal-bobot" class="form-label fw-semibold">Bobot Nilai</label>
+                <input type="number" class="form-control" id="crud-soal-bobot" required min="1" value="1">
+              </div>
+            </div>
+            <div class="mb-3">
+              <label for="crud-soal-pertanyaan" class="form-label fw-semibold">Pertanyaan</label>
+              <textarea class="form-control" id="crud-soal-pertanyaan" rows="4" placeholder="Tulis soal ujian di sini..." required></textarea>
+            </div>
+            
+            <div class="mb-3">
+              <label for="crud-soal-gambar" class="form-label fw-semibold">Lampiran Gambar (Opsional)</label>
+              <input type="file" class="form-control" id="crud-soal-gambar" accept="image/png, image/jpeg, image/jpg">
+              <div class="mt-2 text-center">
+                <img id="crud-soal-gambar-preview" src="" class="img-fluid rounded d-none" style="max-height: 200px;">
+              </div>
+              <small class="text-muted">Gambar akan otomatis dikompres sebelum disimpan.</small>
+              <input type="hidden" id="crud-soal-gambar-base64">
+            </div>
+            
+            <div class="row">
+              <div class="col-md-6 mb-3">
+                <label for="crud-soal-opsia" class="form-label fw-semibold">Opsi A</label>
+                <input type="text" class="form-control" id="crud-soal-opsia" required placeholder="Jawaban A">
+              </div>
+              <div class="col-md-6 mb-3">
+                <label for="crud-soal-opsib" class="form-label fw-semibold">Opsi B</label>
+                <input type="text" class="form-control" id="crud-soal-opsib" required placeholder="Jawaban B">
+              </div>
+            </div>
+            <div class="row">
+              <div class="col-md-6 mb-3">
+                <label for="crud-soal-opsic" class="form-label fw-semibold">Opsi C (Opsional untuk Benar/Salah)</label>
+                <input type="text" class="form-control" id="crud-soal-opsic" placeholder="Jawaban C">
+              </div>
+              <div class="col-md-6 mb-3">
+                <label for="crud-soal-opsid" class="form-label fw-semibold">Opsi D (Opsional untuk Benar/Salah)</label>
+                <input type="text" class="form-control" id="crud-soal-opsid" placeholder="Jawaban D">
+              </div>
+            </div>
+            
+            <div class="mb-3">
+              <label for="crud-soal-jawaban" class="form-label fw-semibold">Jawaban yang Benar</label>
+              <select class="form-select" id="crud-soal-jawaban" required>
+                <option value="">Pilih opsi benar...</option>
+                <option value="A">Opsi A</option>
+                <option value="B">Opsi B</option>
+                <option value="C">Opsi C</option>
+                <option value="D">Opsi D</option>
+              </select>
+            </div>
+          </div>
+          <div class="modal-footer">
+            <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Batal</button>
+            <button type="submit" class="btn btn-primary" id="btn-save-soal-crud">Simpan Soal</button>
+          </div>
+        </form>
+      </div>
+    </div>
+  </div>
+
+  <!-- Modal: Paket Soal Form -->
+  <div class="modal fade" id="paketFormModal" tabindex="-1">
+    <div class="modal-dialog">
+      <div class="modal-content glass-card border-0">
+        <div class="modal-header">
+          <h5 class="modal-title fw-bold" id="paketFormTitle">Form Paket Soal</h5>
+          <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+        </div>
+        <form id="form-paket-crud">
+          <input type="hidden" id="paket-id">
+          <div class="modal-body">
+            <div class="mb-3">
+              <label for="crud-paket-nama" class="form-label fw-semibold">Nama Paket Soal</label>
+              <input type="text" class="form-control" id="crud-paket-nama" required placeholder="Cth: Ujian Matematika Sesi 1">
+            </div>
+            <div class="mb-3">
+              <label for="crud-paket-jurusan" class="form-label fw-semibold">Jurusan Paket Soal</label>
+              <div class="input-group">
+                <select class="form-select" id="crud-paket-jurusan">
+                  <option value="">Semua Jurusan (Umum)</option>
+                </select>
+                <button class="btn btn-outline-secondary" type="button" onclick="openJurusanModal()" title="Kelola / Tambah Jurusan">
+                  <i class="bi bi-gear-fill"></i>
+                </button>
+              </div>
+              <small class="text-muted">Pilih jurusan spesifik atau biarkan 'Semua Jurusan' jika berlaku untuk seluruh siswa.</small>
+            </div>
+            <div class="mb-3">
+              <label for="crud-paket-kelas" class="form-label fw-semibold">Kelas Paket Soal</label>
+              <div class="input-group">
+                <select class="form-select" id="crud-paket-kelas">
+                  <option value="">Semua Kelas (Umum)</option>
+                </select>
+                <button class="btn btn-outline-secondary" type="button" onclick="openKelasModal()" title="Kelola / Tambah Kelas">
+                  <i class="bi bi-gear-fill"></i>
+                </button>
+              </div>
+              <small class="text-muted">Pilih <b>Semua Kelas</b> untuk semua angkatan, atau <b>Tingkat X</b> untuk seluruh rombel kelas 10 (X TKJ 1 & X TKJ 2 sama-sama dapat), atau pilih rombel tertentu.</small>
+            </div>
+            <div class="mb-3">
+              <label for="crud-paket-mulai" class="form-label fw-semibold">Jadwal Mulai (Otomatis Terbuka)</label>
+              <input type="datetime-local" class="form-control" id="crud-paket-mulai" required>
+            </div>
+            <div class="mb-3">
+              <label for="crud-paket-selesai" class="form-label fw-semibold">Jadwal Selesai (Otomatis Ditutup)</label>
+              <input type="datetime-local" class="form-control" id="crud-paket-selesai" required>
+            </div>
+          </div>
+          <div class="modal-footer">
+            <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Batal</button>
+            <button type="submit" class="btn btn-primary" id="btn-save-paket">Simpan Paket</button>
+          </div>
+        </form>
+      </div>
+    </div>
+  </div>
+
+  <!-- Modal: Kelola Jurusan Quick Modal -->
+  <div class="modal fade" id="jurusanModal" tabindex="-1">
+    <div class="modal-dialog">
+      <div class="modal-content glass-card border-0">
+        <div class="modal-header">
+          <h5 class="modal-title fw-bold"><i class="bi bi-diagram-3-fill me-2 text-primary"></i>Kelola Data Jurusan</h5>
+          <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+        </div>
+        <div class="modal-body">
+          <form id="form-jurusan-modal" class="mb-3">
+            <label for="modal-input-jurusan" class="form-label fw-semibold">Tambah Jurusan Baru</label>
+            <div class="input-group">
+              <input type="text" class="form-control" id="modal-input-jurusan" placeholder="Nama / Singkatan Jurusan (Cth: TKJ, RPL)" required>
+              <button class="btn btn-primary" type="submit"><i class="bi bi-plus-lg"></i> Tambah</button>
+            </div>
+            <small class="text-muted">Jurusan baru akan langsung muncul di pilihan dropdown soal & siswa.</small>
+          </form>
+          <hr>
+          <h6 class="fw-semibold mb-2">Daftar Jurusan:</h6>
+          <div class="list-group list-group-flush border rounded-3" id="modal-jurusan-list" style="max-height: 250px; overflow-y: auto;">
+            <div class="text-center py-3 text-muted small"><span class="spinner-border spinner-border-sm me-1"></span> Memuat jurusan...</div>
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-secondary btn-sm" data-bs-dismiss="modal">Tutup</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Modal: Kelola Kelas Quick Modal -->
+  <div class="modal fade" id="kelasModal" tabindex="-1">
+    <div class="modal-dialog">
+      <div class="modal-content glass-card border-0">
+        <div class="modal-header">
+          <h5 class="modal-title fw-bold"><i class="bi bi-collection-fill me-2 text-success"></i>Kelola Data Kelas</h5>
+          <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+        </div>
+        <div class="modal-body">
+          <form id="form-kelas-modal" class="mb-3">
+            <label for="modal-input-kelas" class="form-label fw-semibold">Tambah Kelas Baru</label>
+            <div class="input-group">
+              <input type="text" class="form-control" id="modal-input-kelas" placeholder="Nama Kelas (Cth: X TKJ 1, X RPL 2)" required>
+              <button class="btn btn-success" type="submit"><i class="bi bi-plus-lg"></i> Tambah</button>
+            </div>
+            <small class="text-muted">Kelas baru akan langsung muncul di pilihan dropdown soal & siswa.</small>
+          </form>
+          <hr>
+          <h6 class="fw-semibold mb-2">Daftar Kelas:</h6>
+          <div class="list-group list-group-flush border rounded-3" id="modal-kelas-list" style="max-height: 250px; overflow-y: auto;">
+            <div class="text-center py-3 text-muted small"><span class="spinner-border spinner-border-sm me-1"></span> Memuat kelas...</div>
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-secondary btn-sm" data-bs-dismiss="modal">Tutup</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Modal: Cetak Kartu Ujian -->
+  <div class="modal fade" id="cetakKartuModal" tabindex="-1" aria-labelledby="cetakKartuModalLabel" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered modal-lg">
+      <div class="modal-content glass-card border-0">
+        <div class="modal-header border-bottom">
+          <h5 class="modal-title fw-bold" id="cetakKartuModalLabel">
+            <i class="bi bi-printer-fill text-warning me-2"></i>Cetak Kartu Peserta Ujian (CBT)
+          </h5>
+          <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+        </div>
+        <div class="modal-body p-4">
+          <!-- Information alert -->
+          <div class="alert alert-primary d-flex align-items-center mb-4">
+            <i class="bi bi-info-circle-fill fs-4 me-3 text-primary"></i>
+            <div>
+              <strong>Format Cetak Siap Pakai (Standar A4):</strong>
+              <div class="small">Kartu disusun otomatis <strong>4 kartu per lembar A4</strong> (Grid 2x2) lengkap dengan kop sekolah, nomor peserta, QR code, pasfoto box, garis potong, dan tanda tangan panitia.</div>
+            </div>
+          </div>
+
+          <!-- Configuration Form -->
+          <div class="row g-3 mb-3">
+            <div class="col-md-6">
+              <label for="cetak-nama-sekolah" class="form-label fw-semibold">Nama Sekolah / Instansi</label>
+              <input type="text" class="form-control" id="cetak-nama-sekolah" value="SMK NEGERI 1 LEMPUING">
+            </div>
+            <div class="col-md-6">
+              <label for="cetak-judul-ujian" class="form-label fw-semibold">Judul Kegiatan Ujian</label>
+              <input type="text" class="form-control" id="cetak-judul-ujian" value="PENILAIAN AKHIR SEMESTER (PAS) CBT">
+            </div>
+            <div class="col-md-6">
+              <label for="cetak-subjudul-ujian" class="form-label fw-semibold">Subjudul / Tahun Ajaran</label>
+              <input type="text" class="form-control" id="cetak-subjudul-ujian" value="TAHUN AJARAN 2025/2026">
+            </div>
+            <div class="col-md-6">
+              <label for="cetak-kota-tanggal" class="form-label fw-semibold">Tempat & Tanggal Penerbitan</label>
+              <input type="text" class="form-control" id="cetak-kota-tanggal" value="Lempuing, November 2026">
+            </div>
+          </div>
+
+          <hr class="my-3">
+
+          <h6 class="fw-bold mb-3 text-dark"><i class="bi bi-funnel-fill me-2 text-primary"></i>Pilih Target Peserta yang Dicetak</h6>
+          
+          <div class="row g-3 mb-3">
+            <div class="col-md-4">
+              <label for="cetak-filter-lingkup" class="form-label fw-semibold">Lingkup Peserta</label>
+              <select class="form-select" id="cetak-filter-lingkup" onchange="onCetakLingkupChange()">
+                <option value="semua">Semua Peserta Terdaftar</option>
+                <option value="kelas">Pilih Per Kelas</option>
+                <option value="jurusan">Pilih Per Jurusan</option>
+                <option value="sesi">Pilih Per Sesi</option>
+                <option value="filter_tabel">Sesuai Filter Tabel Saat Ini</option>
+              </select>
+            </div>
+            <div class="col-md-4" id="col-cetak-spesifik">
+              <label for="cetak-filter-spesifik" class="form-label fw-semibold" id="label-cetak-spesifik">Pilihan Kelas</label>
+              <select class="form-select" id="cetak-filter-spesifik" onchange="updateCetakPreviewCount()" disabled>
+                <option value="">- Semua Kelas -</option>
+              </select>
+            </div>
+            <div class="col-md-4">
+              <label class="form-label fw-semibold">Jumlah Kartu Siap Cetak</label>
+              <div class="p-2 border rounded bg-light text-center">
+                <span class="fs-4 fw-bold text-primary" id="cetak-preview-count">0</span>
+                <div class="small text-muted"><span id="cetak-preview-pages">0</span> Lembar A4 (4 kartu/lbr)</div>
+              </div>
+            </div>
+          </div>
+
+          <div class="row g-3 pt-2">
+            <div class="col-md-4">
+              <div class="form-check">
+                <input class="form-check-input" type="checkbox" id="cetak-opt-qr" checked>
+                <label class="form-check-label small fw-semibold" for="cetak-opt-qr">QR Code Verifikasi</label>
+              </div>
+            </div>
+            <div class="col-md-4">
+              <div class="form-check">
+                <input class="form-check-input" type="checkbox" id="cetak-opt-ttd" checked>
+                <label class="form-check-label small fw-semibold" for="cetak-opt-ttd">Kolom Tanda Tangan</label>
+              </div>
+            </div>
+            <div class="col-md-4">
+              <div class="form-check">
+                <input class="form-check-input" type="checkbox" id="cetak-opt-tatib" checked>
+                <label class="form-check-label small fw-semibold" for="cetak-opt-tatib">Tata Tertib Singkat</label>
+              </div>
+            </div>
+          </div>
+        </div>
+        <div class="modal-footer border-top d-flex justify-content-between flex-wrap gap-2">
+          <button type="button" class="btn btn-secondary btn-sm" data-bs-dismiss="modal">Tutup</button>
+          <div class="d-flex gap-2">
+            <button type="button" class="btn btn-outline-primary btn-sm fw-semibold" onclick="prosesCetakKartu('tab')">
+              <i class="bi bi-box-arrow-up-right me-1"></i> Buka Pratinjau Tab
+            </button>
+            <button type="button" class="btn btn-primary btn-sm px-3 fw-semibold shadow-sm" onclick="prosesCetakKartu('direct')">
+              <i class="bi bi-printer-fill me-1"></i> Cetak Sekarang (Print / PDF)
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- SCRIPTS -->
+  <!-- SweetAlert2 -->
+  <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
+  <!-- Chart.js -->
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <!-- SheetJS -->
+  <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+  <!-- Bootstrap JS -->
+  <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
+  
+  <!-- Supabase -->
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  
+  <!-- CBT Modules -->
+  <script src="js/config.js?v=13"></script>
+  <script src="js/supabase-config.js?v=13"></script>
+  <script src="js/db-adapter.js?v=13"></script>
+  <script src="js/auth.js?v=13"></script>
+  <script src="js/excel-helpers.js?v=13"></script>
+  <script src="js/templates.js?v=13"></script>
+  <script src="js/admin.js?v=13"></script>
+  <script>
+    // Dark mode logic
+    const themeToggleBtn = document.getElementById('theme-toggle-admin');
+    const isDarkMode = localStorage.getItem('CBT_DARK_MODE') === 'true';
+    if (isDarkMode) {
+      document.body.classList.add('dark-mode');
+      themeToggleBtn.innerHTML = '<i class="bi bi-sun-fill text-warning"></i>';
+    }
+    
+    themeToggleBtn.addEventListener('click', () => {
+      document.body.classList.toggle('dark-mode');
+      const isDark = document.body.classList.contains('dark-mode');
+      localStorage.setItem('CBT_DARK_MODE', isDark);
+      if (isDark) {
+        themeToggleBtn.innerHTML = '<i class="bi bi-sun-fill text-warning"></i>';
+      } else {
+        themeToggleBtn.innerHTML = '<i class="bi bi-moon-fill"></i>';
+      }
+    });
+  </script>
+</body>
+</html>

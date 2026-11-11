@@ -1,0 +1,204 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Login Portal - CBT SMK Negeri 1 Lempuing</title>
+  <!-- Bootstrap 5 CSS -->
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
+  <!-- Bootstrap Icons -->
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.1/font/bootstrap-icons.css" rel="stylesheet">
+  <!-- SweetAlert2 -->
+  <link href="https://cdn.jsdelivr.net/npm/sweetalert2@11/dist/sweetalert2.min.css" rel="stylesheet">
+  <!-- Custom Styles -->
+  <link rel="stylesheet" href="css/styles.css">
+  <style>
+    .login-container {
+      max-width: 450px;
+      margin: auto;
+      padding-top: 60px;
+      padding-bottom: 60px;
+    }
+    .nav-tabs-custom {
+      border-bottom: 2px solid rgba(0, 0, 0, 0.05);
+    }
+    .nav-tabs-custom .nav-link {
+      border: none;
+      color: var(--secondary-color);
+      font-weight: 600;
+      padding: 12px 20px;
+      background: transparent;
+      transition: all 0.2s ease;
+    }
+    .nav-tabs-custom .nav-link.active {
+      color: var(--primary-color);
+      border-bottom: 3px solid var(--primary-color);
+    }
+  </style>
+</head>
+<body class="d-flex align-items-center" style="min-height: 100vh;">
+
+  <div class="container">
+    <div class="login-container">
+      
+      <!-- Back Link -->
+      <div class="mb-4">
+        <a href="index.html" class="text-decoration-none text-muted">
+          <i class="bi bi-arrow-left me-2"></i>Kembali ke Login Utama
+        </a>
+      </div>
+
+      <!-- Configuration Warning if Supabase is not connected -->
+      <div id="config-warning" class="alert alert-warning d-none" role="alert">
+        <h5 class="alert-heading"><i class="bi bi-exclamation-triangle-fill me-2"></i>Konfigurasi Supabase Kosong</h5>
+        <p class="small mb-0">
+          Koneksi Supabase belum diatur. Untuk pengujian pertama, Anda dapat masuk sebagai Admin untuk melakukan konfigurasi melalui panel pengaturan.
+        </p>
+        <hr class="my-2">
+        <div class="d-grid">
+          <button class="btn btn-warning btn-sm" onclick="bypassToAdminSetup()">
+            Buka Panel Pengaturan Admin
+          </button>
+        </div>
+      </div>
+
+      <!-- Main Login Glass Card -->
+      <div class="glass-card p-4">
+        <div class="text-center mb-4">
+          <svg width="60" height="60" viewBox="0 0 100 100" fill="none" xmlns="http://www.w3.org/2000/svg" class="mb-3">
+            <circle cx="50" cy="50" r="45" fill="#0d6efd" stroke="#ffffff" stroke-width="4"/>
+            <path d="M50 20 L25 40 L35 40 L35 75 L65 75 L65 40 L75 40 Z" fill="#ffffff"/>
+            <circle cx="50" cy="50" r="8" fill="#ffc107"/>
+          </svg>
+          <h4 class="fw-bold" style="color: #1e3c72;">CBT SMKN 1 Lempuing</h4>
+          <p class="text-muted small">Silakan masuk menggunakan kredensial Anda</p>
+        </div>
+
+        <!-- Peserta Login Form -->
+        <div id="peserta">
+            <form id="form-peserta" autocomplete="off">
+              <div class="mb-3">
+                <label for="peserta-username" class="form-label font-heading fw-semibold">Username Peserta</label>
+                <div class="input-group">
+                  <span class="input-group-text"><i class="bi bi-person-fill"></i></span>
+                  <input type="text" class="form-control" id="peserta-username" placeholder="Masukkan username Anda" required autocomplete="off">
+                </div>
+              </div>
+              <div class="mb-4">
+                <label for="peserta-password" class="form-label font-heading fw-semibold">Password</label>
+                <div class="input-group">
+                  <span class="input-group-text"><i class="bi bi-lock-fill"></i></span>
+                  <input type="password" class="form-control" id="peserta-password" placeholder="Masukkan password Anda" required autocomplete="new-password">
+                  <button class="btn btn-outline-secondary" type="button" onclick="togglePassword('peserta-password')">
+                    <i class="bi bi-eye" id="peserta-password-eye"></i>
+                  </button>
+                </div>
+              </div>
+              <div class="d-grid mb-3">
+                <button type="submit" class="btn btn-primary-custom text-white" id="btn-login-peserta">
+                  Masuk Ujian <i class="bi bi-box-arrow-in-right ms-1"></i>
+                </button>
+              </div>
+            </form>
+          </div>
+
+      </div>
+    </div>
+  </div>
+
+  <!-- Scripts -->
+  <!-- SweetAlert2 -->
+  <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
+  <!-- Bootstrap JS -->
+  <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
+  <!-- Supabase -->
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <!-- Configs & Auth -->
+  <script src="js/config.js?v=16"></script>
+  <script src="js/supabase-config.js?v=16"></script>
+  <script src="js/db-adapter.js?v=16"></script>
+  <script src="js/auth.js?v=16"></script>
+
+  <script>
+    // Show configuration warnings or local demo notice
+    document.addEventListener("DOMContentLoaded", () => {
+      if (!window.CBT_CONFIG.isConfigured) {
+        document.getElementById('config-warning').className = 'alert alert-info';
+        document.getElementById('config-warning').innerHTML = `
+          <h5 class="alert-heading"><i class="bi bi-info-circle-fill me-2"></i>Mode Demo Lokal Aktif</h5>
+          <p class="small mb-0">
+            Koneksi database cloud belum diatur. Aplikasi berjalan dalam <strong>Mode Demo Lokal</strong> menggunakan penyimpanan browser Anda.
+            <br>🗝️ <strong>Akun Demo Peserta:</strong> Username <code>U001</code> / Password <code>123456</code>
+          </p>
+          <hr class="my-2">
+          <div class="d-grid">
+            <button class="btn btn-outline-primary btn-sm rounded-3" onclick="bypassToAdminSetup()">
+              <i class="bi bi-gear-fill me-1"></i> Hubungkan ke Database Supabase Cloud
+            </button>
+          </div>
+        `;
+        document.getElementById('btn-login-peserta').disabled = false;
+        document.getElementById('btn-login-admin').disabled = false;
+      }
+
+      // Check for redirect errors
+      const urlParams = new URLSearchParams(window.location.search);
+      const errorMsg = urlParams.get('error');
+      if (errorMsg === 'unauthorized_admin') {
+        Swal.fire("Akses Ditolak", "Sesi login Anda tidak memiliki akses Administrator.", "error");
+      } else if (errorMsg === 'unauthorized_peserta') {
+        Swal.fire("Akses Ditolak", "Sesi login Anda tidak memiliki akses Peserta.", "error");
+      } else if (errorMsg === 'config_missing') {
+        Swal.fire("Akses Ditolak", "Koneksi Supabase belum dikonfigurasi.", "warning");
+      }
+    });
+
+    // Toggle Password Visibility
+    function togglePassword(id) {
+      const field = document.getElementById(id);
+      const eye = document.getElementById(id + '-eye');
+      if (field.type === 'password') {
+        field.type = 'text';
+        eye.classList.replace('bi-eye', 'bi-eye-slash');
+      } else {
+        field.type = 'password';
+        eye.classList.replace('bi-eye-slash', 'bi-eye');
+      }
+    }
+
+    // Bypass login to open config if no key exists (helps admin setting it up)
+    function bypassToAdminSetup() {
+      window.location.href = 'admin.html?setup=true';
+    }
+
+    // Handle Peserta Login
+    document.getElementById('form-peserta').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const num = document.getElementById('peserta-username').value;
+      const pass = document.getElementById('peserta-password').value;
+      const btn = document.getElementById('btn-login-peserta');
+
+      btn.innerHTML = `<span class="spinner-border spinner-border-sm me-1"></span> Memproses...`;
+      btn.disabled = true;
+
+      try {
+        const data = await DB.loginPeserta(num, pass);
+        Swal.fire({
+          icon: 'success',
+          title: 'Login Berhasil',
+          text: `Selamat datang, ${data.profile.nama_lengkap}!`,
+          timer: 1500,
+          showConfirmButton: false
+        }).then(() => {
+          window.location.href = 'ujian.html';
+        });
+      } catch (err) {
+        Swal.fire('Login Gagal', err.message || 'Terjadi kesalahan.', 'error');
+        btn.innerHTML = `Masuk Ujian <i class="bi bi-box-arrow-in-right ms-1"></i>`;
+        btn.disabled = false;
+      }
+    });
+  </script>
+</body>
+</html>
+
