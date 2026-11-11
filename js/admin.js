@@ -232,11 +232,10 @@ async function loadSettings() {
       if (data.tampilkan_nilai !== undefined) {
         document.getElementById('settings-exam-show-score').checked = data.tampilkan_nilai;
       }
-      if (data.token_ujian !== undefined) {
-        document.getElementById('settings-exam-token').value = data.token_ujian;
-      } else {
-        document.getElementById('settings-exam-token').value = "CBT123";
-      }
+      const activeToken = data.token_ujian !== undefined ? data.token_ujian : "CBT123";
+      document.getElementById('settings-exam-token').value = activeToken;
+      const dashTokenEl = document.getElementById('dash-active-token');
+      if (dashTokenEl) dashTokenEl.innerText = activeToken;
       if (data.token_aktif !== undefined) {
         document.getElementById('settings-exam-use-token').checked = data.token_aktif;
       }
@@ -314,6 +313,33 @@ function generateNewToken() {
     token += chars.charAt(Math.floor(Math.random() * chars.length));
   }
   document.getElementById('settings-exam-token').value = token;
+  return token;
+}
+
+async function quickRotateTokenPembebas() {
+  const newToken = generateNewToken();
+  try {
+    const duration = parseInt(document.getElementById('settings-exam-duration').value) || 60;
+    const passingInput = document.getElementById('settings-exam-passing');
+    const passing = passingInput ? (parseFloat(passingInput.value) || 60) : 60;
+    const showScore = document.getElementById('settings-exam-show-score').checked;
+    const useToken = document.getElementById('settings-exam-use-token').checked;
+    const randomize = document.getElementById('settings-exam-randomize').checked;
+
+    await DB.saveSettings(duration, passing, showScore, newToken, useToken, randomize);
+    const dashTokenEl = document.getElementById('dash-active-token');
+    if (dashTokenEl) dashTokenEl.innerText = newToken;
+    Swal.fire({
+      toast: true,
+      position: 'top-end',
+      icon: 'success',
+      title: `Token Pembebas baru: ${newToken}`,
+      showConfirmButton: false,
+      timer: 2000
+    });
+  } catch (err) {
+    Swal.fire('Gagal Memperbarui Token', err.message || 'Terjadi kesalahan.', 'error');
+  }
 }
 
 // -------------------------------------------------------------
@@ -3601,3 +3627,5 @@ window.prosesCetakKartu = prosesCetakKartu;
 window.cetakKartuSiswa = cetakKartuSiswa;
 window.filterSoalList = () => {};
 window.filterHasilList = filterHasilList;
+window.generateNewToken = generateNewToken;
+window.quickRotateTokenPembebas = quickRotateTokenPembebas;

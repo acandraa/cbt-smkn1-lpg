@@ -786,13 +786,53 @@ const DB = {
       const list = JSON.parse(localStorage.getItem('CBT_LOCAL_PESERTA')) || [];
       const idx = list.findIndex(p => p.id === pesertaId);
       if (idx !== -1) {
-        list[idx].pelanggaran = (list[idx].pelanggaran || 0) + 1;
+        const nextCount = (list[idx].pelanggaran || 0) + 1;
+        list[idx].pelanggaran = nextCount;
+        if (nextCount > 0 && nextCount % 3 === 0) {
+          list[idx].is_locked = true;
+        }
+        localStorage.setItem('CBT_LOCAL_PESERTA', JSON.stringify(list));
+        return nextCount;
+      }
+      return 0;
+    } else {
+      const { data } = await window.supabaseClient.from('peserta').select('pelanggaran, is_locked').eq('id', pesertaId).single();
+      const current = data ? (data.pelanggaran || 0) : 0;
+      const nextCount = current + 1;
+      const updatePayload = { pelanggaran: nextCount };
+      if (nextCount > 0 && nextCount % 3 === 0) {
+        updatePayload.is_locked = true;
+      }
+      await window.supabaseClient.from('peserta').update(updatePayload).eq('id', pesertaId);
+      return nextCount;
+    }
+  },
+
+  async unlockPesertaByToken(pesertaId, inputToken) {
+    const cleanInput = (inputToken || '').trim().toUpperCase();
+    if (!cleanInput) {
+      throw new Error("Token Pembebas wajib diisi.");
+    }
+    const settings = await this.getSettings();
+    const validToken = (settings && settings.token_ujian ? settings.token_ujian : 'CBT123').trim().toUpperCase();
+    if (cleanInput !== validToken) {
+      throw new Error("Token Pembebas tidak valid atau salah! Silakan minta token aktif kepada Pengawas Ujian.");
+    }
+    if (this.isLocal()) {
+      const list = JSON.parse(localStorage.getItem('CBT_LOCAL_PESERTA')) || [];
+      const idx = list.findIndex(p => p.id === pesertaId);
+      if (idx !== -1) {
+        list[idx].is_locked = false;
         localStorage.setItem('CBT_LOCAL_PESERTA', JSON.stringify(list));
       }
+      return true;
     } else {
-      const { data } = await window.supabaseClient.from('peserta').select('pelanggaran').eq('id', pesertaId).single();
-      const current = data ? (data.pelanggaran || 0) : 0;
-      await window.supabaseClient.from('peserta').update({ pelanggaran: current + 1 }).eq('id', pesertaId);
+      const { error } = await window.supabaseClient
+        .from('peserta')
+        .update({ is_locked: false })
+        .eq('id', pesertaId);
+      if (error) throw error;
+      return true;
     }
   },
 
@@ -805,16 +845,17 @@ const DB = {
         localStorage.setItem('CBT_LOCAL_PESERTA', JSON.stringify(list));
       }
     } else {
+      const updatePayload = { is_locked: Boolean(isLocked) };
       if (shardId) {
         const client = this.getClientForShard(shardId);
-        const { error } = await client.from('peserta').update({ is_locked: isLocked }).eq('id', pesertaId);
+        const { error } = await client.from('peserta').update(updatePayload).eq('id', pesertaId);
         if (error) throw error;
       } else {
         const shards = (window.getSupabaseShards && window.getSupabaseShards()) || [];
         if (shards.length > 1) {
-          await Promise.allSettled(shards.map(s => s.client && s.client.from('peserta').update({ is_locked: isLocked }).eq('id', pesertaId)));
+          await Promise.allSettled(shards.map(s => s.client && s.client.from('peserta').update(updatePayload).eq('id', pesertaId)));
         } else {
-          const { error } = await window.supabaseClient.from('peserta').update({ is_locked: isLocked }).eq('id', pesertaId);
+          const { error } = await window.supabaseClient.from('peserta').update(updatePayload).eq('id', pesertaId);
           if (error) throw error;
         }
       }
@@ -1575,6 +1616,10 @@ const DB_PHP = {
 
   incrementPelanggaran(pesertaId) {
     return DB.api('incrementPelanggaran', { peserta_id: pesertaId });
+  },
+
+  unlockPesertaByToken(pesertaId, inputToken) {
+    return DB.api('unlockPesertaByToken', { peserta_id: pesertaId, token: inputToken });
   },
 
   toggleLockPeserta(pesertaId, isLocked) {

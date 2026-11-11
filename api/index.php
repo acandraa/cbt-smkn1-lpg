@@ -435,14 +435,30 @@ try {
 
         case 'incrementPelanggaran': {
             $pid = resolvePesertaId($req['peserta_id'] ?? null);
-            exec_sql('UPDATE peserta SET pelanggaran = pelanggaran + 1 WHERE id = ?', [$pid]);
+            exec_sql('UPDATE peserta SET pelanggaran = pelanggaran + 1, is_locked = CASE WHEN (pelanggaran + 1) % 3 = 0 THEN 1 ELSE is_locked END WHERE id = ?', [$pid]);
             respond(['ok' => true]);
         }
 
-        case 'toggleLockPeserta':
-            requireAdmin();
-            exec_sql('UPDATE peserta SET is_locked = ? WHERE id = ?', [toBit($req['is_locked'] ?? false), (string)($req['peserta_id'] ?? '')]);
+        case 'unlockPesertaByToken': {
+            $pid = resolvePesertaId($req['peserta_id'] ?? null);
+            $inputToken = strtoupper(trim((string)($req['token'] ?? '')));
+            if ($inputToken === '') fail('Token Pembebas wajib diisi.');
+            $settings = fetchOne('SELECT token_ujian FROM pengaturan_ujian WHERE id = 1');
+            $validToken = strtoupper(trim((string)($settings['token_ujian'] ?? 'CBT123')));
+            if ($inputToken !== $validToken) {
+                fail('Token Pembebas tidak valid atau salah! Silakan minta token aktif kepada Pengawas Ujian.');
+            }
+            exec_sql('UPDATE peserta SET is_locked = 0 WHERE id = ?', [$pid]);
             respond(['ok' => true]);
+        }
+
+        case 'toggleLockPeserta': {
+            requireAdmin();
+            $locked = toBit($req['is_locked'] ?? false);
+            $pid = (string)($req['peserta_id'] ?? '');
+            exec_sql('UPDATE peserta SET is_locked = ? WHERE id = ?', [$locked, $pid]);
+            respond(['ok' => true]);
+        }
 
         // ---------------- JURUSAN ----------------
         case 'getJurusanList': {

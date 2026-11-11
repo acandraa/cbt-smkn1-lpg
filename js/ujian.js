@@ -150,26 +150,6 @@ function findActivePaketForStudent(allPaket, profile) {
 // Load config settings and verify if they can start the exam
 async function loadExamSetupAndVerify() {
   try {
-    // 0. Check if student is locked by Admin
-    if (studentProfile.is_locked) {
-      document.getElementById('dash-soal-count').innerText = "0";
-      document.getElementById('dash-duration').innerText = "0";
-      const dashPassing = document.getElementById('dash-passing');
-      if (dashPassing) dashPassing.innerText = "-";
-      
-      const dashJadwal = document.getElementById('dash-jadwal');
-      if (dashJadwal) {
-        dashJadwal.innerText = "Akses Ujian Diblokir karena Indikasi Kecurangan";
-        dashJadwal.classList.add('text-danger', 'fw-bold');
-      }
-
-      document.getElementById('btn-mulai-ujian').disabled = true;
-      document.getElementById('btn-mulai-ujian').innerHTML = `<i class="bi bi-lock-fill"></i> Ujian Terkunci`;
-      document.getElementById('btn-mulai-ujian').classList.replace('btn-primary-custom', 'btn-danger');
-      document.getElementById('view-dashboard').classList.remove('d-none');
-      return;
-    }
-
     // 1. Find active Paket Soal based on current time, jurusan, and kelas
     const allPaket = await DB.getPaketList();
     const activePaket = findActivePaketForStudent(allPaket, studentProfile);
@@ -234,6 +214,28 @@ async function loadExamSetupAndVerify() {
         document.getElementById('dash-status').innerText = 'Sudah Ujian';
         document.getElementById('dash-status').className = 'badge bg-success';
       }
+    } else if (studentProfile.is_locked) {
+      // Siswa terkunci karena mencapai kelipatan 3x pelanggaran atau dikunci pengawas -> wajib masukkan Token Pembebas
+      if (dashJadwal) {
+        dashJadwal.innerText = `Akses Ujian Terkunci (${violationCount}x Pelanggaran) — Wajib Token Pembebas`;
+        dashJadwal.classList.add('text-danger', 'fw-bold');
+      }
+      const btnMulai = document.getElementById('btn-mulai-ujian');
+      btnMulai.disabled = false;
+      btnMulai.innerHTML = `<i class="bi bi-key-fill me-2"></i>Masukkan Token Pembebas`;
+      btnMulai.classList.replace('btn-primary-custom', 'btn-danger');
+      btnMulai.onclick = () => {
+        showTokenPembebasModal(() => {
+          window.location.reload();
+        });
+      };
+      document.getElementById('view-dashboard').classList.remove('d-none');
+      setTimeout(() => {
+        showTokenPembebasModal(() => {
+          window.location.reload();
+        });
+      }, 300);
+      return;
     } else {
       // Verify schedules window
       if (!activePaket) {
@@ -875,12 +877,129 @@ window.toggleRaguRagu = toggleRaguRagu;
 window.confirmSelesaiUjian = confirmSelesaiUjian;
 
 // -------------------------------------------------------------
-// ANTI-CHEAT MECHANICS & FULLSCREEN DETECTION
+// ANTI-CHEAT MECHANICS & FULLSCREEN DETECTION (3X PELANGGARAN -> TOKEN PEMBEBAS)
 // -------------------------------------------------------------
+const MAX_PELANGGARAN = 3;
 let isExamActive = false;
 let violationCount = 0;
 let fullscreenWarningInterval = null;
 let isFullscreenWarningActive = false;
+let isTokenPembebasModalOpen = false;
+
+function showTokenPembebasModal(onUnlockedCallback) {
+  if (isTokenPembebasModalOpen) return;
+  isTokenPembebasModalOpen = true;
+  if (fullscreenWarningInterval) {
+    clearInterval(fullscreenWarningInterval);
+    fullscreenWarningInterval = null;
+  }
+  isFullscreenWarningActive = false;
+
+  Swal.fire({
+    icon: 'error',
+    title: `Ujian Terkunci! (${violationCount || MAX_PELANGGARAN}x Pelanggaran)`,
+    html: `
+      <div class="text-center">
+        <p class="mb-2">Anda telah melakukan <strong>${violationCount || MAX_PELANGGARAN} kali pelanggaran</strong> keamanan ujian (kelipatan ${MAX_PELANGGARAN}x pelanggaran).</p>
+        <div class="alert alert-danger py-2 px-3 small fw-semibold mb-3">
+          <i class="bi bi-shield-lock-fill me-1"></i> Untuk dapat melanjutkan pengerjaan ujian, silakan panggil <strong>Pengawas Ujian</strong> dan masukkan <strong>Token Pembebas</strong> di bawah ini.
+        </div>
+      </div>
+    `,
+    input: 'text',
+    inputPlaceholder: 'Masukkan Token Pembebas...',
+    inputAttributes: {
+      autocapitalize: 'characters',
+      autocomplete: 'off',
+      style: 'text-align: center; font-weight: bold; font-size: 1.2rem; letter-spacing: 3px; text-transform: uppercase;'
+    },
+    showCancelButton: true,
+    confirmButtonText: '<i class="bi bi-unlock-fill me-1"></i> Buka Kunci & Lanjutkan',
+    confirmButtonColor: '#198754',
+    cancelButtonText: '<i class="bi bi-box-arrow-left me-1"></i> Keluar (Logout)',
+    cancelButtonColor: '#6c757d',
+    allowOutsideClick: false,
+    allowEscapeKey: false,
+    showLoaderOnConfirm: true,
+    preConfirm: async (tokenVal) => {
+      if (!tokenVal || !tokenVal.trim()) {
+        Swal.showValidationMessage('Token Pembebas wajib diisi!');
+        return false;
+      }
+      try {
+        await DB.unlockPesertaByToken(studentProfile.id, tokenVal);
+        return true;
+      } catch (err) {
+        Swal.showValidationMessage(err.message || 'Token Pembebas salah atau tidak valid!');
+        return false;
+      }
+    }
+  }).then((result) => {
+    isTokenPembebasModalOpen = false;
+    if (result.isConfirmed) {
+      if (studentProfile) {
+        studentProfile.is_locked = false;
+      }
+      Swal.fire({
+        icon: 'success',
+        title: 'Kunci Ujian Dibuka!',
+        text: `Token Pembebas valid. Catatan pelanggaran tetap tersimpan (${violationCount}x). Silakan lanjutkan ujian dengan tertib.`,
+        timer: 1800,
+        showConfirmButton: false
+      }).then(() => {
+        if (typeof onUnlockedCallback === 'function') {
+          onUnlockedCallback();
+        } else if (isExamActive) {
+          requestFullscreen();
+        }
+      });
+    } else if (result.dismiss === Swal.DismissReason.cancel) {
+      Auth.logout();
+    }
+  });
+}
+
+function handleViolationRecorded(reasonText) {
+  if (isTokenPembebasModalOpen) return;
+
+  violationCount++;
+  if (studentProfile) {
+    studentProfile.pelanggaran = violationCount;
+    if (studentProfile.id) {
+      DB.incrementPelanggaran(studentProfile.id).catch(e => console.error("Gagal catat pelanggaran:", e));
+    }
+  }
+
+  if (violationCount > 0 && violationCount % MAX_PELANGGARAN === 0) {
+    if (studentProfile) studentProfile.is_locked = true;
+    showTokenPembebasModal(() => {
+      requestFullscreen();
+    });
+    return;
+  }
+
+  const sisa = MAX_PELANGGARAN - (violationCount % MAX_PELANGGARAN);
+  const nextLockAt = violationCount + sisa;
+  Swal.fire({
+    icon: 'warning',
+    title: `Pelanggaran Ke-${violationCount} Tercatat!`,
+    html: `
+      <p>${reasonText}</p>
+      <div class="alert alert-warning mb-2 py-2 fw-semibold">
+        <i class="bi bi-exclamation-triangle-fill me-1"></i> Total Pelanggaran: <strong>${violationCount} kali</strong> (Sisa toleransi sebelum terkunci: ${sisa}x lagi)
+      </div>
+      <p class="small text-danger fw-semibold mb-1">Peringatan: Pada pelanggaran ke-${nextLockAt} (kelipatan 3), ujian akan otomatis terkunci dan wajib meminta Token Pembebas dari Pengawas!</p>
+      <p class="small text-muted mb-0">Klik tombol di bawah untuk melanjutkan ujian dalam mode layar penuh.</p>
+    `,
+    confirmButtonText: '<i class="bi bi-arrows-fullscreen me-2"></i>Kembali & Lanjutkan Ujian',
+    confirmButtonColor: '#0d6efd',
+    allowOutsideClick: false,
+    allowEscapeKey: false
+  }).then(() => {
+    isFullscreenWarningActive = false;
+    requestFullscreen();
+  });
+}
 
 function isFullscreenSupported() {
   const elem = document.documentElement;
@@ -936,7 +1055,7 @@ function exitFullscreen() {
 }
 
 function handleFullscreenChange() {
-  if (!isExamActive || !isFullscreenSupported()) return;
+  if (!isExamActive || !isFullscreenSupported() || isTokenPembebasModalOpen) return;
 
   const isFs = checkIsFullscreen();
 
@@ -960,6 +1079,7 @@ function handleFullscreenChange() {
 }
 
 function triggerFullscreenExitCountdown() {
+  if (isTokenPembebasModalOpen) return;
   isFullscreenWarningActive = true;
   let secondsLeft = 10;
 
@@ -972,7 +1092,7 @@ function triggerFullscreenExitCountdown() {
         <div class="small text-muted mb-1">Batas waktu untuk kembali ke layar penuh:</div>
         <div class="display-6 fw-bold text-danger font-monospace" id="fs-countdown-display">10 detik</div>
       </div>
-      <p class="small text-muted mb-0">Segera klik tombol di bawah sebelum waktu habis, atau aktivitas ini akan dicatat sebagai <strong>1 kali pelanggaran</strong>.</p>
+      <p class="small text-muted mb-0">Segera klik tombol di bawah sebelum waktu habis, atau aktivitas ini akan dicatat sebagai <strong>1 kali pelanggaran</strong> (Maksimal ${MAX_PELANGGARAN}x pelanggaran).</p>
     `,
     confirmButtonText: '<i class="bi bi-arrows-fullscreen me-2"></i>Kembali ke Layar Penuh',
     confirmButtonColor: '#0d6efd',
@@ -991,32 +1111,10 @@ function triggerFullscreenExitCountdown() {
         if (secondsLeft <= 0) {
           clearInterval(fullscreenWarningInterval);
           fullscreenWarningInterval = null;
+          isFullscreenWarningActive = false;
 
-          // Waktu 10 detik habis -> Catat pelanggaran ke database
-          violationCount++;
-          if (studentProfile && studentProfile.id) {
-            DB.incrementPelanggaran(studentProfile.id).catch(e => console.error("Gagal catat pelanggaran:", e));
-          }
-
-          // Tampilkan notifikasi bahwa pelanggaran telah dicatat
-          Swal.fire({
-            icon: 'error',
-            title: 'Waktu Habis! Pelanggaran Dicatat',
-            html: `
-              <p>Anda tidak kembali ke mode layar penuh tepat waktu.</p>
-              <div class="alert alert-danger mb-3 py-2 fw-semibold">
-                <i class="bi bi-exclamation-triangle-fill me-1"></i> Pelanggaran ke-${violationCount} telah dicatat oleh sistem keamanan.
-              </div>
-              <p class="small text-muted mb-0">Klik tombol di bawah untuk kembali ke layar penuh dan melanjutkan ujian.</p>
-            `,
-            confirmButtonText: '<i class="bi bi-arrows-fullscreen me-2"></i>Masuk Layar Penuh & Lanjutkan',
-            confirmButtonColor: '#dc3545',
-            allowOutsideClick: false,
-            allowEscapeKey: false
-          }).then(() => {
-            isFullscreenWarningActive = false;
-            requestFullscreen();
-          });
+          // Waktu 10 detik habis -> Catat pelanggaran (dan kunci jika sudah 3x)
+          handleViolationRecorded('Anda tidak kembali ke mode layar penuh tepat waktu.');
         }
       }, 1000);
     }
@@ -1065,7 +1163,7 @@ function initAntiCheat() {
 
   // Deteksi pindah tab
   document.addEventListener('visibilitychange', () => {
-    if (isExamActive && document.visibilityState === 'hidden') {
+    if (isExamActive && document.visibilityState === 'hidden' && !isTokenPembebasModalOpen) {
       // Jika countdown keluar fullscreen sedang berjalan, bersihkan agar tidak dobel penalti
       if (fullscreenWarningInterval) {
         clearInterval(fullscreenWarningInterval);
@@ -1073,30 +1171,7 @@ function initAntiCheat() {
       }
       isFullscreenWarningActive = false;
 
-      violationCount++;
-      
-      // Update DB
-      if (studentProfile && studentProfile.id) {
-        DB.incrementPelanggaran(studentProfile.id).catch(e => console.error("Gagal catat pelanggaran:", e));
-      }
-
-      Swal.fire({
-        icon: 'warning',
-        title: 'Pelanggaran Ujian!',
-        html: `
-          <p>Anda terdeteksi berpindah tab atau aplikasi. Aktivitas ini dicatat oleh sistem keamanan.</p>
-          <div class="alert alert-warning mb-2 py-2 fw-semibold">
-            <i class="bi bi-exclamation-triangle-fill me-1"></i> Total Pelanggaran: ${violationCount} kali
-          </div>
-          <p class="small text-muted mb-0">Klik tombol di bawah untuk melanjutkan ujian dalam mode layar penuh.</p>
-        `,
-        confirmButtonText: '<i class="bi bi-arrows-fullscreen me-2"></i>Kembali & Lanjutkan Ujian',
-        confirmButtonColor: '#0d6efd',
-        allowOutsideClick: false,
-        allowEscapeKey: false
-      }).then(() => {
-        requestFullscreen();
-      });
+      handleViolationRecorded('Anda terdeteksi berpindah tab atau aplikasi. Aktivitas ini dicatat oleh sistem keamanan.');
     }
   });
 }

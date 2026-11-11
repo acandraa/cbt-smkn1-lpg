@@ -130,7 +130,15 @@
               </div>
               <p class="text-muted small mb-0 mt-1">Pantau kehadiran, progres pengerjaan ujian siswa per kelas & jurusan secara real-time</p>
             </div>
-            <div class="d-flex align-items-center gap-2 mt-2 mt-md-0">
+            <div class="d-flex align-items-center flex-wrap gap-2 mt-2 mt-md-0">
+              <div class="d-inline-flex align-items-center bg-warning-subtle border border-warning rounded-pill px-3 py-1 me-1" title="Token Pembebas untuk membuka kunci peserta yang terkena 3x pelanggaran">
+                <i class="bi bi-key-fill text-warning-emphasis me-1"></i>
+                <span class="small text-dark me-1">Token Pembebas:</span>
+                <strong class="font-monospace text-danger fs-6 me-2" id="dash-active-token">CBT123</strong>
+                <button type="button" class="btn btn-sm btn-warning py-0 px-2 rounded-pill fw-semibold" style="font-size: 0.72rem;" onclick="quickRotateTokenPembebas()" title="Acak & Simpan Token Pembebas Baru">
+                  <i class="bi bi-arrow-repeat"></i> Acak
+                </button>
+              </div>
               <div class="form-check form-switch d-inline-flex align-items-center me-1 mb-0">
                 <input class="form-check-input me-1" type="checkbox" id="switch-auto-refresh" onchange="toggleAutoRefresh(this.checked)" checked>
                 <label class="form-check-label small fw-semibold text-muted" for="switch-auto-refresh">Auto-Refresh (10d)</label>
@@ -746,13 +754,14 @@
                   
                   <div class="mb-3 d-flex align-items-center gap-2">
                     <div class="flex-grow-1">
-                      <label for="settings-exam-token" class="form-label fw-semibold mb-0">Token Ujian Aktif</label>
+                      <label for="settings-exam-token" class="form-label fw-semibold mb-0">Token Ujian &amp; Token Pembebas (3x Pelanggaran)</label>
                       <div class="input-group mt-2">
                         <input type="text" class="form-control fw-bold fs-5 text-center text-primary" id="settings-exam-token" readonly>
                         <button type="button" class="btn btn-outline-secondary" onclick="generateNewToken()" title="Buat Token Baru">
                           <i class="bi bi-arrow-repeat"></i> Acak
                         </button>
                       </div>
+                      <div class="form-text">Digunakan oleh pengawas untuk membuka kunci siswa yang terkena <strong>3x pelanggaran</strong> (serta memulai ujian jika wajib token aktif).</div>
                     </div>
                   </div>
 
@@ -1237,13 +1246,13 @@
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   
   <!-- CBT Modules -->
-  <script src="js/config.js?v=21"></script>
-  <script src="js/supabase-config.js?v=21"></script>
-  <script src="js/db-adapter.js?v=21"></script>
-  <script src="js/auth.js?v=21"></script>
-  <script src="js/excel-helpers.js?v=21"></script>
-  <script src="js/templates.js?v=21"></script>
-  <script src="js/admin.js?v=21"></script>
+  <script src="js/config.js?v=23"></script>
+  <script src="js/supabase-config.js?v=23"></script>
+  <script src="js/db-adapter.js?v=23"></script>
+  <script src="js/auth.js?v=23"></script>
+  <script src="js/excel-helpers.js?v=23"></script>
+  <script src="js/templates.js?v=23"></script>
+  <script src="js/admin.js?v=23"></script>
   <script>
     // Dark mode logic
     const themeToggleBtn = document.getElementById('theme-toggle-admin');
