@@ -11,6 +11,11 @@ const DB = {
     return !this.isPhp() && !window.supabaseClient;
   },
 
+  // Check if we are in Unified Multi-Shard Mode
+  isUnifiedSupabaseMode() {
+    return !!(window.isUnifiedSupabaseMode && window.isUnifiedSupabaseMode());
+  },
+
   // Helper: call PHP REST API (mode "php")
   async api(action, params = {}) {
     const url = (window.CBT_CONFIG && window.CBT_CONFIG.apiUrl) || 'api/index.php';
@@ -825,7 +830,8 @@ const DB = {
       return JSON.parse(localStorage.getItem('CBT_LOCAL_PAKET')) || [];
     } else {
       const shards = (window.getSupabaseShards && window.getSupabaseShards()) || [];
-      if (this.isUnifiedSupabaseMode() && shards.length > 1) {
+      const isUnified = window.isUnifiedSupabaseMode && window.isUnifiedSupabaseMode();
+      if (isUnified && shards.length > 1) {
         const results = await Promise.allSettled(shards.map(async (shard) => {
           if (!shard.client) return [];
           const { data, error } = await shard.client

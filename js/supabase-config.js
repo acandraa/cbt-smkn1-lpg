@@ -163,6 +163,7 @@
 
   // Helper: Cek apakah sedang dalam Mode Gabungan (Unified All Servers)
   window.isUnifiedSupabaseMode = function () {
+    if (!isAdminPage) return false;
     if (!window.CBT_CONFIG || window.CBT_CONFIG.backend !== 'supabase') return false;
     const activeId = sessionStorage.getItem(SHARD_ID_KEY);
     return (activeId === 'all' || !activeId) && (window.CBT_VALID_SHARDS && window.CBT_VALID_SHARDS.length > 1);
@@ -172,8 +173,10 @@
   window.getActiveSupabaseShardId = function () {
     const saved = sessionStorage.getItem(SHARD_ID_KEY);
     if (saved) return saved;
-    // Default di admin: jika multi-shard aktif, jadikan 'all' sebagai default
-    return (window.CBT_VALID_SHARDS && window.CBT_VALID_SHARDS.length > 1) ? 'all' : (window.CBT_VALID_SHARDS[0] ? String(window.CBT_VALID_SHARDS[0].id) : null);
+    if (isAdminPage && window.CBT_VALID_SHARDS && window.CBT_VALID_SHARDS.length > 1) {
+      return 'all';
+    }
+    return (window.CBT_VALID_SHARDS && window.CBT_VALID_SHARDS[0]) ? String(window.CBT_VALID_SHARDS[0].id) : null;
   };
 
   // Helper: Ganti / Aktifkan Shard tertentu ('all' untuk semua server)

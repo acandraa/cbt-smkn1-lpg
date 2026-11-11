@@ -256,6 +256,7 @@ async function loadExamSetupAndVerify() {
 
   } catch (err) {
     console.error("Gagal verifikasi pendaftaran:", err);
+    document.getElementById('view-dashboard').classList.remove('d-none');
   }
 }
 

@@ -186,7 +186,7 @@ const Auth = {
 
   // Check if session is valid and redirect accordingly
   async checkSession(requiredRole) {
-    const loginPage = requiredRole === 'admin' ? 'login-admin.html' : 'login.html';
+    const loginPage = requiredRole === 'admin' ? 'login-admin.html' : 'index.html';
 
     // Pulihkan shard aktif jika tersimpan di sessionStorage
     const savedShardId = window.getActiveSupabaseShardId && window.getActiveSupabaseShardId();
@@ -202,6 +202,22 @@ const Auth = {
         const res = await window.supabaseClient.auth.getSession();
         session = res && res.data ? res.data.session : null;
       } catch (e) {}
+    }
+
+    // Untuk peserta: jika di shard aktif belum ada session, cari di shard lainnya
+    if (requiredRole === 'peserta' && !session && shards.length > 1) {
+      for (const s of shards) {
+        if (s.client && s.client.auth) {
+          try {
+            const { data } = await s.client.auth.getSession();
+            if (data && data.session) {
+              session = data.session;
+              if (window.setActiveSupabaseShard) window.setActiveSupabaseShard(s.id);
+              break;
+            }
+          } catch (e) {}
+        }
+      }
     }
 
     // Untuk admin pada mode multi-shard: pastikan seluruh server memiliki sesi login aktif
