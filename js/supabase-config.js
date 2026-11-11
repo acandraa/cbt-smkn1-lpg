@@ -1,6 +1,7 @@
 // Supabase client initialization wrapper
 // + Penentuan mode backend (supabase / php / local)
 // + Dukungan Multi-Shard (hingga 5 akun / project Supabase untuk 700+ peserta)
+// + Mode "Unified Dashboard" (Semua Server Gabungan dalam 1 Tampilan Admin)
 
 (function () {
   // -------------------------------------------------------------
@@ -39,7 +40,7 @@
     let ok = false;
     try {
       const xhr = new XMLHttpRequest();
-      xhr.open('POST', apiUrl, false); // synchronous: harus selesai sebelum script lain berjalan
+      xhr.open('POST', apiUrl, false);
       xhr.setRequestHeader('Content-Type', 'application/json');
       xhr.send(JSON.stringify({ action: 'ping' }));
       if (xhr.status === 200) {
@@ -145,20 +146,37 @@
 
   window.CBT_VALID_SHARDS = validShards;
 
-  // Helper: Ambil semua shard yang aktif
+  // Helper: Ambil semua shard yang valid
   window.getSupabaseShards = function () {
     return window.CBT_VALID_SHARDS || [];
   };
 
-  // Helper: Dapatkan ID Shard aktif
+  // Helper: Cek apakah sedang dalam Mode Gabungan (Unified All Servers)
+  window.isUnifiedSupabaseMode = function () {
+    if (!window.CBT_CONFIG || window.CBT_CONFIG.backend !== 'supabase') return false;
+    const activeId = sessionStorage.getItem('CBT_ACTIVE_SHARD_ID');
+    return (activeId === 'all' || !activeId) && (window.CBT_VALID_SHARDS && window.CBT_VALID_SHARDS.length > 1);
+  };
+
+  // Helper: Dapatkan ID Shard aktif ('all' atau ID angka)
   window.getActiveSupabaseShardId = function () {
     const saved = sessionStorage.getItem('CBT_ACTIVE_SHARD_ID');
     if (saved) return saved;
-    return (window.CBT_VALID_SHARDS && window.CBT_VALID_SHARDS.length > 0) ? String(window.CBT_VALID_SHARDS[0].id) : null;
+    // Default di admin: jika multi-shard aktif, jadikan 'all' sebagai default
+    return (window.CBT_VALID_SHARDS && window.CBT_VALID_SHARDS.length > 1) ? 'all' : (window.CBT_VALID_SHARDS[0] ? String(window.CBT_VALID_SHARDS[0].id) : null);
   };
 
-  // Helper: Ganti / Aktifkan Shard tertentu
+  // Helper: Ganti / Aktifkan Shard tertentu ('all' untuk semua server)
   window.setActiveSupabaseShard = function (shardId) {
+    if (shardId === 'all' || !shardId) {
+      sessionStorage.setItem('CBT_ACTIVE_SHARD_ID', 'all');
+      sessionStorage.setItem('CBT_ACTIVE_SHARD_NAME', 'Semua Server (Gabungan)');
+      if (window.CBT_VALID_SHARDS && window.CBT_VALID_SHARDS.length > 0) {
+        window.supabaseClient = window.CBT_VALID_SHARDS[0].client;
+      }
+      return { id: 'all', name: 'Semua Server (Gabungan)', client: window.supabaseClient };
+    }
+
     const target = (window.CBT_VALID_SHARDS || []).find(s => String(s.id) === String(shardId));
     if (target && target.client) {
       window.supabaseClient = target.client;
@@ -174,26 +192,67 @@
     return null;
   };
 
+  // Helper: Penentuan otomatis Shard untuk Siswa berdasarkan Jurusan / Sesi
+  window.getShardForPeserta = function (jurusan, sesi) {
+    const shards = window.getSupabaseShards();
+    if (shards.length <= 1) return shards[0] || null;
+
+    const j = (jurusan || '').toUpperCase();
+    const s = (sesi || '').toUpperCase();
+
+    // 1. Cocokkan nama jurusan dengan nama server
+    for (const shard of shards) {
+      const sName = (shard.name || '').toUpperCase();
+      if (j) {
+        if (j.includes('TKJ') && sName.includes('TKJ')) return shard;
+        if (j.includes('ATP') && sName.includes('ATP')) return shard;
+        if (j.includes('TKRO') && sName.includes('TKRO')) return shard;
+        if (j.includes('TBSM') && sName.includes('TBSM')) return shard;
+        if ((j.includes('AK') || j.includes('AKUN')) && (sName.includes('AK') || sName.includes('AKUN'))) return shard;
+        if (j.includes('MM') && sName.includes('MM')) return shard;
+        if (j.includes('RPL') && sName.includes('RPL')) return shard;
+      }
+    }
+
+    // 2. Cocokkan Sesi jika jurusan tidak spesifik (misal: "Sesi 1" -> Shard 1)
+    for (const shard of shards) {
+      const sName = (shard.name || '').toUpperCase();
+      if (s && sName.includes(s)) return shard;
+    }
+
+    // 3. Fallback: jika admin sedang memilih 1 server tertentu (bukan 'all'), gunakan server itu
+    const activeId = sessionStorage.getItem('CBT_ACTIVE_SHARD_ID');
+    if (activeId && activeId !== 'all') {
+      const target = shards.find(x => String(x.id) === String(activeId));
+      if (target) return target;
+    }
+
+    return shards[0];
+  };
+
   if (validShards.length > 0) {
-    // Tentukan shard awal (berdasarkan sessionStorage atau default shard 0)
     const initialShardId = window.getActiveSupabaseShardId();
-    let activeShard = validShards.find(s => String(s.id) === String(initialShardId)) || validShards[0];
-    
-    window.supabaseClient = activeShard.client;
-    sessionStorage.setItem('CBT_ACTIVE_SHARD_ID', String(activeShard.id));
-    sessionStorage.setItem('CBT_ACTIVE_SHARD_NAME', activeShard.name);
+    if (initialShardId === 'all') {
+      window.supabaseClient = validShards[0].client;
+      sessionStorage.setItem('CBT_ACTIVE_SHARD_ID', 'all');
+      sessionStorage.setItem('CBT_ACTIVE_SHARD_NAME', 'Semua Server (Gabungan)');
+    } else {
+      let activeShard = validShards.find(s => String(s.id) === String(initialShardId)) || validShards[0];
+      window.supabaseClient = activeShard.client;
+      sessionStorage.setItem('CBT_ACTIVE_SHARD_ID', String(activeShard.id));
+      sessionStorage.setItem('CBT_ACTIVE_SHARD_NAME', activeShard.name);
+    }
 
     window.CBT_CONFIG = {
       backend: 'supabase',
-      url: activeShard.url,
-      key: activeShard.key,
+      url: validShards[0].url,
+      key: validShards[0].key,
       isConfigured: true,
       isMultiShard: validShards.length > 1,
-      shardCount: validShards.length,
-      activeShard: activeShard
+      shardCount: validShards.length
     };
 
-    console.info(`[CBT Supabase] Aktif: ${activeShard.name} (${validShards.length} server terkonfigurasi)`);
+    console.info(`[CBT Supabase] Aktif: Mode Multi-Shard (${validShards.length} server terdaftar).`);
   } else {
     window.CBT_CONFIG = { backend: 'local', url: '', key: '', isConfigured: false, isMultiShard: false };
     window.supabaseClient = null;

@@ -21,7 +21,7 @@ CREATE TABLE public.jurusan (
   created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
 
-INSERT INTO public.jurusan (nama_jurusan) VALUES ('TKJ'), ('RPL'), ('Multimedia')
+INSERT INTO public.jurusan (nama_jurusan) VALUES ('TKJ'), ('AKL'), ('TBSM'), ('TKRO'), ('ATP')
 ON CONFLICT (nama_jurusan) DO NOTHING;
 
 CREATE TABLE public.kelas (
@@ -30,7 +30,7 @@ CREATE TABLE public.kelas (
   created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
 
-INSERT INTO public.kelas (nama_kelas) VALUES ('X TKJ 1'), ('X TKJ 2'), ('X RPL 1'), ('X RPL 2'), ('XI MM 1')
+INSERT INTO public.kelas (nama_kelas) VALUES ('X TKJ 1'), ('X TKJ 2'), ('X AKL 1'), ('X AKL 2'), ('X TBSM 1'), ('X TBSM 2'), ('X TKRO 1'), ('X TKRO 2'), ('X ATP 1'), ('X ATP 2')
 ON CONFLICT (nama_kelas) DO NOTHING;
 
 -- 1. Table for Admin Users

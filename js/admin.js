@@ -105,12 +105,14 @@ function initAdminShardSelector() {
   const shards = (window.getSupabaseShards && window.getSupabaseShards()) || [];
   if (shards.length > 1) {
     wrapper.style.display = 'block';
-    const activeId = window.getActiveSupabaseShardId();
-    selector.innerHTML = shards.map(s => `
+    const activeId = window.getActiveSupabaseShardId() || 'all';
+    let opts = `<option value="all" ${activeId === 'all' ? 'selected' : ''}>🌐 Semua Server (Gabungan - 5 Server)</option>`;
+    opts += shards.map(s => `
       <option value="${s.id}" ${String(s.id) === String(activeId) ? 'selected' : ''}>
-        ${s.name}
+        ⚡ ${s.name}
       </option>
     `).join('');
+    selector.innerHTML = opts;
   } else {
     wrapper.style.display = 'none';
   }
@@ -126,7 +128,7 @@ window.handleAdminShardSwitch = async function(shardId) {
           toast: true,
           position: 'top-end',
           icon: 'info',
-          title: `Server Aktif: ${target.name}`,
+          title: `Tampilan: ${target.name}`,
           showConfirmButton: false,
           timer: 1500
         });
@@ -1463,7 +1465,7 @@ function renderPesertaTable(list) {
       <tr>
         <td class="font-monospace text-primary"><strong>${escapeHtml(p.username)}</strong></td>
         <td class="cell-wrap fw-semibold">${escapeHtml(p.nama_lengkap)}</td>
-        <td class="cell-wrap">${escapeHtml(p.jurusan || '-')}</td>
+        <td class="cell-wrap">${escapeHtml(p.jurusan || '-')}${p._shardName ? `<br><span class="badge bg-secondary-subtle text-secondary border mt-1" style="font-size: 0.65rem;"><i class="bi bi-hdd-network me-1"></i>${escapeHtml(p._shardName.split(' ')[0] + ' ' + (p._shardName.split(' ')[1] || ''))}</span>` : ''}</td>
         <td><span class="badge bg-light text-dark border">${escapeHtml(p.kelas || '-')}</span></td>
         <td>${escapeHtml(p.ruang || '-')}</td>
         <td>${escapeHtml(p.sesi || '-')}</td>
@@ -1603,7 +1605,8 @@ async function handlePesertaCrudSubmit(e) {
         ruang: ruang,
         sesi: sesi
       };
-      await DB.editPesertaProfile(id, payload, pass);
+      const pTarget = allPeserta.find(item => item.id === id);
+      await DB.editPesertaProfile(id, payload, pass, pTarget ? pTarget._shardId : null);
       Swal.fire('Berhasil', 'Data Peserta berhasil diperbarui.', 'success');
     } else {
       // Add mode
@@ -1641,7 +1644,8 @@ async function deletePeserta(id, name) {
     });
 
     try {
-      await DB.deletePeserta(id);
+      const pTarget = allPeserta.find(item => item.id === id);
+      await DB.deletePeserta(id, pTarget ? pTarget._shardId : null);
       Swal.fire('Dihapus!', 'Data Peserta telah berhasil dihapus.', 'success');
       await loadPeserta();
       await loadHasil();
@@ -1706,7 +1710,8 @@ async function togglePesertaLock(id, isLocked) {
 
   if (result.isConfirmed) {
     try {
-      await DB.toggleLockPeserta(id, isLocked);
+      const pTarget = allPeserta.find(item => item.id === id);
+      await DB.toggleLockPeserta(id, isLocked, pTarget ? pTarget._shardId : null);
       Swal.fire('Berhasil!', `Akses ujian berhasil di${isLocked ? 'kunci' : 'buka'}.`, 'success');
       await loadPeserta();
     } catch (err) {
@@ -1730,7 +1735,8 @@ async function resetPesertaSesi(id, name) {
   if (result.isConfirmed) {
     Swal.fire({ title: 'Mereset...', didOpen: () => { Swal.showLoading(); } });
     try {
-      await DB.resetPesertaSesi(id);
+      const pTarget = allPeserta.find(item => item.id === id);
+      await DB.resetPesertaSesi(id, pTarget ? pTarget._shardId : null);
       Swal.fire('Berhasil', 'Sesi ujian berhasil direset.', 'success');
       await loadPeserta();
       await loadHasil();
@@ -3199,7 +3205,8 @@ async function resetUjianPeserta(hasilId, pesertaId, name) {
     });
 
     try {
-      await DB.resetHasilUjian(hasilId, pesertaId);
+      const hTarget = allHasil.find(item => item.id === hasilId);
+      await DB.resetHasilUjian(hasilId, pesertaId, hTarget ? hTarget._shardId : null);
       Swal.fire('Ujian Direset!', `Status ujian "${name}" berhasil direset.`, 'success');
       await refreshAllData();
     } catch (err) {

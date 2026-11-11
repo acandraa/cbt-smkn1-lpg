@@ -41,6 +41,15 @@ const DB = {
     return json ? json.data : null;
   },
 
+  // Helper: Ambil client Supabase berdasarkan Shard ID (atau client aktif)
+  getClientForShard(shardId) {
+    if (shardId && window.getSupabaseShards) {
+      const s = window.getSupabaseShards().find(x => String(x.id) === String(shardId));
+      if (s && s.client) return s.client;
+    }
+    return window.supabaseClient;
+  },
+
   // Helper: Generate Mock UUIDs
   uuidv4() {
     return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function(c) {
@@ -394,18 +403,25 @@ const DB = {
       localStorage.setItem('CBT_LOCAL_PENGATURAN', JSON.stringify(s));
       return s;
     } else {
+      const payload = {
+        id: 1,
+        durasi_menit: durasi,
+        passing_grade: passing,
+        tampilkan_nilai: tampilkanNilai,
+        token_ujian: tokenUjian || 'CBT123',
+        token_aktif: Boolean(tokenAktif),
+        acak_soal: acakSoal !== undefined ? Boolean(acakSoal) : true,
+        updated_at: new Date().toISOString()
+      };
+      const shards = (window.getSupabaseShards && window.getSupabaseShards()) || [];
+      if (shards.length > 1) {
+        // Broadcast ke seluruh server Supabase agar durasi & token seragam
+        await Promise.allSettled(shards.map(s => s.client && s.client.from('pengaturan_ujian').upsert(payload)));
+        return payload;
+      }
       const { data, error } = await window.supabaseClient
         .from('pengaturan_ujian')
-        .upsert({
-          id: 1,
-          durasi_menit: durasi,
-          passing_grade: passing,
-          tampilkan_nilai: tampilkanNilai,
-          token_ujian: tokenUjian || 'CBT123',
-          token_aktif: Boolean(tokenAktif),
-          acak_soal: acakSoal !== undefined ? Boolean(acakSoal) : true,
-          updated_at: new Date().toISOString()
-        });
+        .upsert(payload);
       if (error) throw error;
       return data;
     }
@@ -419,12 +435,51 @@ const DB = {
       this.initLocalData();
       return JSON.parse(localStorage.getItem('CBT_LOCAL_PESERTA'));
     } else {
+      const shards = (window.getSupabaseShards && window.getSupabaseShards()) || [];
+      const isUnified = window.isUnifiedSupabaseMode && window.isUnifiedSupabaseMode();
+
+      if (isUnified && shards.length > 1) {
+        // Tarik data seluruh siswa dari ke-5 server secara paralel
+        const results = await Promise.allSettled(shards.map(async (shard) => {
+          if (!shard.client) return [];
+          const { data, error } = await shard.client
+            .from('peserta')
+            .select('*')
+            .order('created_at', { ascending: false });
+          if (error) {
+            console.warn(`Gagal mengambil data peserta dari ${shard.name}:`, error);
+            return [];
+          }
+          return (data || []).map(p => ({
+            ...p,
+            _shardId: shard.id,
+            _shardName: shard.name
+          }));
+        }));
+
+        let merged = [];
+        results.forEach(res => {
+          if (res.status === 'fulfilled' && Array.isArray(res.value)) {
+            merged = merged.concat(res.value);
+          }
+        });
+        return merged;
+      }
+
+      // Single shard / Server spesifik terpilih
       const { data, error } = await window.supabaseClient
         .from('peserta')
         .select('*')
         .order('created_at', { ascending: false });
       if (error) throw error;
-      return data;
+      const activeId = window.getActiveSupabaseShardId();
+      const activeShard = shards.find(s => String(s.id) === String(activeId));
+      const activeName = activeShard ? activeShard.name : '';
+      return (data || []).map(p => ({
+        ...p,
+        _shardId: activeId,
+        _shardName: activeName
+      }));
     }
   },
 
@@ -463,7 +518,10 @@ const DB = {
       };
       return await this.savePesertaLocal(null, payload);
     } else {
-      const { data, error } = await window.supabaseClient.rpc('create_peserta_user', {
+      // Auto-Routing: Tentukan server tujuan berdasarkan jurusan/sesi
+      const targetShard = (window.getShardForPeserta && window.getShardForPeserta(jurusan, sesi)) || null;
+      const client = (targetShard && targetShard.client) || window.supabaseClient;
+      const { data, error } = await client.rpc('create_peserta_user', {
         p_username: username,
         p_password: pass,
         p_nama_lengkap: nama,
@@ -477,21 +535,22 @@ const DB = {
     }
   },
 
-  async editPesertaProfile(id, payload, pass) {
+  async editPesertaProfile(id, payload, pass, shardId = null) {
     if (this.isLocal()) {
       if (pass) {
         payload.password_hash = await this.sha256(pass);
       }
       return await this.savePesertaLocal(id, payload);
     } else {
-      const { error: profileErr } = await window.supabaseClient
+      const client = this.getClientForShard(shardId);
+      const { error: profileErr } = await client
         .from('peserta')
         .update(payload)
         .eq('id', id);
       if (profileErr) throw profileErr;
 
       if (pass) {
-        const { error: passErr } = await window.supabaseClient.rpc('update_peserta_password', {
+        const { error: passErr } = await client.rpc('update_peserta_password', {
           p_peserta_id: id,
           p_password: pass
         });
@@ -500,7 +559,7 @@ const DB = {
     }
   },
 
-  async deletePeserta(id) {
+  async deletePeserta(id, shardId = null) {
     if (this.isLocal()) {
       let list = JSON.parse(localStorage.getItem('CBT_LOCAL_PESERTA')) || [];
       list = list.filter(p => p.id !== id);
@@ -515,10 +574,19 @@ const DB = {
       jawaban = jawaban.filter(j => j.peserta_id !== id);
       localStorage.setItem('CBT_LOCAL_JAWABAN', JSON.stringify(jawaban));
     } else {
-      const { error } = await window.supabaseClient.rpc('delete_peserta_user', {
-        p_peserta_id: id
-      });
-      if (error) throw error;
+      if (shardId) {
+        const client = this.getClientForShard(shardId);
+        const { error } = await client.rpc('delete_peserta_user', { p_peserta_id: id });
+        if (error) throw error;
+      } else {
+        const shards = (window.getSupabaseShards && window.getSupabaseShards()) || [];
+        if (shards.length > 1) {
+          await Promise.allSettled(shards.map(s => s.client && s.client.rpc('delete_peserta_user', { p_peserta_id: id })));
+        } else {
+          const { error } = await window.supabaseClient.rpc('delete_peserta_user', { p_peserta_id: id });
+          if (error) throw error;
+        }
+      }
     }
   },
 
@@ -549,14 +617,13 @@ const DB = {
         localStorage.setItem('CBT_LOCAL_PESERTA', JSON.stringify(list));
       }
     } else {
-      // Need to fetch first then update, or use an RPC. Since we don't have an RPC, fetch and update:
       const { data } = await window.supabaseClient.from('peserta').select('pelanggaran').eq('id', pesertaId).single();
       const current = data ? (data.pelanggaran || 0) : 0;
       await window.supabaseClient.from('peserta').update({ pelanggaran: current + 1 }).eq('id', pesertaId);
     }
   },
 
-  async toggleLockPeserta(pesertaId, isLocked) {
+  async toggleLockPeserta(pesertaId, isLocked, shardId = null) {
     if (this.isLocal()) {
       const list = JSON.parse(localStorage.getItem('CBT_LOCAL_PESERTA')) || [];
       const idx = list.findIndex(p => p.id === pesertaId);
@@ -565,11 +632,19 @@ const DB = {
         localStorage.setItem('CBT_LOCAL_PESERTA', JSON.stringify(list));
       }
     } else {
-      const { error } = await window.supabaseClient
-        .from('peserta')
-        .update({ is_locked: isLocked })
-        .eq('id', pesertaId);
-      if (error) throw error;
+      if (shardId) {
+        const client = this.getClientForShard(shardId);
+        const { error } = await client.from('peserta').update({ is_locked: isLocked }).eq('id', pesertaId);
+        if (error) throw error;
+      } else {
+        const shards = (window.getSupabaseShards && window.getSupabaseShards()) || [];
+        if (shards.length > 1) {
+          await Promise.allSettled(shards.map(s => s.client && s.client.from('peserta').update({ is_locked: isLocked }).eq('id', pesertaId)));
+        } else {
+          const { error } = await window.supabaseClient.from('peserta').update({ is_locked: isLocked }).eq('id', pesertaId);
+          if (error) throw error;
+        }
+      }
     }
   },
 
@@ -604,6 +679,19 @@ const DB = {
       localStorage.setItem('CBT_LOCAL_PAKET', JSON.stringify(list));
       return payload;
     } else {
+      const shards = (window.getSupabaseShards && window.getSupabaseShards()) || [];
+      if (shards.length > 1) {
+        // Broadcast ke semua server Supabase agar paket soal selalu seragam
+        await Promise.allSettled(shards.map(async (shard) => {
+          if (!shard.client) return;
+          if (id) {
+            await shard.client.from('paket_soal').update(payload).eq('id', id);
+          } else {
+            await shard.client.from('paket_soal').insert(payload);
+          }
+        }));
+        return payload;
+      }
       if (id) {
         const { error } = await window.supabaseClient.from('paket_soal').update(payload).eq('id', id);
         if (error) throw error;
@@ -625,6 +713,11 @@ const DB = {
       soal = soal.filter(s => s.paket_soal_id !== id);
       localStorage.setItem('CBT_LOCAL_SOAL', JSON.stringify(soal));
     } else {
+      const shards = (window.getSupabaseShards && window.getSupabaseShards()) || [];
+      if (shards.length > 1) {
+        await Promise.allSettled(shards.map(s => s.client && s.client.from('paket_soal').delete().eq('id', id)));
+        return;
+      }
       const { error } = await window.supabaseClient.from('paket_soal').delete().eq('id', id);
       if (error) throw error;
     }
@@ -662,6 +755,19 @@ const DB = {
       localStorage.setItem('CBT_LOCAL_SOAL', JSON.stringify(list));
       return payload;
     } else {
+      const shards = (window.getSupabaseShards && window.getSupabaseShards()) || [];
+      if (shards.length > 1) {
+        // Broadcast ke seluruh server Supabase agar butir soal seragam
+        await Promise.allSettled(shards.map(async (shard) => {
+          if (!shard.client) return;
+          if (id) {
+            await shard.client.from('soal').update(payload).eq('id', id);
+          } else {
+            await shard.client.from('soal').insert(payload);
+          }
+        }));
+        return payload;
+      }
       if (id) {
         const { error } = await window.supabaseClient.from('soal').update(payload).eq('id', id);
         if (error) throw error;
@@ -678,6 +784,11 @@ const DB = {
       list = list.filter(s => s.id !== id);
       localStorage.setItem('CBT_LOCAL_SOAL', JSON.stringify(list));
     } else {
+      const shards = (window.getSupabaseShards && window.getSupabaseShards()) || [];
+      if (shards.length > 1) {
+        await Promise.allSettled(shards.map(s => s.client && s.client.from('soal').delete().eq('id', id)));
+        return;
+      }
       const { error } = await window.supabaseClient.from('soal').delete().eq('id', id);
       if (error) throw error;
     }
@@ -693,6 +804,12 @@ const DB = {
       });
       localStorage.setItem('CBT_LOCAL_SOAL', JSON.stringify(list));
     } else {
+      const shards = (window.getSupabaseShards && window.getSupabaseShards()) || [];
+      if (shards.length > 1) {
+        // Broadcast bulk insert ke seluruh server Supabase
+        await Promise.allSettled(shards.map(s => s.client && s.client.from('soal').insert(soalList)));
+        return;
+      }
       const { error } = await window.supabaseClient.from('soal').insert(soalList);
       if (error) throw error;
     }
@@ -722,10 +839,58 @@ const DB = {
         };
       });
     } else {
+      const shards = (window.getSupabaseShards && window.getSupabaseShards()) || [];
+      const isUnified = window.isUnifiedSupabaseMode && window.isUnifiedSupabaseMode();
+
+      if (isUnified && shards.length > 1) {
+        // Tarik data seluruh hasil ujian dari ke-5 server secara paralel
+        const results = await Promise.allSettled(shards.map(async (shard) => {
+          if (!shard.client) return [];
+          const { data, error } = await shard.client
+            .from('hasil_ujian')
+            .select(`
+              id,
+              paket_soal_id,
+              jumlah_benar,
+              jumlah_salah,
+              nilai,
+              status_kelulusan,
+              waktu_selesai,
+              peserta:peserta_id (
+                id,
+                username,
+                nama_lengkap,
+                kelas,
+                jurusan
+              )
+            `)
+            .order('nilai', { ascending: false });
+          if (error) {
+            console.warn(`Gagal mengambil hasil ujian dari ${shard.name}:`, error);
+            return [];
+          }
+          return (data || []).map(h => ({
+            ...h,
+            _shardId: shard.id,
+            _shardName: shard.name
+          }));
+        }));
+
+        let merged = [];
+        results.forEach(res => {
+          if (res.status === 'fulfilled' && Array.isArray(res.value)) {
+            merged = merged.concat(res.value);
+          }
+        });
+        merged.sort((a, b) => (parseFloat(b.nilai) || 0) - (parseFloat(a.nilai) || 0));
+        return merged;
+      }
+
       const { data, error } = await window.supabaseClient
         .from('hasil_ujian')
         .select(`
           id,
+          paket_soal_id,
           jumlah_benar,
           jumlah_salah,
           nilai,
@@ -741,7 +906,14 @@ const DB = {
         `)
         .order('nilai', { ascending: false });
       if (error) throw error;
-      return data;
+      const activeId = window.getActiveSupabaseShardId();
+      const activeShard = shards.find(s => String(s.id) === String(activeId));
+      const activeName = activeShard ? activeShard.name : '';
+      return (data || []).map(h => ({
+        ...h,
+        _shardId: activeId,
+        _shardName: activeName
+      }));
     }
   },
 
@@ -804,7 +976,7 @@ const DB = {
     }
   },
 
-  async resetHasilUjian(hasilId, pesertaId) {
+  async resetHasilUjian(hasilId, pesertaId, shardId = null) {
     if (this.isLocal()) {
       // 1. Wipe hasil
       let list = JSON.parse(localStorage.getItem('CBT_LOCAL_HASIL')) || [];
@@ -819,30 +991,21 @@ const DB = {
       // 3. Set status
       await this.updateStatusUjian(pesertaId, 'Belum Ujian');
     } else {
-      // 1. Wipe answers
-      const { error: ansErr } = await window.supabaseClient
-        .from('jawaban_peserta')
-        .delete()
-        .eq('peserta_id', pesertaId);
-      if (ansErr) throw ansErr;
-
-      // 2. Wipe hasil
-      const { error: hasilErr } = await window.supabaseClient
-        .from('hasil_ujian')
-        .delete()
-        .eq('id', hasilId);
-      if (hasilErr) throw hasilErr;
-
-      // 3. Set status
-      const { error: profileErr } = await window.supabaseClient
-        .from('peserta')
-        .update({ status_ujian: 'Belum Ujian' })
-        .eq('id', pesertaId);
-      if (profileErr) throw profileErr;
+      const shards = (window.getSupabaseShards && window.getSupabaseShards()) || [];
+      const targetShards = shardId ? shards.filter(s => String(s.id) === String(shardId)) : (shards.length > 0 ? shards : [{ client: window.supabaseClient }]);
+      for (const shard of targetShards) {
+        const client = shard.client || window.supabaseClient;
+        if (!client) continue;
+        if (hasilId) await client.from('hasil_ujian').delete().eq('id', hasilId);
+        if (pesertaId) {
+          await client.from('jawaban_peserta').delete().eq('peserta_id', pesertaId);
+          await client.from('peserta').update({ status_ujian: 'Belum Ujian', pelanggaran: 0 }).eq('id', pesertaId);
+        }
+      }
     }
   },
 
-  async resetPesertaSesi(pesertaId) {
+  async resetPesertaSesi(pesertaId, shardId = null) {
     if (this.isLocal()) {
       let answers = JSON.parse(localStorage.getItem('CBT_LOCAL_JAWABAN')) || [];
       answers = answers.filter(a => a.peserta_id !== pesertaId);
@@ -861,9 +1024,15 @@ const DB = {
         localStorage.setItem('CBT_LOCAL_PESERTA', JSON.stringify(list));
       }
     } else {
-      await window.supabaseClient.from('jawaban_peserta').delete().eq('peserta_id', pesertaId);
-      await window.supabaseClient.from('hasil_ujian').delete().eq('peserta_id', pesertaId);
-      await window.supabaseClient.from('peserta').update({ status_ujian: 'Belum Ujian', pelanggaran: 0, is_locked: false }).eq('id', pesertaId);
+      const shards = (window.getSupabaseShards && window.getSupabaseShards()) || [];
+      const targetShards = shardId ? shards.filter(s => String(s.id) === String(shardId)) : (shards.length > 0 ? shards : [{ client: window.supabaseClient }]);
+      for (const shard of targetShards) {
+        const client = shard.client || window.supabaseClient;
+        if (!client) continue;
+        await client.from('jawaban_peserta').delete().eq('peserta_id', pesertaId);
+        await client.from('hasil_ujian').delete().eq('peserta_id', pesertaId);
+        await client.from('peserta').update({ status_ujian: 'Belum Ujian', pelanggaran: 0, is_locked: false }).eq('id', pesertaId);
+      }
     }
   },
 
