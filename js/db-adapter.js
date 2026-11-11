@@ -824,6 +824,30 @@ const DB = {
       this.initLocalData();
       return JSON.parse(localStorage.getItem('CBT_LOCAL_PAKET')) || [];
     } else {
+      const shards = (window.getSupabaseShards && window.getSupabaseShards()) || [];
+      if (this.isUnifiedSupabaseMode() && shards.length > 1) {
+        const results = await Promise.allSettled(shards.map(async (shard) => {
+          if (!shard.client) return [];
+          const { data, error } = await shard.client
+            .from('paket_soal')
+            .select('*')
+            .order('created_at', { ascending: false });
+          if (error) return [];
+          return data || [];
+        }));
+        const mapById = new Map();
+        results.forEach(res => {
+          if (res.status === 'fulfilled' && Array.isArray(res.value)) {
+            res.value.forEach(item => {
+              const key = item.id || (item.nama_paket || '').toUpperCase().trim();
+              if (key && !mapById.has(key)) {
+                mapById.set(key, item);
+              }
+            });
+          }
+        });
+        return Array.from(mapById.values());
+      }
       const { data, error } = await window.supabaseClient
         .from('paket_soal')
         .select('*')
@@ -1009,12 +1033,15 @@ const DB = {
       this.initLocalData();
       const hasil = JSON.parse(localStorage.getItem('CBT_LOCAL_HASIL')) || [];
       const peserta = JSON.parse(localStorage.getItem('CBT_LOCAL_PESERTA')) || [];
+      const paket = JSON.parse(localStorage.getItem('CBT_LOCAL_PAKET')) || [];
       
       // Mimic Joined Supabase results mapping
       return hasil.map(h => {
         const p = peserta.find(item => item.id === h.peserta_id);
+        const pk = paket.find(item => item.id === h.paket_soal_id);
         return {
           ...h,
+          nama_mapel: pk ? pk.nama_paket : (h.nama_mapel || 'Umum'),
           peserta: p ? {
             id: p.id,
             username: p.username,
@@ -1029,13 +1056,14 @@ const DB = {
       const isUnified = window.isUnifiedSupabaseMode && window.isUnifiedSupabaseMode();
 
       if (isUnified && shards.length > 1) {
-        // Tarik data seluruh hasil ujian dari ke-5 server secara paralel
+        // Tarik data seluruh hasil ujian dari ke-5 server secara paralel beserta nama mapel (paket_soal)
         const results = await Promise.allSettled(shards.map(async (shard) => {
           if (!shard.client) return [];
           const { data, error } = await shard.client
             .from('hasil_ujian')
             .select(`
               id,
+              peserta_id,
               paket_soal_id,
               jumlah_benar,
               jumlah_salah,
@@ -1048,6 +1076,10 @@ const DB = {
                 nama_lengkap,
                 kelas,
                 jurusan
+              ),
+              paket_soal:paket_soal_id (
+                id,
+                nama_paket
               )
             `)
             .order('nilai', { ascending: false });
@@ -1057,6 +1089,7 @@ const DB = {
           }
           return (data || []).map(h => ({
             ...h,
+            nama_mapel: (h.paket_soal && h.paket_soal.nama_paket) ? h.paket_soal.nama_paket : (h.nama_mapel || 'Umum'),
             _shardId: shard.id,
             _shardName: shard.name
           }));
@@ -1076,6 +1109,7 @@ const DB = {
         .from('hasil_ujian')
         .select(`
           id,
+          peserta_id,
           paket_soal_id,
           jumlah_benar,
           jumlah_salah,
@@ -1088,6 +1122,10 @@ const DB = {
             nama_lengkap,
             kelas,
             jurusan
+          ),
+          paket_soal:paket_soal_id (
+            id,
+            nama_paket
           )
         `)
         .order('nilai', { ascending: false });
@@ -1097,24 +1135,28 @@ const DB = {
       const activeName = activeShard ? activeShard.name : '';
       return (data || []).map(h => ({
         ...h,
+        nama_mapel: (h.paket_soal && h.paket_soal.nama_paket) ? h.paket_soal.nama_paket : (h.nama_mapel || 'Umum'),
         _shardId: activeId,
         _shardName: activeName
       }));
     }
   },
 
-  async checkExistingHasil(pesertaId) {
+  async checkExistingHasil(pesertaId, paketSoalId = null) {
     if (this.isLocal()) {
       const list = JSON.parse(localStorage.getItem('CBT_LOCAL_HASIL')) || [];
-      return list.find(h => h.peserta_id === pesertaId) || null;
+      return list.find(h => h.peserta_id === pesertaId && (!paketSoalId || h.paket_soal_id === paketSoalId)) || null;
     } else {
-      const { data, error } = await window.supabaseClient
+      let query = window.supabaseClient
         .from('hasil_ujian')
         .select('*')
-        .eq('peserta_id', pesertaId)
-        .maybeSingle();
+        .eq('peserta_id', pesertaId);
+      if (paketSoalId) {
+        query = query.eq('paket_soal_id', paketSoalId);
+      }
+      const { data, error } = await query.limit(1);
       if (error) throw error;
-      return data;
+      return (data && data.length > 0) ? data[0] : null;
     }
   },
 

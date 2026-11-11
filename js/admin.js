@@ -2466,6 +2466,10 @@ async function loadPaket() {
   try {
     allPaket = await DB.getPaketList();
     renderPaketList(allPaket);
+    populateHasilFilterDropdowns();
+    if (allHasil && allHasil.length > 0) {
+      filterHasilList();
+    }
     
     if (allPaket.length > 0 && !activePaketId) {
       selectPaket(allPaket[0].id);
@@ -2986,61 +2990,68 @@ function exportSoalData() {
 // RESULTS: HASIL & NILAI
 // -------------------------------------------------------------
 
+function populateHasilFilterDropdowns() {
+  const mapelSet = new Set();
+  const jurusanSet = new Set();
+  const kelasSet = new Set();
+
+  // Collect from allPaket
+  (allPaket || []).forEach(pk => {
+    if (pk.nama_paket) mapelSet.add(pk.nama_paket);
+  });
+
+  // Backfill nama_mapel from allPaket if needed and collect from actual results
+  (allHasil || []).forEach(h => {
+    if ((!h.nama_mapel || h.nama_mapel === 'Umum') && h.paket_soal_id && Array.isArray(allPaket)) {
+      const matchedPaket = allPaket.find(pk => pk.id === h.paket_soal_id);
+      if (matchedPaket && matchedPaket.nama_paket) {
+        h.nama_mapel = matchedPaket.nama_paket;
+      }
+    }
+    if (h.nama_mapel) mapelSet.add(h.nama_mapel);
+    const p = h.peserta;
+    if (p) {
+      if (p.jurusan) jurusanSet.add(p.jurusan.toUpperCase());
+      if (p.kelas) kelasSet.add(p.kelas.toUpperCase());
+    }
+  });
+
+  const fMapel = document.getElementById('filter-mapel-hasil');
+  if (fMapel) {
+    const fMapelVal = fMapel.value;
+    fMapel.innerHTML = '<option value="">📚 Semua Mata Pelajaran</option>';
+    Array.from(mapelSet).sort().forEach(m => {
+      fMapel.innerHTML += `<option value="${escapeHtml(m)}">${escapeHtml(m)}</option>`;
+    });
+    fMapel.value = fMapelVal;
+  }
+
+  const fJurusan = document.getElementById('filter-jurusan-hasil');
+  if (fJurusan) {
+    const fJurusanVal = fJurusan.value;
+    fJurusan.innerHTML = '<option value="">Semua Jurusan</option>';
+    Array.from(jurusanSet).sort().forEach(j => {
+      fJurusan.innerHTML += `<option value="${escapeHtml(j)}">${escapeHtml(j)}</option>`;
+    });
+    fJurusan.value = fJurusanVal;
+  }
+
+  const fKelas = document.getElementById('filter-kelas-hasil');
+  if (fKelas) {
+    const fKelasVal = fKelas.value;
+    fKelas.innerHTML = '<option value="">Semua Kelas</option>';
+    Array.from(kelasSet).sort().forEach(k => {
+      fKelas.innerHTML += `<option value="${escapeHtml(k)}">${escapeHtml(k)}</option>`;
+    });
+    fKelas.value = fKelasVal;
+  }
+}
+
 async function loadHasil() {
   try {
     allHasil = await DB.getHasilList();
-    
-    // Populate dropdowns for Mapel, Jurusan and Kelas in Hasil Ujian
-    const mapelSet = new Set();
-    const jurusanSet = new Set();
-    const kelasSet = new Set();
-
-    // Collect from allPaket
-    (allPaket || []).forEach(pk => {
-      if (pk.nama_paket) mapelSet.add(pk.nama_paket);
-    });
-
-    // Collect from actual results
-    allHasil.forEach(h => {
-      if (h.nama_mapel) mapelSet.add(h.nama_mapel);
-      const p = h.peserta;
-      if (p) {
-        if (p.jurusan) jurusanSet.add(p.jurusan.toUpperCase());
-        if (p.kelas) kelasSet.add(p.kelas.toUpperCase());
-      }
-    });
-
-    const fMapel = document.getElementById('filter-mapel-hasil');
-    if (fMapel) {
-      const fMapelVal = fMapel.value;
-      fMapel.innerHTML = '<option value="">📚 Semua Mata Pelajaran</option>';
-      Array.from(mapelSet).sort().forEach(m => {
-        fMapel.innerHTML += `<option value="${escapeHtml(m)}">${escapeHtml(m)}</option>`;
-      });
-      fMapel.value = fMapelVal;
-    }
-    
-    const fJurusan = document.getElementById('filter-jurusan-hasil');
-    if (fJurusan) {
-      const fJurusanVal = fJurusan.value;
-      fJurusan.innerHTML = '<option value="">Semua Jurusan</option>';
-      Array.from(jurusanSet).sort().forEach(j => {
-        fJurusan.innerHTML += `<option value="${escapeHtml(j)}">${escapeHtml(j)}</option>`;
-      });
-      fJurusan.value = fJurusanVal;
-    }
-
-    const fKelas = document.getElementById('filter-kelas-hasil');
-    if (fKelas) {
-      const fKelasVal = fKelas.value;
-      fKelas.innerHTML = '<option value="">Semua Kelas</option>';
-      Array.from(kelasSet).sort().forEach(k => {
-        fKelas.innerHTML += `<option value="${escapeHtml(k)}">${escapeHtml(k)}</option>`;
-      });
-      fKelas.value = fKelasVal;
-    }
-    
-    renderHasilTable(allHasil);
+    populateHasilFilterDropdowns();
+    filterHasilList();
   } catch (err) {
     console.error("Gagal memuat hasil ujian:", err);
   }

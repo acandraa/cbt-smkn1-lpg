@@ -174,6 +174,12 @@ const Auth = {
     sessionStorage.removeItem('CBT_SESSION');
     sessionStorage.removeItem('CBT_ACTIVE_SHARD_ID');
     sessionStorage.removeItem('CBT_ACTIVE_SHARD_NAME');
+    sessionStorage.removeItem('CBT_PESERTA_ACTIVE_SHARD_ID');
+    sessionStorage.removeItem('CBT_PESERTA_ACTIVE_SHARD_NAME');
+    if (/(admin|login-admin)\.html/i.test(window.location.pathname || '')) {
+      sessionStorage.removeItem('CBT_ADMIN_ACTIVE_SHARD_ID');
+      sessionStorage.removeItem('CBT_ADMIN_ACTIVE_SHARD_NAME');
+    }
     localStorage.removeItem('CBT_SESSION_EXPIRE');
     window.location.href = 'index.html';
   },
@@ -183,7 +189,7 @@ const Auth = {
     const loginPage = requiredRole === 'admin' ? 'login-admin.html' : 'login.html';
 
     // Pulihkan shard aktif jika tersimpan di sessionStorage
-    const savedShardId = sessionStorage.getItem('CBT_ACTIVE_SHARD_ID');
+    const savedShardId = window.getActiveSupabaseShardId && window.getActiveSupabaseShardId();
     if (savedShardId && window.setActiveSupabaseShard) {
       window.setActiveSupabaseShard(savedShardId);
     }
