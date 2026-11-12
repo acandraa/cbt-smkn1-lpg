@@ -2697,92 +2697,92 @@ async function openCetakKartuModal() {
     }
   }
 
-  const lingkup = document.getElementById('cetak-filter-lingkup');
-  if (lingkup) lingkup.value = 'semua';
-  onCetakLingkupChange();
+  populateCetakJurusanAndKelasDropdowns();
+  updateCetakPreviewCount();
   if (cetakKartuModalInstance) cetakKartuModalInstance.show();
 }
 
-function onCetakLingkupChange() {
-  const lingkup = document.getElementById('cetak-filter-lingkup')?.value || 'semua';
-  const selSpesifik = document.getElementById('cetak-filter-spesifik');
-  const labelSpesifik = document.getElementById('label-cetak-spesifik');
-  if (!selSpesifik || !labelSpesifik) return;
+function populateCetakJurusanAndKelasDropdowns() {
+  const selJur = document.getElementById('cetak-filter-jurusan');
+  const selKls = document.getElementById('cetak-filter-kelas');
+  if (!selJur || !selKls) return;
 
-  if (lingkup === 'semua') {
-    selSpesifik.disabled = true;
-    labelSpesifik.innerText = 'Semua Siswa';
-    selSpesifik.innerHTML = '<option value="">- Seluruh Peserta -</option>';
-  } else if (lingkup === 'kelas') {
-    selSpesifik.disabled = false;
-    labelSpesifik.innerText = 'Pilih Kelas';
-    const classes = Array.from(new Set((allPeserta || []).map(p => (p.kelas || '').toUpperCase()).filter(Boolean))).sort();
-    selSpesifik.innerHTML = '<option value="">Semua Kelas</option>' + classes.map(k => `<option value="${escapeHtml(k)}">${escapeHtml(k)}</option>`).join('');
-  } else if (lingkup === 'jurusan') {
-    selSpesifik.disabled = false;
-    labelSpesifik.innerText = 'Pilih Jurusan';
-    const jurusans = Array.from(new Set((allPeserta || []).map(p => (p.jurusan || '').toUpperCase()).filter(Boolean))).sort();
-    selSpesifik.innerHTML = '<option value="">Semua Jurusan</option>' + jurusans.map(j => `<option value="${escapeHtml(j)}">${escapeHtml(j)}</option>`).join('');
-  } else if (lingkup === 'sesi') {
-    selSpesifik.disabled = false;
-    labelSpesifik.innerText = 'Pilih Sesi';
-    const sesis = Array.from(new Set((allPeserta || []).map(p => p.sesi).filter(Boolean))).sort();
-    if (sesis.length === 0) {
-      selSpesifik.innerHTML = '<option value="">Semua Sesi</option><option value="Sesi 1">Sesi 1</option><option value="Sesi 2">Sesi 2</option><option value="Sesi 3">Sesi 3</option>';
-    } else {
-      selSpesifik.innerHTML = '<option value="">Semua Sesi</option>' + sesis.map(s => `<option value="${escapeHtml(s)}">${escapeHtml(s)}</option>`).join('');
+  const currentJur = selJur.value;
+  const currentKls = selKls.value;
+
+  const jurSet = new Set();
+  (allJurusan || []).forEach(j => { if (j.nama_jurusan) jurSet.add(j.nama_jurusan.toUpperCase().trim()); });
+  (allPeserta || []).forEach(p => { if (p.jurusan) jurSet.add(p.jurusan.toUpperCase().trim()); });
+  const sortedJur = Array.from(jurSet).sort();
+
+  selJur.innerHTML = '<option value="">Semua Jurusan</option>' + sortedJur.map(j => `<option value="${escapeHtml(j)}">${escapeHtml(j)}</option>`).join('');
+  if (currentJur && sortedJur.includes(currentJur)) {
+    selJur.value = currentJur;
+  }
+
+  onCetakFilterJurusanChange(currentKls);
+}
+
+function onCetakFilterJurusanChange(selectedKls = '') {
+  const selJur = document.getElementById('cetak-filter-jurusan');
+  const selKls = document.getElementById('cetak-filter-kelas');
+  if (!selKls) return;
+
+  const jurVal = (selJur?.value || '').toUpperCase().trim();
+
+  const klsSet = new Set();
+  (allPeserta || []).forEach(p => {
+    const pJur = (p.jurusan || '').toUpperCase().trim();
+    if (!jurVal || pJur === jurVal) {
+      if (p.kelas) klsSet.add(p.kelas.toUpperCase().trim());
     }
-  } else if (lingkup === 'filter_tabel') {
-    selSpesifik.disabled = true;
-    labelSpesifik.innerText = 'Filter Tabel Aktif';
-    selSpesifik.innerHTML = '<option value="">- Sesuai Tabel Peserta -</option>';
+  });
+
+  const sortedKls = Array.from(klsSet).sort();
+  selKls.innerHTML = '<option value="">Semua Kelas</option>' + sortedKls.map(k => `<option value="${escapeHtml(k)}">${escapeHtml(k)}</option>`).join('');
+  if (selectedKls && sortedKls.includes(selectedKls)) {
+    selKls.value = selectedKls;
   }
 
   updateCetakPreviewCount();
 }
 
 function getTargetCetakStudents() {
-  const lingkup = document.getElementById('cetak-filter-lingkup')?.value || 'semua';
-  const spesifik = (document.getElementById('cetak-filter-spesifik')?.value || '').toUpperCase().trim();
+  const jur = (document.getElementById('cetak-filter-jurusan')?.value || '').toUpperCase().trim();
+  const kls = (document.getElementById('cetak-filter-kelas')?.value || '').toUpperCase().trim();
+  const sesi = (document.getElementById('cetak-filter-sesi')?.value || '').trim();
 
-  if (lingkup === 'semua') {
-    return allPeserta || [];
-  } else if (lingkup === 'kelas') {
-    if (!spesifik) return allPeserta || [];
-    return (allPeserta || []).filter(p => (p.kelas || '').toUpperCase().trim() === spesifik);
-  } else if (lingkup === 'jurusan') {
-    if (!spesifik) return allPeserta || [];
-    return (allPeserta || []).filter(p => (p.jurusan || '').toUpperCase().trim() === spesifik);
-  } else if (lingkup === 'sesi') {
-    if (!spesifik) return allPeserta || [];
-    return (allPeserta || []).filter(p => (p.sesi || '').toUpperCase().trim() === spesifik);
-  } else if (lingkup === 'filter_tabel') {
-    const q = (document.getElementById('search-peserta')?.value || '').toLowerCase().trim();
-    const jurusan = (document.getElementById('filter-jurusan-peserta')?.value || '').toUpperCase().trim();
-    const kelas = (document.getElementById('filter-kelas-peserta')?.value || '').toUpperCase().trim();
-    const sesi = (document.getElementById('filter-sesi-peserta')?.value || '').trim();
-    const status = (document.getElementById('filter-status-peserta')?.value || '').trim();
+  return (allPeserta || []).filter(p => {
+    const pJur = (p.jurusan || '').toUpperCase().trim();
+    const pKls = (p.kelas || '').toUpperCase().trim();
+    const pSesi = (p.sesi || '').trim();
 
-    return (allPeserta || []).filter(p => {
-      const matchesSearch = !q ||
-        (p.nama_lengkap || '').toLowerCase().includes(q) ||
-        (p.username || '').toLowerCase().includes(q) ||
-        (p.jurusan && p.jurusan.toLowerCase().includes(q)) ||
-        (p.kelas && p.kelas.toLowerCase().includes(q));
-      const matchesJurusan = !jurusan || (p.jurusan || '').toUpperCase().trim() === jurusan;
-      const matchesKelas = !kelas || (p.kelas || '').toUpperCase().trim() === kelas;
-      const matchesSesi = !sesi || p.sesi === sesi;
-      const matchesStatus = !status || p.status_ujian === status;
-      return matchesSearch && matchesJurusan && matchesKelas && matchesSesi && matchesStatus;
-    });
-  }
-  return allPeserta || [];
+    const matchJur = !jur || pJur === jur;
+    const matchKls = !kls || pKls === kls;
+    const matchSesi = !sesi || pSesi === sesi;
+
+    return matchJur && matchKls && matchSesi;
+  });
 }
 
 function updateCetakPreviewCount() {
   const list = getTargetCetakStudents();
   const count = list.length;
-  const pages = Math.ceil(count / 4);
+  const pisahKelas = document.getElementById('cetak-opt-pisah-kelas')?.checked ?? true;
+  let pages = 0;
+
+  if (pisahKelas && count > 0) {
+    const classCountMap = new Map();
+    list.forEach(p => {
+      const k = `${(p.jurusan || 'UMUM').toUpperCase()}|||${(p.kelas || 'SEMUA KELAS').toUpperCase()}`;
+      classCountMap.set(k, (classCountMap.get(k) || 0) + 1);
+    });
+    classCountMap.forEach(c => {
+      pages += Math.ceil(c / 10);
+    });
+  } else {
+    pages = Math.ceil(count / 10);
+  }
 
   const elCount = document.getElementById('cetak-preview-count');
   const elPages = document.getElementById('cetak-preview-pages');
@@ -2804,7 +2804,7 @@ function prosesCetakKartu(mode = 'direct') {
     kotaTanggal: document.getElementById('cetak-kota-tanggal')?.value || 'Lempuing, November 2026',
     showQr: document.getElementById('cetak-opt-qr')?.checked ?? true,
     showTtd: document.getElementById('cetak-opt-ttd')?.checked ?? true,
-    showTatib: document.getElementById('cetak-opt-tatib')?.checked ?? true
+    pisahKelas: document.getElementById('cetak-opt-pisah-kelas')?.checked ?? true
   };
 
   if (cetakKartuModalInstance) cetakKartuModalInstance.hide();
@@ -2826,32 +2826,71 @@ function cetakKartuSiswa(pesertaId, mode = 'direct') {
     kotaTanggal: `Lempuing, ${todayStr}`,
     showQr: true,
     showTtd: true,
-    showTatib: true
+    pisahKelas: false
   };
 
   renderAndPrintCards([p], opt, mode);
 }
 
 function generatePrintCardsHtml(students, opt) {
-  // Sort students by Kelas then Nama
+  // Urutkan siswa secara berjenjang: Jurusan ASC -> Kelas ASC -> Nama Lengkap ASC
   const sorted = [...students].sort((a, b) => {
-    const kA = (a.kelas || '').toUpperCase();
-    const kB = (b.kelas || '').toUpperCase();
+    const jA = (a.jurusan || 'Tanpa Jurusan').toUpperCase();
+    const jB = (b.jurusan || 'Tanpa Jurusan').toUpperCase();
+    if (jA < jB) return -1;
+    if (jA > jB) return 1;
+
+    const kA = (a.kelas || 'Tanpa Kelas').toUpperCase();
+    const kB = (b.kelas || 'Tanpa Kelas').toUpperCase();
     if (kA < kB) return -1;
     if (kA > kB) return 1;
+
     return (a.nama_lengkap || '').localeCompare(b.nama_lengkap || '');
   });
 
   const pages = [];
-  for (let i = 0; i < sorted.length; i += 4) {
-    pages.push(sorted.slice(i, i + 4));
+  if (opt.pisahKelas) {
+    // Kelompokkan per Jurusan + Kelas agar kartu per rombel tidak tercampur di lembar yang sama
+    const classGroups = new Map();
+    sorted.forEach(p => {
+      const groupKey = `${(p.jurusan || 'UMUM').toUpperCase()}|||${(p.kelas || 'SEMUA KELAS').toUpperCase()}`;
+      if (!classGroups.has(groupKey)) classGroups.set(groupKey, []);
+      classGroups.get(groupKey).push(p);
+    });
+
+    classGroups.forEach((groupStudents, key) => {
+      const [jur, kls] = key.split('|||');
+      const totalPagesForClass = Math.ceil(groupStudents.length / 10);
+      for (let i = 0; i < groupStudents.length; i += 10) {
+        pages.push({
+          jurusan: jur,
+          kelas: kls,
+          pageInClass: Math.floor(i / 10) + 1,
+          totalPageInClass: totalPagesForClass,
+          totalStudentsInClass: groupStudents.length,
+          students: groupStudents.slice(i, i + 10)
+        });
+      }
+    });
+  } else {
+    const totalP = Math.max(1, Math.ceil(sorted.length / 10));
+    for (let i = 0; i < sorted.length; i += 10) {
+      pages.push({
+        jurusan: 'SEMUA JURUSAN',
+        kelas: 'SEMUA KELAS',
+        pageInClass: Math.floor(i / 10) + 1,
+        totalPageInClass: totalP,
+        totalStudentsInClass: sorted.length,
+        students: sorted.slice(i, i + 10)
+      });
+    }
   }
 
   return `<!DOCTYPE html>
 <html lang="id">
 <head>
   <meta charset="UTF-8">
-  <title>Cetak Kartu Ujian - ${escapeHtml(opt.namaSekolah)}</title>
+  <title>Cetak Kartu Ujian (8,56 x 5,4 cm) - ${escapeHtml(opt.namaSekolah)}</title>
   <style>
     @page {
       size: 210mm 297mm;
@@ -2867,8 +2906,8 @@ function generatePrintCardsHtml(students, opt) {
       padding: 0;
       background: #e2e8f0;
       font-family: Arial, Helvetica, sans-serif;
-      color: #000;
-      font-size: 8px;
+      color: #0f172a;
+      -webkit-font-smoothing: antialiased;
     }
     .no-print-bar {
       background: #1e293b;
@@ -2899,244 +2938,255 @@ function generatePrintCardsHtml(students, opt) {
     .btn-close { background: #64748b; color: #fff; margin-left: 8px; }
     .btn-close:hover { background: #475569; }
 
-    /* Exact A4 Sheet Grid (296mm fits on single page without extra blank sheet) */
+    /* Lembar A4 (210mm x 297mm) memuat Header Rombel + 10 Kartu (2 Kolom x 5 Baris) */
     .a4-sheet {
       width: 210mm;
-      height: 296mm;
+      height: 297mm;
       margin: 10px auto;
-      padding: 5mm 6mm;
+      box-sizing: border-box;
+      padding: 6.5mm 16.4mm 7.5mm 16.4mm;
+      display: grid;
+      grid-template-columns: 85.6mm 85.6mm;
+      grid-template-rows: auto repeat(5, 54mm);
+      column-gap: 6mm;
+      row-gap: 2mm;
       background: #ffffff;
       box-shadow: 0 4px 15px rgba(0,0,0,0.15);
-      display: grid;
-      grid-template-columns: calc(50% - 3mm) calc(50% - 3mm);
-      grid-template-rows: calc(50% - 3mm) calc(50% - 3mm);
-      gap: 6mm;
-      box-sizing: border-box;
       page-break-after: always;
       break-after: page;
       overflow: hidden;
     }
 
-    /* Single Card: Fits perfectly into 96mm x 139mm without overflowing */
+    /* Header Rombel / Penanda Kelas di atas kertas */
+    .sheet-rombel-header {
+      grid-column: 1 / -1;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      font-size: 6.5pt;
+      font-weight: bold;
+      color: #1e293b;
+      border-bottom: 1.5px solid #0f172a;
+      padding-bottom: 1mm;
+      margin-bottom: 0.5mm;
+      line-height: 1.2;
+    }
+    .sheet-rombel-header .rombel-info {
+      display: flex;
+      gap: 3mm;
+      align-items: center;
+    }
+    .sheet-rombel-header .badge-jur {
+      color: #0d6efd;
+      text-transform: uppercase;
+    }
+    .sheet-rombel-header .badge-kls {
+      color: #0f172a;
+      text-transform: uppercase;
+      font-size: 7pt;
+    }
+    .sheet-rombel-header .badge-count {
+      color: #64748b;
+      font-weight: normal;
+    }
+    .sheet-rombel-header .page-info {
+      color: #475569;
+      font-size: 6.2pt;
+    }
+
+    /* Kartu Ujian: Presisi Standar Landscape (8,56 cm x 5,4 cm) */
     .kartu-card {
+      width: 85.6mm;
+      height: 54mm;
+      max-width: 85.6mm;
+      max-height: 54mm;
       border: 1px dashed #64748b;
-      border-radius: 6px;
-      padding: 5px 7px;
+      border-radius: 4px;
+      padding: 2mm 3.2mm;
       display: flex;
       flex-direction: column;
       justify-content: space-between;
       position: relative;
       background: #ffffff;
       box-sizing: border-box;
-      height: 100%;
       overflow: hidden;
     }
 
-    /* Kop Sekolah */
+    /* KOP KARTU */
     .kop-sekolah {
       display: flex;
       align-items: center;
-      border-bottom: 2px double #111;
-      padding-bottom: 3px;
-      margin-bottom: 3px;
+      gap: 2mm;
+      border-bottom: 1.5px solid #0f172a;
+      padding-bottom: 1.2mm;
+      margin-bottom: 1.2mm;
     }
     .kop-logo {
-      width: 32px;
-      height: 32px;
-      margin-right: 6px;
+      width: 22px;
+      height: 22px;
       flex-shrink: 0;
     }
     .kop-text {
       text-align: center;
       flex-grow: 1;
+      line-height: 1.1;
     }
     .kop-prov {
-      font-size: 6.8px;
-      font-weight: bold;
+      font-size: 5.2pt;
+      font-weight: 700;
+      color: #334155;
       text-transform: uppercase;
-      line-height: 1.1;
+      letter-spacing: 0.2px;
       margin: 0;
-      color: #333;
-    }
-    .kop-dinas {
-      font-size: 7.2px;
-      font-weight: bold;
-      text-transform: uppercase;
-      line-height: 1.1;
-      margin: 0;
-      color: #222;
     }
     .kop-nama {
-      font-size: 9.5px;
+      font-size: 7.2pt;
       font-weight: 800;
       color: #0d6efd;
       text-transform: uppercase;
-      line-height: 1.15;
-      margin: 1px 0;
+      margin: 0.5px 0;
+      letter-spacing: 0.2px;
     }
-    .kop-alamat {
-      font-size: 6.5px;
-      color: #555;
-      line-height: 1.1;
+    .kop-judul {
+      font-size: 5.6pt;
+      font-weight: 700;
+      color: #0f172a;
+      text-transform: uppercase;
       margin: 0;
     }
 
-    /* Banner Judul */
-    .title-banner {
-      text-align: center;
-      margin-bottom: 3px;
-      border-bottom: 1px solid #e2e8f0;
-      padding-bottom: 2px;
-    }
-    .title-main {
-      font-size: 8px;
-      font-weight: 800;
-      text-transform: uppercase;
-      letter-spacing: 0.3px;
-      line-height: 1.15;
-      color: #0f172a;
-    }
-    .title-sub {
-      font-size: 7.2px;
-      font-weight: 600;
-      color: #475569;
-      text-transform: uppercase;
-      line-height: 1.1;
-    }
-
-    /* Body Siswa */
+    /* BODY KARTU: DATA SISWA & QR */
     .body-content {
       display: flex;
-      gap: 5px;
-      align-items: stretch;
-      margin-bottom: 3px;
+      gap: 2mm;
+      align-items: center;
       flex-grow: 1;
+      min-height: 0;
     }
     .table-siswa {
       width: 100%;
       border-collapse: collapse;
-      font-size: 7.8px;
+      font-size: 6.8pt;
       line-height: 1.25;
+      table-layout: fixed;
     }
     .table-siswa td {
-      padding: 1.2px 0;
-      vertical-align: top;
+      padding: 0.7px 0;
+      vertical-align: middle;
     }
     .table-siswa td.lbl {
-      width: 58px;
+      width: 16mm;
       font-weight: 600;
       color: #475569;
+      font-size: 6.4pt;
     }
     .table-siswa td.col {
-      width: 5px;
+      width: 2.5mm;
+      text-align: center;
+      color: #64748b;
     }
     .table-siswa td.val {
       color: #0f172a;
-      word-break: break-word;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
     }
-    .username-badge {
-      font-family: monospace;
-      font-size: 9px;
+    .val-nama {
+      font-weight: 700;
+      font-size: 7.2pt;
+      color: #0f172a;
+    }
+    .val-kelas {
+      font-weight: 700;
+      color: #1e293b;
+    }
+    .badge-user {
+      font-family: Consolas, monospace;
+      font-size: 7.5pt;
       font-weight: 800;
       color: #0d6efd;
-      letter-spacing: 0.5px;
+      letter-spacing: 0.3px;
     }
-    .password-code {
-      font-family: monospace;
-      font-size: 7.8px;
+    .badge-pass {
+      font-family: Consolas, monospace;
+      font-size: 7.2pt;
+      font-weight: 700;
+      color: #0f172a;
       background: #f1f5f9;
-      padding: 1px 3px;
-      border-radius: 3px;
+      padding: 0.5px 3.5px;
       border: 1px solid #cbd5e1;
-      font-weight: 600;
+      border-radius: 3px;
+      display: inline-block;
     }
 
-    /* Photo / QR box */
-    .photo-qr-box {
-      width: 54px;
-      height: 70px;
-      border: 1px dashed #94a3b8;
-      border-radius: 4px;
+    /* QR Code Box */
+    .qr-box {
+      width: 18mm;
+      height: 18mm;
+      flex-shrink: 0;
       display: flex;
       flex-direction: column;
       align-items: center;
       justify-content: center;
-      flex-shrink: 0;
-      background: #f8fafc;
-      text-align: center;
-      padding: 2px;
-      overflow: hidden;
+      border: 1px solid #e2e8f0;
+      border-radius: 3px;
+      background: #fafafa;
+      padding: 1px;
     }
     .qr-img {
-      width: 48px;
-      height: 48px;
+      width: 16mm;
+      height: 16mm;
       display: block;
     }
-    .photo-placeholder {
-      font-size: 7px;
-      color: #64748b;
-      line-height: 1.2;
-    }
 
-    /* Footer */
+    /* FOOTER KARTU */
     .footer-kartu {
       display: flex;
       justify-content: space-between;
-      align-items: flex-end;
+      align-items: center;
       border-top: 1px solid #cbd5e1;
-      padding-top: 3px;
-      margin-top: auto;
-      font-size: 6.5px;
+      padding-top: 0.8mm;
+      margin-top: 0.8mm;
+      font-size: 5pt;
+      color: #64748b;
+      line-height: 1.1;
     }
-    .tatib-box {
-      max-width: 56%;
-      color: #475569;
-      line-height: 1.2;
+    .footer-kiri {
+      max-width: 50mm;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
     }
-    .tatib-box strong { font-size: 6.8px; color: #1e293b; }
-    .tatib-box ol {
-      margin: 1px 0 0 0;
-      padding-left: 10px;
-    }
-    .tatib-box li {
-      margin-bottom: 0.5px;
-    }
-    .ttd-box {
-      text-align: center;
-      min-width: 90px;
-      line-height: 1.15;
-      color: #1e293b;
-    }
-    .ttd-space {
-      height: 20px;
-    }
-    .ttd-name {
-      font-weight: bold;
-      text-decoration: underline;
+    .footer-kanan {
+      text-align: right;
+      font-weight: 600;
+      color: #334155;
     }
 
     .cut-guide {
       position: absolute;
-      bottom: 1px;
-      right: 4px;
-      font-size: 6px;
+      bottom: 0.5px;
+      right: 2px;
+      font-size: 4.5pt;
       color: #94a3b8;
       pointer-events: none;
     }
 
     @media print {
-      body {
+      html, body {
         background: #fff !important;
+        margin: 0 !important;
+        padding: 0 !important;
       }
       .no-print-bar {
         display: none !important;
       }
       .a4-sheet {
         margin: 0 !important;
-        padding: 5mm 6mm !important;
+        padding: 6.5mm 16.4mm 7.5mm 16.4mm !important;
         box-shadow: none !important;
-        width: 100% !important;
-        height: 296mm !important;
+        width: 210mm !important;
+        height: 297mm !important;
         page-break-after: always !important;
         break-after: page !important;
         -webkit-print-color-adjust: exact !important;
@@ -3148,7 +3198,7 @@ function generatePrintCardsHtml(students, opt) {
 <body>
   <div class="no-print-bar">
     <div class="title">
-      📄 Pratinjau Kartu Ujian &bull; Total: ${sorted.length} Peserta (${pages.length} Lembar A4)
+      📄 Pratinjau Kartu Ujian (8,56 &times; 5,4 cm) &bull; Total: ${sorted.length} Peserta (${pages.length} Lembar A4)
     </div>
     <div>
       <button class="btn-act btn-print" onclick="window.print()">🖨️ Cetak / Simpan PDF</button>
@@ -3156,9 +3206,21 @@ function generatePrintCardsHtml(students, opt) {
     </div>
   </div>
 
-  ${pages.map((group) => `
+  ${pages.map((pGroup) => `
     <div class="a4-sheet">
-      ${group.map(p => `
+      <!-- Penanda Rombel / Header Lembar A4 -->
+      <div class="sheet-rombel-header">
+        <div class="rombel-info">
+          <span class="badge-jur">JURUSAN: ${escapeHtml(pGroup.jurusan)}</span>
+          <span class="badge-kls">KELAS: ${escapeHtml(pGroup.kelas)}</span>
+          <span class="badge-count">(${pGroup.totalStudentsInClass} Siswa)</span>
+        </div>
+        <div class="page-info">
+          Lembar ${pGroup.pageInClass} dari ${pGroup.totalPageInClass}
+        </div>
+      </div>
+
+      ${pGroup.students.map(p => `
         <div class="kartu-card">
           <!-- Kop Kartu -->
           <div class="kop-sekolah">
@@ -3168,91 +3230,58 @@ function generatePrintCardsHtml(students, opt) {
               <circle cx="50" cy="50" r="8" fill="#ffc107" />
             </svg>
             <div class="kop-text">
-              <div class="kop-prov">PEMERINTAH PROVINSI SUMATERA SELATAN</div>
-              <div class="kop-dinas">DINAS PENDIDIKAN</div>
+              <div class="kop-prov">PEMERINTAH PROVINSI SUMATERA SELATAN &bull; DINAS PENDIDIKAN</div>
               <div class="kop-nama">${escapeHtml(opt.namaSekolah)}</div>
-              <div class="kop-alamat">Kec. Lempuing, Kab. Ogan Komering Ilir, Sumatera Selatan</div>
+              <div class="kop-judul">${escapeHtml(opt.judulUjian)}</div>
             </div>
           </div>
 
-          <!-- Judul Ujian -->
-          <div class="title-banner">
-            <div class="title-main">${escapeHtml(opt.judulUjian)}</div>
-            <div class="title-sub">${escapeHtml(opt.subjudulUjian)}</div>
-          </div>
-
-          <!-- Body Siswa & QR/Photo -->
+          <!-- Body Siswa (Kop, Nama, Kelas, Username, Password) -->
           <div class="body-content">
             <table class="table-siswa">
               <tr>
-                <td class="lbl">No. Peserta</td>
+                <td class="lbl">Nama</td>
                 <td class="col">:</td>
-                <td class="val"><span class="username-badge">${escapeHtml(p.username)}</span></td>
-              </tr>
-              <tr>
-                <td class="lbl">Password</td>
-                <td class="col">:</td>
-                <td class="val"><span class="password-code">${escapeHtml(p.password || 'Sesuai Akun')}</span></td>
-              </tr>
-              <tr>
-                <td class="lbl">Nama Lengkap</td>
-                <td class="col">:</td>
-                <td class="val"><strong>${escapeHtml(p.nama_lengkap)}</strong></td>
-              </tr>
-              <tr>
-                <td class="lbl">Jurusan</td>
-                <td class="col">:</td>
-                <td class="val">${escapeHtml(p.jurusan || '-')}</td>
+                <td class="val val-nama" title="${escapeAttr(p.nama_lengkap)}">${escapeHtml(p.nama_lengkap)}</td>
               </tr>
               <tr>
                 <td class="lbl">Kelas</td>
                 <td class="col">:</td>
-                <td class="val"><strong>${escapeHtml(p.kelas || '-')}</strong></td>
+                <td class="val val-kelas">${escapeHtml(p.kelas || '-')}${p.jurusan ? ` (${escapeHtml(p.jurusan)})` : ''}</td>
               </tr>
               <tr>
-                <td class="lbl">Ruang / Sesi</td>
+                <td class="lbl">Username</td>
                 <td class="col">:</td>
-                <td class="val">${escapeHtml(p.ruang || '1')} / Sesi ${escapeHtml(p.sesi || '1')}</td>
+                <td class="val"><span class="badge-user">${escapeHtml(p.username)}</span></td>
+              </tr>
+              <tr>
+                <td class="lbl">Password</td>
+                <td class="col">:</td>
+                <td class="val"><span class="badge-pass">${escapeHtml(p.password || 'Sesuai Akun')}</span></td>
               </tr>
             </table>
 
-            <!-- Photo / QR Box -->
-            <div class="photo-qr-box">
-              ${opt.showQr ? `
-                <img class="qr-img" src="https://api.qrserver.com/v1/create-qr-code/?size=120x120&data=${encodeURIComponent(p.username)}" alt="QR" onerror="this.style.display='none'; this.nextElementSibling.style.display='block';">
-                <div class="photo-placeholder" style="display: none;">Pasfoto<br>3 x 4 cm</div>
-              ` : `
-                <div class="photo-placeholder">Pasfoto<br>3 x 4 cm</div>
-              `}
+            ${opt.showQr ? `
+            <div class="qr-box" title="Scan QR Login Peserta">
+              <img class="qr-img" src="https://api.qrserver.com/v1/create-qr-code/?size=100x100&data=${encodeURIComponent(p.username)}" alt="QR" onerror="this.parentElement.style.display='none'">
             </div>
+            ` : ''}
           </div>
 
           <!-- Footer Kartu -->
           <div class="footer-kartu">
-            ${opt.showTatib ? `
-            <div class="tatib-box">
-              <strong>Tata Tertib:</strong>
-              <ol>
-                <li>Bawa kartu ini saat ujian.</li>
-                <li>Dilarang membuka tab lain.</li>
-                <li>Hadir 15 mnt sebelum sesi.</li>
-              </ol>
-            </div>` : '<div></div>'}
-
-            ${opt.showTtd ? `
-            <div class="ttd-box">
-              <div>${escapeHtml(opt.kotaTanggal)}</div>
-              <div>Panitia Pelaksana,</div>
-              <div class="ttd-space"></div>
-              <div class="ttd-name">Panitia CBT</div>
-              <div style="font-size: 6px; color: #64748b;">SMKN 1 Lempuing</div>
-            </div>` : '<div></div>'}
+            <div class="footer-kiri">
+              <span>Ruang: <strong>${escapeHtml(p.ruang || '1')}</strong> &bull; Sesi: <strong>${escapeHtml(p.sesi || '1')}</strong></span>
+            </div>
+            <div class="footer-kanan">
+              <span>${escapeHtml(opt.kotaTanggal || 'Panitia CBT')}</span>
+            </div>
           </div>
 
-          <div class="cut-guide">✂️ potong</div>
+          <div class="cut-guide">✂️ 8,56 &times; 5,4 cm</div>
         </div>
       `).join('')}
-      ${group.length < 4 ? Array(4 - group.length).fill('<div style="border: 1px dashed #cbd5e1; border-radius: 6px;"></div>').join('') : ''}
+      ${pGroup.students.length < 10 ? Array(10 - pGroup.students.length).fill('<div style="border: 1px dashed #e2e8f0; border-radius: 4px; height: 54mm;"></div>').join('') : ''}
     </div>
   `).join('')}
 
@@ -3292,7 +3321,7 @@ function renderAndPrintCards(students, opt, mode = 'direct') {
 
   Swal.fire({
     title: 'Menyiapkan Cetak...',
-    text: `Menyiapkan ${students.length} kartu (${Math.ceil(students.length / 4)} lembar A4)...`,
+    text: `Menyiapkan ${students.length} kartu (${Math.ceil(students.length / 10)} lembar A4)...`,
     allowOutsideClick: false,
     didOpen: () => { Swal.showLoading(); }
   });
@@ -4990,7 +5019,8 @@ window.onMonitorFilterJurusanChange = onMonitorFilterJurusanChange;
 window.resetMonitoringFullFilter = resetMonitoringFullFilter;
 window.handleProctorResetSesi = handleProctorResetSesi;
 window.openCetakKartuModal = openCetakKartuModal;
-window.onCetakLingkupChange = onCetakLingkupChange;
+window.onCetakFilterJurusanChange = onCetakFilterJurusanChange;
+window.populateCetakJurusanAndKelasDropdowns = populateCetakJurusanAndKelasDropdowns;
 window.updateCetakPreviewCount = updateCetakPreviewCount;
 window.prosesCetakKartu = prosesCetakKartu;
 window.cetakKartuSiswa = cetakKartuSiswa;

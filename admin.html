@@ -1518,8 +1518,8 @@
           <div class="alert alert-primary d-flex align-items-center mb-4">
             <i class="bi bi-info-circle-fill fs-4 me-3 text-primary"></i>
             <div>
-              <strong>Format Cetak Siap Pakai (Standar A4):</strong>
-              <div class="small">Kartu disusun otomatis <strong>4 kartu per lembar A4</strong> (Grid 2x2) lengkap dengan kop sekolah, nomor peserta, QR code, pasfoto box, garis potong, dan tanda tangan panitia.</div>
+              <strong>Format Kartu Ujian Landscape (8,56 cm &times; 5,4 cm):</strong>
+              <div class="small">Ukuran presisi standar ID Card horizontal (8,56 &times; 5,4 cm), otomatis disusun <strong>10 kartu per lembar A4</strong> (Grid 2 kolom &times; 5 baris) lengkap dengan kop sekolah, nama peserta, kelas, username, password login, QR Code, dan garis potong rapi.</div>
             </div>
           </div>
 
@@ -1545,51 +1545,59 @@
 
           <hr class="my-3">
 
-          <h6 class="fw-bold mb-3 text-dark"><i class="bi bi-funnel-fill me-2 text-primary"></i>Pilih Target Peserta yang Dicetak</h6>
+          <h6 class="fw-bold mb-3 text-dark"><i class="bi bi-funnel-fill me-2 text-primary"></i>Pilih Target Peserta & Pengelompokan Kartu</h6>
           
           <div class="row g-3 mb-3">
-            <div class="col-md-4">
-              <label for="cetak-filter-lingkup" class="form-label fw-semibold">Lingkup Peserta</label>
-              <select class="form-select" id="cetak-filter-lingkup" onchange="onCetakLingkupChange()">
-                <option value="semua">Semua Peserta Terdaftar</option>
-                <option value="kelas">Pilih Per Kelas</option>
-                <option value="jurusan">Pilih Per Jurusan</option>
-                <option value="sesi">Pilih Per Sesi</option>
-                <option value="filter_tabel">Sesuai Filter Tabel Saat Ini</option>
+            <div class="col-md-3">
+              <label for="cetak-filter-jurusan" class="form-label fw-semibold">Filter Jurusan</label>
+              <select class="form-select form-select-sm" id="cetak-filter-jurusan" onchange="onCetakFilterJurusanChange()">
+                <option value="">Semua Jurusan</option>
               </select>
             </div>
-            <div class="col-md-4" id="col-cetak-spesifik">
-              <label for="cetak-filter-spesifik" class="form-label fw-semibold" id="label-cetak-spesifik">Pilihan Kelas</label>
-              <select class="form-select" id="cetak-filter-spesifik" onchange="updateCetakPreviewCount()" disabled>
-                <option value="">- Semua Kelas -</option>
+            <div class="col-md-3">
+              <label for="cetak-filter-kelas" class="form-label fw-semibold">Filter Kelas / Rombel</label>
+              <select class="form-select form-select-sm" id="cetak-filter-kelas" onchange="updateCetakPreviewCount()">
+                <option value="">Semua Kelas</option>
               </select>
             </div>
-            <div class="col-md-4">
-              <label class="form-label fw-semibold">Jumlah Kartu Siap Cetak</label>
+            <div class="col-md-3">
+              <label for="cetak-filter-sesi" class="form-label fw-semibold">Filter Sesi Ujian</label>
+              <select class="form-select form-select-sm" id="cetak-filter-sesi" onchange="updateCetakPreviewCount()">
+                <option value="">Semua Sesi</option>
+                <option value="Sesi 1">Sesi 1</option>
+                <option value="Sesi 2">Sesi 2</option>
+                <option value="Sesi 3">Sesi 3</option>
+              </select>
+            </div>
+            <div class="col-md-3">
+              <label class="form-label fw-semibold">Jumlah Kartu</label>
               <div class="p-2 border rounded bg-light text-center">
                 <span class="fs-4 fw-bold text-primary" id="cetak-preview-count">0</span>
-                <div class="small text-muted"><span id="cetak-preview-pages">0</span> Lembar A4 (4 kartu/lbr)</div>
+                <div class="small text-muted"><span id="cetak-preview-pages">0</span> Lembar A4</div>
               </div>
             </div>
           </div>
 
           <div class="row g-3 pt-2">
-            <div class="col-md-4">
+            <div class="col-md-6">
+              <div class="form-check form-switch">
+                <input class="form-check-input" type="checkbox" id="cetak-opt-pisah-kelas" onchange="updateCetakPreviewCount()" checked>
+                <label class="form-check-label small fw-bold text-dark" for="cetak-opt-pisah-kelas">
+                  <i class="bi bi-collection-fill text-primary me-1"></i>Kelompokkan & Pisah Lembar per Kelas
+                </label>
+                <div class="text-muted" style="font-size: 0.72rem;">Setiap ganti kelas otomatis mulai di lembar A4 baru (kartu kelas tidak tercampur)</div>
+              </div>
+            </div>
+            <div class="col-md-3">
               <div class="form-check">
                 <input class="form-check-input" type="checkbox" id="cetak-opt-qr" checked>
-                <label class="form-check-label small fw-semibold" for="cetak-opt-qr">QR Code Verifikasi</label>
+                <label class="form-check-label small fw-semibold" for="cetak-opt-qr">QR Code Scan Login</label>
               </div>
             </div>
-            <div class="col-md-4">
+            <div class="col-md-3">
               <div class="form-check">
                 <input class="form-check-input" type="checkbox" id="cetak-opt-ttd" checked>
-                <label class="form-check-label small fw-semibold" for="cetak-opt-ttd">Kolom Tanda Tangan</label>
-              </div>
-            </div>
-            <div class="col-md-4">
-              <div class="form-check">
-                <input class="form-check-input" type="checkbox" id="cetak-opt-tatib" checked>
-                <label class="form-check-label small fw-semibold" for="cetak-opt-tatib">Tata Tertib Singkat</label>
+                <label class="form-check-label small fw-semibold" for="cetak-opt-ttd">Kolom Panitia CBT</label>
               </div>
             </div>
           </div>
