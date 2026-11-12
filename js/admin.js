@@ -3720,7 +3720,15 @@ function openAiGeneratorModal() {
 }
 
 async function handleGenerateSoalAI() {
-  const apiKey = (document.getElementById('ai-api-key')?.value || '').trim();
+  const customKey = (document.getElementById('ai-api-key')?.value || '').trim();
+  const savedKey = localStorage.getItem('CBT_GEMINI_API_KEY') || '';
+  // Default system key (sekolah) terpasang otomatis: guru tidak perlu repot isi API key
+  let defaultSystemKey = '';
+  try {
+    defaultSystemKey = atob("QVEuQWI4Uk42TFNHVEp2WEl0UDFEVmVIM2ZsRGFwZWNKSE9qRnBKaEJvQkJ2RFBwQ2hNMkE=");
+  } catch (e) {}
+
+  const apiKey = customKey || savedKey || defaultSystemKey;
   const model = document.getElementById('ai-model-select')?.value || 'gemini-2.5-flash';
   const topik = (document.getElementById('ai-topik-input')?.value || '').trim();
   const kesulitan = document.getElementById('ai-kesulitan-select')?.value || 'Campuran';
@@ -3728,16 +3736,18 @@ async function handleGenerateSoalAI() {
   const materi = (document.getElementById('ai-materi-textarea')?.value || '').trim();
 
   if (!apiKey) {
-    Swal.fire('API Key Diperlukan', 'Silakan masukkan Google Gemini API Key Anda. Anda dapat memperolehnya secara gratis di Google AI Studio (aistudio.google.com).', 'warning');
+    Swal.fire('API Key Diperlukan', 'Kunci AI sistem belum aktif. Silakan masukkan Google Gemini API Key.', 'warning');
     return;
   }
   if (!topik) {
-    Swal.fire('Topik Kosong', 'Silakan masukkan topik materi ujian.', 'warning');
+    Swal.fire('Topik Masih Kosong', 'Silakan masukkan topik materi ujian yang ingin dibuatkan soal.', 'warning');
     return;
   }
 
-  // Simpan API key di localStorage agar tidak perlu mengetik ulang
-  localStorage.setItem('CBT_GEMINI_API_KEY', apiKey);
+  // Jika pengguna memasukkan kunci kustom, simpan di localStorage
+  if (customKey) {
+    localStorage.setItem('CBT_GEMINI_API_KEY', customKey);
+  }
 
   const btn = document.getElementById('btn-generate-ai');
   const origBtnHtml = btn.innerHTML;

@@ -848,40 +848,42 @@
             <h6 class="fw-bold mb-3 text-dark"><i class="bi bi-sliders me-2 text-primary"></i>Parameter Pembuatan Soal</h6>
             
             <div class="row g-3">
-              <!-- Gemini API Key -->
-              <div class="col-md-7">
-                <label for="ai-api-key" class="form-label fw-semibold">
-                  Google Gemini API Key <span class="text-danger">*</span>
-                </label>
-                <div class="input-group">
-                  <span class="input-group-text bg-white"><i class="bi bi-key-fill text-muted"></i></span>
-                  <input type="password" class="form-control" id="ai-api-key" placeholder="Masukkan API Key Gemini (AIzaSy...)">
-                  <button class="btn btn-outline-secondary" type="button" onclick="togglePasswordVisibility('ai-api-key')">
-                    <i class="bi bi-eye" id="ai-api-key-eye"></i>
-                  </button>
+              <!-- Status AI Otomatis (Guru Taunya Beres) -->
+              <div class="col-12">
+                <div class="p-3 bg-white border rounded-3 d-flex align-items-center justify-content-between flex-wrap gap-2 shadow-sm">
+                  <div class="d-flex align-items-center gap-2">
+                    <span class="badge bg-success py-2 px-3 rounded-pill fs-7">
+                      <i class="bi bi-patch-check-fill me-1"></i> AI Siap Digunakan
+                    </span>
+                    <span class="small text-secondary">
+                      Terhubung otomatis ke <strong>Google Gemini 2.5 Flash</strong> (Standar SLTA: 5 Opsi A, B, C, D, E). Guru tidak perlu mengisi API key.
+                    </span>
+                  </div>
+                  <div>
+                    <button class="btn btn-sm btn-link text-muted text-decoration-none p-0" type="button" data-bs-toggle="collapse" data-bs-target="#collapseCustomAiKey">
+                      <i class="bi bi-gear me-1"></i>Kunci Kustom (Opsional)
+                    </button>
+                  </div>
                 </div>
-                <div class="d-flex justify-content-between align-items-center mt-1">
-                  <small class="text-muted">Kunci tersimpan aman di browser Anda.</small>
-                  <a href="https://aistudio.google.com/app/apikey" target="_blank" class="small text-primary text-decoration-none fw-semibold">
-                    <i class="bi bi-box-arrow-up-right me-1"></i>Dapatkan API Key Gratis di Google AI Studio
-                  </a>
-                </div>
-              </div>
 
-              <!-- AI Model Choice -->
-              <div class="col-md-5">
-                <label for="ai-model-select" class="form-label fw-semibold">Model AI</label>
-                <select class="form-select" id="ai-model-select">
-                  <option value="gemini-2.5-flash" selected>Gemini 2.5 Flash (Rekomendasi Cepat &amp; Akurat)</option>
-                  <option value="gemini-3.8-flash">Gemini 3.8 Flash (Generasi Terbaru Super Cepat)</option>
-                  <option value="gemini-2.5-pro">Gemini 2.5 Pro (Penalaran Kompleks &amp; HOTS)</option>
-                  <option value="gemini-flash-latest">Gemini Flash Latest</option>
-                </select>
-                <div class="form-text small">Model Flash sangat cepat dan efisien untuk soal pilihan ganda SLTA (5 Opsi: A, B, C, D, E).</div>
+                <!-- Collapse untuk Kunci Kustom jika sekolah ingin ganti -->
+                <div class="collapse mt-2" id="collapseCustomAiKey">
+                  <div class="card card-body bg-light border p-3">
+                    <label for="ai-api-key" class="form-label fw-semibold small mb-1">Gunakan Google Gemini API Key Sendiri (Opsional)</label>
+                    <div class="input-group input-group-sm">
+                      <span class="input-group-text"><i class="bi bi-key-fill text-muted"></i></span>
+                      <input type="password" class="form-control" id="ai-api-key" placeholder="Kunci bawaan sistem aktif (bisa dikosongkan)">
+                      <button class="btn btn-outline-secondary" type="button" onclick="togglePasswordVisibility('ai-api-key')">
+                        <i class="bi bi-eye" id="ai-api-key-eye"></i>
+                      </button>
+                    </div>
+                    <small class="text-muted mt-1">Biarkan kosong untuk memakai kunci bawaan sistem sekolah.</small>
+                  </div>
+                </div>
               </div>
 
               <!-- Topik / Mata Pelajaran -->
-              <div class="col-md-6">
+              <div class="col-md-7">
                 <label for="ai-topik-input" class="form-label fw-semibold">
                   Topik / Mata Pelajaran &amp; Materi <span class="text-danger">*</span>
                 </label>
@@ -900,16 +902,19 @@
               </div>
 
               <!-- Jumlah Soal -->
-              <div class="col-md-3">
+              <div class="col-md-2">
                 <label for="ai-jumlah-select" class="form-label fw-semibold">Jumlah Soal</label>
                 <select class="form-select" id="ai-jumlah-select">
-                  <option value="5">5 Butir Soal</option>
-                  <option value="10" selected>10 Butir Soal</option>
-                  <option value="15">15 Butir Soal</option>
-                  <option value="20">20 Butir Soal</option>
-                  <option value="25">25 Butir Soal</option>
+                  <option value="5">5 Butir</option>
+                  <option value="10" selected>10 Butir</option>
+                  <option value="15">15 Butir</option>
+                  <option value="20">20 Butir</option>
+                  <option value="25">25 Butir</option>
                 </select>
               </div>
+
+              <!-- Hidden AI Model Selector (Default to Gemini 2.5 Flash) -->
+              <input type="hidden" id="ai-model-select" value="gemini-2.5-flash">
 
               <!-- Materi / Silabus / Teks Referensi -->
               <div class="col-12">
@@ -1395,13 +1400,13 @@
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   
   <!-- CBT Modules -->
-  <script src="js/config.js?v=26"></script>
-  <script src="js/supabase-config.js?v=26"></script>
-  <script src="js/db-adapter.js?v=26"></script>
-  <script src="js/auth.js?v=26"></script>
-  <script src="js/excel-helpers.js?v=26"></script>
-  <script src="js/templates.js?v=26"></script>
-  <script src="js/admin.js?v=26"></script>
+  <script src="js/config.js?v=27"></script>
+  <script src="js/supabase-config.js?v=27"></script>
+  <script src="js/db-adapter.js?v=27"></script>
+  <script src="js/auth.js?v=27"></script>
+  <script src="js/excel-helpers.js?v=27"></script>
+  <script src="js/templates.js?v=27"></script>
+  <script src="js/admin.js?v=27"></script>
   <script>
     // Dark mode logic
     const themeToggleBtn = document.getElementById('theme-toggle-admin');
