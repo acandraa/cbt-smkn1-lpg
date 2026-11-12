@@ -379,8 +379,10 @@ const DB = {
           id: "guru-uuid-1",
           username: "guru_mtk",
           password_hash: "ef797c8118f02dfb649607dd5d3f8c7623048c9c063d532cc95c5ed7a898a64f", // "123456"
-          nama_lengkap: "Bpk. Hendra Wijaya, S.Pd.",
+          nama_lengkap: "Bpk. Noferson, S.Pd, Gr, M.Eng.",
           mapel_diampu: "Matematika",
+          jurusan_diampu: "TKJ",
+          kelas_diampu: "TINGKAT:X",
           paket_ids: '["paket-uuid-1"]',
           created_at: new Date().toISOString()
         }
@@ -443,21 +445,10 @@ const DB = {
     const primaryClient = (shards[0] && shards[0].client) || window.supabaseClient;
     if (!primaryClient) return [];
 
-    // 1. Coba baca dari tabel public.guru terlebih dahulu (jika sudah dibuat di SQL)
-    try {
-      const { data, error } = await primaryClient
-        .from('guru')
-        .select('*')
-        .order('nama_lengkap', { ascending: true });
-      if (!error && Array.isArray(data) && data.length > 0) {
-        return data;
-      }
-    } catch (e) {}
-
-    // 2. Fallback Zero-SQL: Baca dari baris registri sistem di tabel soal (atau gabungan antar shard)
+    // 1. Baca dari baris registri sistem di tabel soal (mendukung penuh field jurusan_diampu & kelas_diampu tanpa perlu alter SQL)
+    const mapByUser = new Map();
     if (shards.length > 1) {
       const results = await Promise.allSettled(shards.map(s => this._readGuruFromSysRow(s.client)));
-      const mapByUser = new Map();
       results.forEach(r => {
         if (r.status === 'fulfilled' && Array.isArray(r.value)) {
           r.value.forEach(g => {
@@ -468,13 +459,39 @@ const DB = {
           });
         }
       });
-      const list = Array.from(mapByUser.values());
-      if (list.length > 0) {
-        return list.sort((a, b) => (a.nama_lengkap || '').localeCompare(b.nama_lengkap || ''));
-      }
+    } else {
+      const sysList = await this._readGuruFromSysRow(primaryClient);
+      (sysList || []).forEach(g => {
+        const key = (g.username || g.id || '').toLowerCase();
+        if (key && !mapByUser.has(key)) {
+          mapByUser.set(key, g);
+        }
+      });
     }
 
-    const list = await this._readGuruFromSysRow(primaryClient);
+    // 2. Gabungkan juga dari tabel public.guru jika sudah dibuat di SQL
+    try {
+      const { data, error } = await primaryClient
+        .from('guru')
+        .select('*')
+        .order('nama_lengkap', { ascending: true });
+      if (!error && Array.isArray(data)) {
+        data.forEach(g => {
+          const key = (g.username || g.id || '').toLowerCase();
+          if (key) {
+            const existing = mapByUser.get(key) || {};
+            mapByUser.set(key, {
+              ...g,
+              ...existing,
+              jurusan_diampu: existing.jurusan_diampu || g.jurusan_diampu || '',
+              kelas_diampu: existing.kelas_diampu || g.kelas_diampu || ''
+            });
+          }
+        });
+      }
+    } catch (e) {}
+
+    const list = Array.from(mapByUser.values());
     return list.sort((a, b) => (a.nama_lengkap || '').localeCompare(b.nama_lengkap || ''));
   },
 
@@ -482,6 +499,8 @@ const DB = {
     const cleanUsername = (payload.username || '').trim().toLowerCase();
     const cleanNama = (payload.nama_lengkap || '').trim();
     const cleanMapel = (payload.mapel_diampu || '').trim();
+    const cleanJurusan = (payload.jurusan_diampu || '').trim();
+    const cleanKelas = (payload.kelas_diampu || '').trim();
     const paketIdsStr = typeof payload.paket_ids === 'string'
       ? payload.paket_ids
       : JSON.stringify(Array.isArray(payload.paket_ids) ? payload.paket_ids : []);
@@ -507,6 +526,8 @@ const DB = {
           username: cleanUsername,
           nama_lengkap: cleanNama,
           mapel_diampu: cleanMapel,
+          jurusan_diampu: cleanJurusan,
+          kelas_diampu: cleanKelas,
           paket_ids: paketIdsStr,
           ...(passHash ? { password_hash: passHash } : {})
         };
@@ -520,6 +541,8 @@ const DB = {
           password_hash: passHash,
           nama_lengkap: cleanNama,
           mapel_diampu: cleanMapel,
+          jurusan_diampu: cleanJurusan,
+          kelas_diampu: cleanKelas,
           paket_ids: paketIdsStr,
           created_at: new Date().toISOString()
         };
@@ -545,6 +568,8 @@ const DB = {
         username: cleanUsername,
         nama_lengkap: cleanNama,
         mapel_diampu: cleanMapel,
+        jurusan_diampu: cleanJurusan,
+        kelas_diampu: cleanKelas,
         paket_ids: paketIdsStr,
         ...(passHash ? { password_hash: passHash } : {})
       };
@@ -557,6 +582,8 @@ const DB = {
         password_hash: passHash,
         nama_lengkap: cleanNama,
         mapel_diampu: cleanMapel,
+        jurusan_diampu: cleanJurusan,
+        kelas_diampu: cleanKelas,
         paket_ids: paketIdsStr,
         created_at: new Date().toISOString()
       };
@@ -1879,6 +1906,8 @@ const DB = {
         email: `${guru.username}@guru.smkn1lempuing.sch.id`,
         nama_lengkap: guru.nama_lengkap,
         mapel_diampu: guru.mapel_diampu,
+        jurusan_diampu: guru.jurusan_diampu || '',
+        kelas_diampu: guru.kelas_diampu || '',
         paket_ids: guru.paket_ids || '[]',
         role: 'guru'
       };

@@ -110,6 +110,24 @@ function getGuruMapelKeywords() {
     .filter(Boolean);
 }
 
+function getGuruJurusanList() {
+  if (!isGuruMode()) return [];
+  const raw = String(currentAdminUser.jurusan_diampu || '');
+  return raw
+    .split(',')
+    .map(s => s.trim().toUpperCase())
+    .filter(s => s && s !== 'SEMUA');
+}
+
+function getGuruKelasList() {
+  if (!isGuruMode()) return [];
+  const raw = String(currentAdminUser.kelas_diampu || '');
+  return raw
+    .split(',')
+    .map(s => s.trim().toUpperCase())
+    .filter(s => s && s !== 'SEMUA');
+}
+
 function getGuruAllowedPaketIds() {
   if (!isGuruMode()) return [];
   const raw = currentAdminUser.paket_ids;
@@ -133,28 +151,101 @@ function isPaketAllowedForGuru(paket) {
   const namaPaket = String(paket.nama_paket || '').toLowerCase().trim();
   if (!namaPaket) return false;
   const keywords = getGuruMapelKeywords();
-  return keywords.some(kw => kw && (namaPaket.includes(kw) || kw.includes(namaPaket)));
+  const mapelMatch = keywords.some(kw => kw && (namaPaket.includes(kw) || kw.includes(namaPaket)));
+  if (!mapelMatch) return false;
+
+  // Jika Guru memiliki batas Jurusan yang diampu, cocokkan dengan jurusan paket soal
+  const guruJurusans = getGuruJurusanList();
+  if (guruJurusans.length > 0) {
+    const pkJurusan = String(paket.jurusan || '').trim().toUpperCase();
+    // Hanya izinkan paket yang jurusannya termasuk dalam jurusan yang diampu guru
+    if (!pkJurusan || pkJurusan === 'SEMUA' || !guruJurusans.includes(pkJurusan)) {
+      return false;
+    }
+  }
+
+  // Jika Guru memiliki batas Kelas/Tingkat yang diampu, cocokkan dengan kelas paket soal
+  const guruKelas = getGuruKelasList();
+  if (guruKelas.length > 0) {
+    const pkKelas = String(paket.kelas || '').trim().toUpperCase();
+    if (!pkKelas || pkKelas === 'SEMUA') return false;
+    const kelasMatch = guruKelas.some(gk => {
+      if (gk === pkKelas) return true;
+      if (gk.startsWith('TINGKAT:')) {
+        const tVal = gk.replace('TINGKAT:', '').trim();
+        return checkKelasMatch(pkKelas, tVal).match || checkKelasMatch(pkKelas, `Kelas ${tVal}`).match || checkKelasMatch(gk, pkKelas).match;
+      }
+      return checkKelasMatch(gk, pkKelas).match || checkKelasMatch(pkKelas, gk).match;
+    });
+    if (!kelasMatch) return false;
+  }
+
+  return true;
 }
 
 function isHasilAllowedForGuru(hasil) {
   if (!isGuruMode()) return true;
   if (!hasil) return false;
+
+  // 1. Cek kecocokan Mapel / Paket Soal
   const allowedIds = getGuruAllowedPaketIds();
+  let mapelOrPaketMatch = false;
   if (hasil.paket_soal_id && allowedIds.includes(String(hasil.paket_soal_id))) {
-    return true;
+    mapelOrPaketMatch = true;
+  } else if (hasil.paket_soal_id && Array.isArray(allPaket) && allPaket.some(pk => String(pk.id) === String(hasil.paket_soal_id))) {
+    mapelOrPaketMatch = true;
+  } else {
+    const namaMapel = String(hasil.nama_mapel || '').toLowerCase().trim();
+    const keywords = getGuruMapelKeywords();
+    if (namaMapel && keywords.some(kw => kw && (namaMapel.includes(kw) || kw.includes(namaMapel)))) {
+      mapelOrPaketMatch = true;
+    }
   }
-  if (hasil.paket_soal_id && Array.isArray(allPaket) && allPaket.some(pk => String(pk.id) === String(hasil.paket_soal_id))) {
-    return true;
+  if (!mapelOrPaketMatch) return false;
+
+  // 2. Cek kecocokan Jurusan Peserta (jika Guru ditugaskan ke jurusan spesifik)
+  const guruJurusans = getGuruJurusanList();
+  if (guruJurusans.length > 0) {
+    const studentJurusan = String((hasil.peserta && hasil.peserta.jurusan) || '').trim().toUpperCase();
+    if (studentJurusan && !guruJurusans.includes(studentJurusan)) {
+      return false;
+    }
   }
-  const namaMapel = String(hasil.nama_mapel || '').toLowerCase().trim();
-  if (!namaMapel) return false;
-  const keywords = getGuruMapelKeywords();
-  return keywords.some(kw => kw && (namaMapel.includes(kw) || kw.includes(namaMapel)));
+
+  // 3. Cek kecocokan Kelas / Tingkat Peserta (jika Guru ditugaskan ke kelas/tingkat spesifik)
+  const guruKelas = getGuruKelasList();
+  if (guruKelas.length > 0) {
+    const studentKelas = String((hasil.peserta && hasil.peserta.kelas) || '').trim().toUpperCase();
+    if (studentKelas) {
+      const kMatch = guruKelas.some(gk => checkKelasMatch(gk, studentKelas).match || gk === studentKelas);
+      if (!kMatch) return false;
+    }
+  }
+
+  return true;
+}
+
+function formatGuruKelasLabel(rawKelas) {
+  if (!rawKelas) return 'Semua Kelas';
+  return String(rawKelas)
+    .split(',')
+    .map(k => {
+      const clean = k.trim();
+      if (clean.toUpperCase().startsWith('TINGKAT:')) {
+        return `Tingkat ${clean.split(':')[1]}`;
+      }
+      return clean;
+    })
+    .filter(Boolean)
+    .join(', ') || 'Semua Kelas';
 }
 
 function applyGuruRoleUI() {
   const guruName = currentAdminUser.nama_lengkap || currentAdminUser.username || 'Guru Mapel';
   const guruMapel = currentAdminUser.mapel_diampu || 'Mata Pelajaran';
+  const guruJurusan = currentAdminUser.jurusan_diampu ? currentAdminUser.jurusan_diampu : 'Semua Jurusan';
+  const guruKelas = formatGuruKelasLabel(currentAdminUser.kelas_diampu);
+  const fullScopeLabel = `${guruMapel} (${guruJurusan} • ${guruKelas})`;
 
   const displayEl = document.getElementById('admin-display-name');
   if (displayEl) displayEl.innerText = guruName;
@@ -163,13 +254,13 @@ function applyGuruRoleUI() {
   if (subEl) subEl.innerText = 'Guru Mata Pelajaran';
 
   const topEmailEl = document.getElementById('admin-email');
-  if (topEmailEl) topEmailEl.innerHTML = `<i class="bi bi-person-workspace me-1"></i>${escapeHtml(guruName)} <span class="badge bg-success ms-1">${escapeHtml(guruMapel)}</span>`;
+  if (topEmailEl) topEmailEl.innerHTML = `<i class="bi bi-person-workspace me-1"></i>${escapeHtml(guruName)} <span class="badge bg-success ms-1">${escapeHtml(fullScopeLabel)}</span>`;
 
   const badgeWrap = document.getElementById('guru-mapel-badge-sidebar');
   const badgeText = document.getElementById('guru-mapel-badge-text');
   if (badgeWrap && badgeText) {
     badgeWrap.classList.remove('d-none');
-    badgeText.innerText = `Mapel: ${guruMapel}`;
+    badgeText.innerText = fullScopeLabel;
   }
 
   // Sembunyikan menu yang khusus Admin
@@ -190,13 +281,13 @@ function applyGuruRoleUI() {
   const lblNilai = document.getElementById('nav-label-nilai');
   if (lblNilai) lblNilai.innerText = 'Nilai & Download';
 
-  // Tampilkan banner informasi Mapel di halaman Soal & Nilai
+  // Tampilkan banner informasi Mapel, Jurusan & Kelas di halaman Soal & Nilai
   const bannerSoal = document.getElementById('guru-scope-banner-soal');
   const bannerSoalMapel = document.getElementById('guru-banner-mapel-soal');
   if (bannerSoal && bannerSoalMapel) {
     bannerSoal.classList.remove('d-none');
     bannerSoal.classList.add('d-flex');
-    bannerSoalMapel.innerText = guruMapel;
+    bannerSoalMapel.innerText = fullScopeLabel;
   }
 
   const bannerNilai = document.getElementById('guru-scope-banner-nilai');
@@ -204,7 +295,7 @@ function applyGuruRoleUI() {
   if (bannerNilai && bannerNilaiMapel) {
     bannerNilai.classList.remove('d-none');
     bannerNilai.classList.add('d-flex');
-    bannerNilaiMapel.innerText = guruMapel;
+    bannerNilaiMapel.innerText = fullScopeLabel;
   }
 }
 
@@ -1138,6 +1229,8 @@ async function loadJurusan() {
     populateJurusanDropdowns();
     populateMonitoringFilterDropdowns();
     renderMonitoringKelasCards();
+    const curCheckedJ = Array.from(document.querySelectorAll('.chk-guru-jurusan:checked')).map(el => el.value).join(', ');
+    renderGuruJurusanChecklist(curCheckedJ);
   } catch (err) {
     console.error("Gagal memuat master jurusan:", err);
   }
@@ -1364,6 +1457,8 @@ async function loadKelas() {
     populateKelasDropdowns();
     populateMonitoringFilterDropdowns();
     renderMonitoringKelasCards();
+    const curCheckedK = Array.from(document.querySelectorAll('.chk-guru-kelas:checked')).map(el => el.value).join(', ');
+    renderGuruKelasChecklist(curCheckedK);
   } catch (err) {
     console.error("Gagal memuat master kelas:", err);
   }
@@ -2078,7 +2173,7 @@ function renderGuruTable(list) {
   if (!list || list.length === 0) {
     tbody.innerHTML = `
       <tr>
-        <td colspan="6" class="text-center py-4 text-muted">
+        <td colspan="7" class="text-center py-4 text-muted">
           Belum ada akun guru mata pelajaran. Klik tombol <strong>+ Tambah Akun Guru</strong> di kanan atas untuk membuat akun guru baru.
         </td>
       </tr>
@@ -2088,7 +2183,7 @@ function renderGuruTable(list) {
 
   const paketLookup = new Map();
   (allPaketUnfiltered.length > 0 ? allPaketUnfiltered : allPaket).forEach(pk => {
-    if (pk && pk.id) paketLookup.set(String(pk.id), pk.nama_paket || pk.id);
+    if (pk && pk.id) paketLookup.set(String(pk.id), pk);
   });
 
   list.forEach((g, idx) => {
@@ -2098,6 +2193,23 @@ function renderGuruTable(list) {
       .filter(Boolean)
       .map(m => `<span class="badge bg-success-subtle text-success border border-success-subtle me-1 mb-1">${escapeHtml(m)}</span>`)
       .join('') || '<span class="text-muted">-</span>';
+
+    const jurusanBadges = String(g.jurusan_diampu || '')
+      .split(',')
+      .map(j => j.trim())
+      .filter(Boolean)
+      .map(j => `<span class="badge bg-info-subtle text-dark border me-1 mb-1"><i class="bi bi-diagram-3 me-1"></i>${escapeHtml(j)}</span>`)
+      .join('') || `<span class="badge bg-secondary-subtle text-secondary border me-1 mb-1">Semua Jurusan</span>`;
+
+    const kelasBadges = String(g.kelas_diampu || '')
+      .split(',')
+      .map(k => k.trim())
+      .filter(Boolean)
+      .map(k => {
+        const lbl = k.toUpperCase().startsWith('TINGKAT:') ? `Tingkat ${k.split(':')[1]}` : k;
+        return `<span class="badge bg-warning-subtle text-dark border border-warning-subtle me-1 mb-1"><i class="bi bi-mortarboard me-1"></i>${escapeHtml(lbl)}</span>`;
+      })
+      .join('') || `<span class="badge bg-secondary-subtle text-secondary border me-1 mb-1">Semua Kelas</span>`;
 
     let paketIds = [];
     if (Array.isArray(g.paket_ids)) {
@@ -2111,10 +2223,11 @@ function renderGuruTable(list) {
 
     const paketBadges = paketIds.length > 0
       ? paketIds.map(pid => {
-          const pName = paketLookup.get(String(pid)) || 'Paket Terkait';
+          const pkObj = paketLookup.get(String(pid));
+          const pName = pkObj ? pkObj.nama_paket : 'Paket Terkait';
           return `<span class="badge bg-primary-subtle text-primary border border-primary-subtle me-1 mb-1"><i class="bi bi-journal-check me-1"></i>${escapeHtml(pName)}</span>`;
         }).join('')
-      : `<span class="text-muted small"><i class="bi bi-magic me-1"></i>Otomatis sesuai nama Mapel</span>`;
+      : `<span class="text-muted small"><i class="bi bi-magic me-1"></i>Otomatis sesuai Mapel, Jurusan & Kelas</span>`;
 
     tbody.innerHTML += `
       <tr>
@@ -2122,6 +2235,10 @@ function renderGuruTable(list) {
         <td class="font-monospace fw-bold text-primary">${escapeHtml(g.username)}</td>
         <td class="fw-semibold">${escapeHtml(g.nama_lengkap)}</td>
         <td>${mapelBadges}</td>
+        <td>
+          <div>${jurusanBadges}</div>
+          <div class="mt-1">${kelasBadges}</div>
+        </td>
         <td>${paketBadges}</td>
         <td class="text-center">
           <div class="btn-group btn-group-sm">
@@ -2138,26 +2255,190 @@ function renderGuruTable(list) {
   });
 }
 
+function getAllAvailableJurusanNames() {
+  const set = new Set();
+  (allJurusan || []).forEach(j => {
+    const n = (j.nama_jurusan || '').trim().toUpperCase();
+    if (n) set.add(n);
+  });
+  (allPeserta || []).forEach(p => {
+    const n = (p.jurusan || '').trim().toUpperCase();
+    if (n) set.add(n);
+  });
+  (allPaketUnfiltered.length > 0 ? allPaketUnfiltered : allPaket).forEach(pk => {
+    const n = (pk.jurusan || '').trim().toUpperCase();
+    if (n && n !== 'SEMUA') set.add(n);
+  });
+  if (set.size === 0) {
+    ['TKJ', 'AKL', 'TBSM', 'TKRO', 'ATP'].forEach(d => set.add(d));
+  }
+  return Array.from(set).sort();
+}
+
+function getAllAvailableKelasNames() {
+  const set = new Set();
+  (allKelas || []).forEach(k => {
+    const n = (k.nama_kelas || '').trim().toUpperCase();
+    if (n) set.add(n);
+  });
+  (allPeserta || []).forEach(p => {
+    const n = (p.kelas || '').trim().toUpperCase();
+    if (n) set.add(n);
+  });
+  (allPaketUnfiltered.length > 0 ? allPaketUnfiltered : allPaket).forEach(pk => {
+    const n = (pk.kelas || '').trim().toUpperCase();
+    if (n && n !== 'SEMUA' && !n.startsWith('TINGKAT:')) set.add(n);
+  });
+  return Array.from(set).sort();
+}
+
+function renderGuruJurusanChecklist(selectedStr = '') {
+  const container = document.getElementById('crud-guru-jurusan-checklist');
+  if (!container) return;
+
+  const selectedList = String(selectedStr || '')
+    .split(',')
+    .map(s => s.trim().toUpperCase())
+    .filter(s => s && s !== 'SEMUA');
+  const selSet = new Set(selectedList);
+  const isAll = selSet.size === 0;
+
+  const jurusans = getAllAvailableJurusanNames();
+
+  let html = `
+    <div class="form-check mb-1 pb-1 border-bottom">
+      <input class="form-check-input" type="checkbox" value="" id="chk-gj-all" ${isAll ? 'checked' : ''} onchange="onGuruJurusanAllToggle(this)">
+      <label class="form-check-label small fw-bold text-primary" for="chk-gj-all">
+        Semua Jurusan (Umum)
+      </label>
+    </div>
+  `;
+
+  html += jurusans.map((j, idx) => {
+    const checked = selSet.has(j) ? 'checked' : '';
+    return `
+      <div class="form-check mb-1">
+        <input class="form-check-input chk-guru-jurusan" type="checkbox" value="${escapeAttr(j)}" id="chk-gj-${idx}" ${checked} onchange="onGuruJurusanItemToggle()">
+        <label class="form-check-label small fw-semibold" for="chk-gj-${idx}">
+          Jurusan ${escapeHtml(j)}
+        </label>
+      </div>
+    `;
+  }).join('');
+
+  container.innerHTML = html;
+}
+
+function onGuruJurusanAllToggle(allChk) {
+  if (allChk.checked) {
+    document.querySelectorAll('.chk-guru-jurusan').forEach(el => { el.checked = false; });
+  }
+}
+
+function onGuruJurusanItemToggle() {
+  const anyChecked = Array.from(document.querySelectorAll('.chk-guru-jurusan')).some(el => el.checked);
+  const allChk = document.getElementById('chk-gj-all');
+  if (allChk) allChk.checked = !anyChecked;
+}
+
+function renderGuruKelasChecklist(selectedStr = '') {
+  const container = document.getElementById('crud-guru-kelas-checklist');
+  if (!container) return;
+
+  const selectedList = String(selectedStr || '')
+    .split(',')
+    .map(s => s.trim().toUpperCase())
+    .filter(s => s && s !== 'SEMUA');
+  const selSet = new Set(selectedList);
+  const isAll = selSet.size === 0;
+
+  const kelasList = getAllAvailableKelasNames();
+
+  let html = `
+    <div class="form-check mb-1 pb-1 border-bottom">
+      <input class="form-check-input" type="checkbox" value="" id="chk-gk-all" ${isAll ? 'checked' : ''} onchange="onGuruKelasAllToggle(this)">
+      <label class="form-check-label small fw-bold text-success" for="chk-gk-all">
+        Semua Kelas / Semua Tingkat
+      </label>
+    </div>
+    <div class="text-muted fw-bold mt-1 mb-1" style="font-size: 0.7rem; text-transform: uppercase;">Per Tingkat Angkatan:</div>
+  `;
+
+  const tingkats = [
+    { val: 'TINGKAT:X', label: 'Tingkat X (Semua Kelas 10)' },
+    { val: 'TINGKAT:XI', label: 'Tingkat XI (Semua Kelas 11)' },
+    { val: 'TINGKAT:XII', label: 'Tingkat XII (Semua Kelas 12)' }
+  ];
+
+  html += tingkats.map((t, idx) => {
+    const checked = selSet.has(t.val) ? 'checked' : '';
+    return `
+      <div class="form-check mb-1">
+        <input class="form-check-input chk-guru-kelas" type="checkbox" value="${escapeAttr(t.val)}" id="chk-gk-t-${idx}" ${checked} onchange="onGuruKelasItemToggle()">
+        <label class="form-check-label small fw-semibold text-dark" for="chk-gk-t-${idx}">
+          ${escapeHtml(t.label)}
+        </label>
+      </div>
+    `;
+  }).join('');
+
+  if (kelasList.length > 0) {
+    html += `<div class="text-muted fw-bold mt-2 mb-1 pt-1 border-top" style="font-size: 0.7rem; text-transform: uppercase;">Atau Pilih Rombel Spesifik:</div>`;
+    html += kelasList.map((k, idx) => {
+      const checked = selSet.has(k) ? 'checked' : '';
+      return `
+        <div class="form-check mb-1">
+          <input class="form-check-input chk-guru-kelas" type="checkbox" value="${escapeAttr(k)}" id="chk-gk-r-${idx}" ${checked} onchange="onGuruKelasItemToggle()">
+          <label class="form-check-label small" for="chk-gk-r-${idx}">
+            Kelas ${escapeHtml(k)}
+          </label>
+        </div>
+      `;
+    }).join('');
+  }
+
+  container.innerHTML = html;
+}
+
+function onGuruKelasAllToggle(allChk) {
+  if (allChk.checked) {
+    document.querySelectorAll('.chk-guru-kelas').forEach(el => { el.checked = false; });
+  }
+}
+
+function onGuruKelasItemToggle() {
+  const anyChecked = Array.from(document.querySelectorAll('.chk-guru-kelas')).some(el => el.checked);
+  const allChk = document.getElementById('chk-gk-all');
+  if (allChk) allChk.checked = !anyChecked;
+}
+
 function renderGuruPaketChecklist(selectedIds = []) {
   const container = document.getElementById('crud-guru-paket-checklist');
   if (!container) return;
 
   const sourcePaket = (allPaketUnfiltered && allPaketUnfiltered.length > 0) ? allPaketUnfiltered : (allPaket || []);
   if (sourcePaket.length === 0) {
-    container.innerHTML = `<div class="text-muted small py-2 text-center">Belum ada paket soal. Guru nantinya dapat membuat paket soal sendiri sesuai Mapel yang diampu.</div>`;
+    container.innerHTML = `<div class="text-muted small py-2 text-center">Belum ada paket soal. Guru nantinya dapat membuat paket soal sendiri sesuai Mapel, Jurusan & Kelas yang diampu.</div>`;
     return;
   }
 
   const selSet = new Set((selectedIds || []).map(String));
   container.innerHTML = sourcePaket.map(pk => {
     const checked = selSet.has(String(pk.id)) ? 'checked' : '';
-    const infoKelas = pk.kelas ? ` (${pk.kelas})` : '';
-    const infoJurusan = pk.jurusan ? ` - ${pk.jurusan}` : '';
+    const jurusanText = (pk.jurusan && pk.jurusan.toLowerCase() !== 'semua') ? pk.jurusan : 'Semua Jurusan';
+    let kelasText = 'Semua Kelas';
+    if (pk.kelas && pk.kelas.toLowerCase() !== 'semua') {
+      kelasText = pk.kelas.toUpperCase().startsWith('TINGKAT:')
+        ? `Tingkat ${pk.kelas.split(':')[1]}`
+        : pk.kelas;
+    }
     return `
-      <div class="form-check mb-1">
-        <input class="form-check-input chk-guru-paket" type="checkbox" value="${escapeAttr(pk.id)}" id="chk-gp-${escapeAttr(pk.id)}" ${checked}>
+      <div class="form-check mb-1 d-flex align-items-center flex-wrap gap-1">
+        <input class="form-check-input chk-guru-paket me-1" type="checkbox" value="${escapeAttr(pk.id)}" id="chk-gp-${escapeAttr(pk.id)}" ${checked}>
         <label class="form-check-label small fw-semibold" for="chk-gp-${escapeAttr(pk.id)}">
-          ${escapeHtml(pk.nama_paket)}${escapeHtml(infoJurusan)}${escapeHtml(infoKelas)}
+          ${escapeHtml(pk.nama_paket)}
+          <span class="badge bg-info-subtle text-dark border ms-1" style="font-size: 0.7rem;">Jurusan: ${escapeHtml(jurusanText)}</span>
+          <span class="badge bg-primary-subtle text-primary border ms-1" style="font-size: 0.7rem;">Kelas: ${escapeHtml(kelasText)}</span>
         </label>
       </div>
     `;
@@ -2183,6 +2464,8 @@ function openGuruForm() {
   document.getElementById('guru-id').value = "";
   document.getElementById('crud-guru-pass').required = true;
   document.getElementById('crud-guru-pass-help').innerText = "Wajib diisi untuk akun guru baru.";
+  renderGuruJurusanChecklist('');
+  renderGuruKelasChecklist('');
   renderGuruPaketChecklist([]);
   if (guruFormModalInstance) guruFormModalInstance.show();
 }
@@ -2199,6 +2482,9 @@ function editGuru(id) {
   document.getElementById('crud-guru-pass').value = '';
   document.getElementById('crud-guru-pass').required = false;
   document.getElementById('crud-guru-pass-help').innerText = "Biarkan kosong jika tidak ingin mengubah password guru.";
+
+  renderGuruJurusanChecklist(g.jurusan_diampu || '');
+  renderGuruKelasChecklist(g.kelas_diampu || '');
 
   let selectedIds = [];
   if (Array.isArray(g.paket_ids)) {
@@ -2221,6 +2507,8 @@ async function handleGuruCrudSubmit(e) {
   const mapel = document.getElementById('crud-guru-mapel').value.trim();
   const pass = document.getElementById('crud-guru-pass').value;
 
+  const checkedJurusans = Array.from(document.querySelectorAll('.chk-guru-jurusan:checked')).map(el => el.value);
+  const checkedKelas = Array.from(document.querySelectorAll('.chk-guru-kelas:checked')).map(el => el.value);
   const checkedPakets = Array.from(document.querySelectorAll('.chk-guru-paket:checked')).map(el => el.value);
 
   const btn = document.getElementById('btn-save-guru-crud');
@@ -2231,6 +2519,8 @@ async function handleGuruCrudSubmit(e) {
       username,
       nama_lengkap: nama,
       mapel_diampu: mapel,
+      jurusan_diampu: checkedJurusans.join(', '),
+      kelas_diampu: checkedKelas.join(', '),
       paket_ids: checkedPakets
     }, pass);
 
@@ -3055,12 +3345,32 @@ function openPaketForm() {
   document.getElementById('crud-paket-jurusan').value = "";
   document.getElementById('crud-paket-kelas').value = "";
 
-  // Jika login sebagai Guru Mapel, isi otomatis nama paket dengan Mapel yang diampu
-  if (isGuruMode() && currentAdminUser.mapel_diampu) {
-    const firstMapel = String(currentAdminUser.mapel_diampu).split(',')[0].trim();
-    if (firstMapel) {
-      document.getElementById('crud-paket-nama').value = firstMapel;
-      detectPaketAgamaHint(firstMapel);
+  // Jika login sebagai Guru Mapel, isi otomatis nama paket, jurusan, dan kelas sesuai yang diampu
+  if (isGuruMode()) {
+    if (currentAdminUser.mapel_diampu) {
+      const firstMapel = String(currentAdminUser.mapel_diampu).split(',')[0].trim();
+      if (firstMapel) {
+        document.getElementById('crud-paket-nama').value = firstMapel;
+        detectPaketAgamaHint(firstMapel);
+      }
+    }
+    const guruJurusans = getGuruJurusanList();
+    if (guruJurusans.length > 0) {
+      const selJ = document.getElementById('crud-paket-jurusan');
+      if (selJ) {
+        selJ.innerHTML = guruJurusans.map(j => `<option value="${escapeHtml(j)}">${escapeHtml(j)}</option>`).join('');
+        selJ.value = guruJurusans[0];
+      }
+    }
+    const guruKelas = getGuruKelasList();
+    if (guruKelas.length > 0) {
+      const selK = document.getElementById('crud-paket-kelas');
+      if (selK) {
+        if (!Array.from(selK.options).some(o => o.value.toUpperCase() === guruKelas[0])) {
+          selK.innerHTML += `<option value="${escapeHtml(guruKelas[0])}">${escapeHtml(guruKelas[0])}</option>`;
+        }
+        selK.value = guruKelas[0];
+      }
     }
   }
 
@@ -3152,6 +3462,8 @@ async function handlePaketCrudSubmit(e) {
             username: currentAdminUser.username,
             nama_lengkap: currentAdminUser.nama_lengkap,
             mapel_diampu: currentAdminUser.mapel_diampu,
+            jurusan_diampu: currentAdminUser.jurusan_diampu || '',
+            kelas_diampu: currentAdminUser.kelas_diampu || '',
             paket_ids: currentIds
           });
         }

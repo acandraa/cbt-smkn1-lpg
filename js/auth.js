@@ -116,6 +116,8 @@ const Auth = {
       email: `${guruUser.username}@guru.smkn1lempuing.sch.id`,
       nama_lengkap: guruUser.nama_lengkap,
       mapel_diampu: guruUser.mapel_diampu || '',
+      jurusan_diampu: guruUser.jurusan_diampu || '',
+      kelas_diampu: guruUser.kelas_diampu || '',
       paket_ids: guruUser.paket_ids || '[]',
       role: 'guru'
     };
@@ -296,6 +298,8 @@ const Auth = {
                 if (fresh) {
                   guruUser.nama_lengkap = fresh.nama_lengkap;
                   guruUser.mapel_diampu = fresh.mapel_diampu;
+                  guruUser.jurusan_diampu = fresh.jurusan_diampu || '';
+                  guruUser.kelas_diampu = fresh.kelas_diampu || '';
                   guruUser.paket_ids = fresh.paket_ids || '[]';
                   sessionStorage.setItem('CBT_GURU_SESSION', JSON.stringify(guruUser));
                 }

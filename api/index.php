@@ -230,10 +230,16 @@ function ensureGuruTable(): void
             password_hash VARCHAR(255) NOT NULL,
             nama_lengkap VARCHAR(255) NOT NULL,
             mapel_diampu TEXT NOT NULL,
+            jurusan_diampu TEXT DEFAULT NULL,
+            kelas_diampu TEXT DEFAULT NULL,
             paket_ids TEXT DEFAULT NULL,
             created_at DATETIME DEFAULT CURRENT_TIMESTAMP
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
     }
+    try { db()->query("SELECT jurusan_diampu FROM guru LIMIT 1"); }
+    catch (Throwable $e) { db()->exec("ALTER TABLE guru ADD COLUMN jurusan_diampu TEXT DEFAULT NULL AFTER mapel_diampu"); }
+    try { db()->query("SELECT kelas_diampu FROM guru LIMIT 1"); }
+    catch (Throwable $e) { db()->exec("ALTER TABLE guru ADD COLUMN kelas_diampu TEXT DEFAULT NULL AFTER jurusan_diampu"); }
 }
 
 /**
@@ -326,13 +332,15 @@ try {
                 if (is_array($decoded)) $paketIds = $decoded;
             }
             $_SESSION['guru'] = [
-                'id'           => $guru['id'],
-                'username'     => $guru['username'],
-                'email'        => $guru['username'],
-                'nama_lengkap' => $guru['nama_lengkap'],
-                'mapel_diampu' => $guru['mapel_diampu'],
-                'paket_ids'    => $paketIds,
-                'role'         => 'guru',
+                'id'             => $guru['id'],
+                'username'       => $guru['username'],
+                'email'          => $guru['username'],
+                'nama_lengkap'   => $guru['nama_lengkap'],
+                'mapel_diampu'   => $guru['mapel_diampu'],
+                'jurusan_diampu' => $guru['jurusan_diampu'] ?? '',
+                'kelas_diampu'   => $guru['kelas_diampu'] ?? '',
+                'paket_ids'      => $paketIds,
+                'role'           => 'guru',
             ];
             respond($_SESSION['guru']);
         }
@@ -384,13 +392,15 @@ try {
                         if (is_array($decoded)) $paketIds = $decoded;
                     }
                     $gSession = [
-                        'id'           => $fresh['id'],
-                        'username'     => $fresh['username'],
-                        'email'        => $fresh['username'],
-                        'nama_lengkap' => $fresh['nama_lengkap'],
-                        'mapel_diampu' => $fresh['mapel_diampu'],
-                        'paket_ids'    => $paketIds,
-                        'role'         => 'guru',
+                        'id'             => $fresh['id'],
+                        'username'       => $fresh['username'],
+                        'email'          => $fresh['username'],
+                        'nama_lengkap'   => $fresh['nama_lengkap'],
+                        'mapel_diampu'   => $fresh['mapel_diampu'],
+                        'jurusan_diampu' => $fresh['jurusan_diampu'] ?? '',
+                        'kelas_diampu'   => $fresh['kelas_diampu'] ?? '',
+                        'paket_ids'      => $paketIds,
+                        'role'           => 'guru',
                     ];
                     $_SESSION['guru'] = $gSession;
                     respond($gSession);
@@ -415,7 +425,7 @@ try {
         case 'getGuruList': {
             requireAdmin();
             ensureGuruTable();
-            $rows = fetchAll('SELECT id, username, nama_lengkap, mapel_diampu, paket_ids, created_at FROM guru ORDER BY nama_lengkap ASC');
+            $rows = fetchAll('SELECT id, username, nama_lengkap, mapel_diampu, jurusan_diampu, kelas_diampu, paket_ids, created_at FROM guru ORDER BY nama_lengkap ASC');
             $out = array_map(function ($r) {
                 $paketIds = [];
                 if (!empty($r['paket_ids'])) {
@@ -423,13 +433,15 @@ try {
                     if (is_array($dec)) $paketIds = $dec;
                 }
                 $r['paket_ids'] = $paketIds;
+                $r['jurusan_diampu'] = $r['jurusan_diampu'] ?? '';
+                $r['kelas_diampu']   = $r['kelas_diampu'] ?? '';
                 return $r;
             }, $rows);
             respond($out);
         }
 
         case 'saveGuru': {
-            requireAdmin();
+            requireAdminOrGuru();
             ensureGuruTable();
             $id      = trim((string)($req['id'] ?? ''));
             $payload = $req['payload'] ?? [];
@@ -438,9 +450,11 @@ try {
             $username = trim((string)($payload['username'] ?? ''));
             $nama     = trim((string)($payload['nama_lengkap'] ?? ''));
             $mapel    = trim((string)($payload['mapel_diampu'] ?? ''));
+            $jurusan  = trim((string)($payload['jurusan_diampu'] ?? ''));
+            $kelas    = trim((string)($payload['kelas_diampu'] ?? ''));
             $paketIds = isset($payload['paket_ids']) && is_array($payload['paket_ids'])
                 ? json_encode(array_values($payload['paket_ids']))
-                : '[]';
+                : (is_string($payload['paket_ids'] ?? null) ? $payload['paket_ids'] : '[]');
 
             if ($username === '' || $nama === '' || $mapel === '') {
                 fail('Username, Nama Lengkap, dan Mata Pelajaran yang diampu wajib diisi.');
@@ -451,11 +465,11 @@ try {
                 if ($dup) fail('Username guru sudah digunakan akun lain.');
                 if ($pass !== '') {
                     $hash = hash('sha256', $pass);
-                    exec_sql('UPDATE guru SET username = ?, password_hash = ?, nama_lengkap = ?, mapel_diampu = ?, paket_ids = ? WHERE id = ?',
-                        [$username, $hash, $nama, $mapel, $paketIds, $id]);
+                    exec_sql('UPDATE guru SET username = ?, password_hash = ?, nama_lengkap = ?, mapel_diampu = ?, jurusan_diampu = ?, kelas_diampu = ?, paket_ids = ? WHERE id = ?',
+                        [$username, $hash, $nama, $mapel, $jurusan, $kelas, $paketIds, $id]);
                 } else {
-                    exec_sql('UPDATE guru SET username = ?, nama_lengkap = ?, mapel_diampu = ?, paket_ids = ? WHERE id = ?',
-                        [$username, $nama, $mapel, $paketIds, $id]);
+                    exec_sql('UPDATE guru SET username = ?, nama_lengkap = ?, mapel_diampu = ?, jurusan_diampu = ?, kelas_diampu = ?, paket_ids = ? WHERE id = ?',
+                        [$username, $nama, $mapel, $jurusan, $kelas, $paketIds, $id]);
                 }
             } else {
                 if ($pass === '') fail('Password wajib diisi untuk akun guru baru.');
@@ -463,10 +477,10 @@ try {
                 if ($dup) fail('Username guru sudah terdaftar.');
                 $id = uuidv4();
                 $hash = hash('sha256', $pass);
-                exec_sql('INSERT INTO guru (id, username, password_hash, nama_lengkap, mapel_diampu, paket_ids, created_at) VALUES (?, ?, ?, ?, ?, ?, UTC_TIMESTAMP())',
-                    [$id, $username, $hash, $nama, $mapel, $paketIds]);
+                exec_sql('INSERT INTO guru (id, username, password_hash, nama_lengkap, mapel_diampu, jurusan_diampu, kelas_diampu, paket_ids, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, UTC_TIMESTAMP())',
+                    [$id, $username, $hash, $nama, $mapel, $jurusan, $kelas, $paketIds]);
             }
-            respond(fetchOne('SELECT id, username, nama_lengkap, mapel_diampu, paket_ids, created_at FROM guru WHERE id = ?', [$id]));
+            respond(fetchOne('SELECT id, username, nama_lengkap, mapel_diampu, jurusan_diampu, kelas_diampu, paket_ids, created_at FROM guru WHERE id = ?', [$id]));
         }
 
         case 'deleteGuru': {

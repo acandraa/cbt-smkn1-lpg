@@ -40,13 +40,15 @@ CREATE TABLE public.admins (
   created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
 
--- 1b. Table for Guru Users (Mata Pelajaran yang Diampu ditentukan oleh Admin)
+-- 1b. Table for Guru Users (Mata Pelajaran, Jurusan & Kelas yang Diampu ditentukan oleh Admin)
 CREATE TABLE IF NOT EXISTS public.guru (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   username VARCHAR(50) UNIQUE NOT NULL,
   password_hash TEXT NOT NULL,
   nama_lengkap TEXT NOT NULL,
   mapel_diampu TEXT NOT NULL,
+  jurusan_diampu TEXT DEFAULT '',
+  kelas_diampu TEXT DEFAULT '',
   paket_ids TEXT DEFAULT '[]',
   created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );

@@ -474,17 +474,18 @@
               <table class="table table-hover align-middle mb-0 custom-table">
                 <thead>
                   <tr>
-                    <th style="width: 55px;">No</th>
-                    <th style="min-width: 130px;">Username Login</th>
-                    <th style="min-width: 200px;">Nama Lengkap Guru</th>
-                    <th style="min-width: 220px;">Mata Pelajaran Diampu</th>
-                    <th style="min-width: 200px;">Akses Paket Soal</th>
-                    <th class="text-center" style="width: 140px;">Aksi</th>
+                    <th style="width: 50px;">No</th>
+                    <th style="min-width: 120px;">Username Login</th>
+                    <th style="min-width: 190px;">Nama Lengkap Guru</th>
+                    <th style="min-width: 180px;">Mata Pelajaran Diampu</th>
+                    <th style="min-width: 190px;">Jurusan & Kelas Diampu</th>
+                    <th style="min-width: 180px;">Akses Paket Soal</th>
+                    <th class="text-center" style="width: 130px;">Aksi</th>
                   </tr>
                 </thead>
                 <tbody id="table-guru-body">
                   <tr>
-                    <td colspan="6" class="text-center py-4 text-muted">
+                    <td colspan="7" class="text-center py-4 text-muted">
                       <span class="spinner-border spinner-border-sm me-1 text-primary"></span> Memuat daftar akun guru...
                     </td>
                   </tr>
@@ -1114,7 +1115,7 @@
               </div>
               <div class="col-md-6">
                 <label for="crud-guru-nama" class="form-label fw-semibold">Nama Lengkap & Gelar <span class="text-danger">*</span></label>
-                <input type="text" class="form-control" id="crud-guru-nama" placeholder="Contoh: Bpk. Hendra Wijaya, S.Pd." required>
+                <input type="text" class="form-control" id="crud-guru-nama" placeholder="Contoh: Bpk. Noferson, S.Pd, Gr, M.Eng." required>
               </div>
               <div class="col-12">
                 <label for="crud-guru-mapel" class="form-label fw-semibold">Mata Pelajaran yang Diampu <span class="text-danger">*</span></label>
@@ -1130,16 +1131,35 @@
                   <button type="button" class="btn btn-outline-secondary btn-sm py-0 px-2" style="font-size: 0.74rem;" onclick="appendGuruMapelPreset('PKN / Pancasila')">PKN</button>
                   <button type="button" class="btn btn-outline-secondary btn-sm py-0 px-2" style="font-size: 0.74rem;" onclick="appendGuruMapelPreset('Sejarah')">Sejarah</button>
                   <button type="button" class="btn btn-outline-secondary btn-sm py-0 px-2" style="font-size: 0.74rem;" onclick="appendGuruMapelPreset('Produktif TKJ')">Produktif TKJ</button>
-                  <button type="button" class="btn btn-outline-secondary btn-sm py-0 px-2" style="font-size: 0.74rem;" onclick="appendGuruMapelPreset('Produktif RPL')">Produktif RPL</button>
                 </div>
                 <small class="text-muted d-block mt-1">Guru otomatis dapat membuat & mengelola paket soal yang sesuai dengan nama mata pelajaran di atas.</small>
               </div>
+              <div class="col-md-6">
+                <div class="d-flex justify-content-between align-items-center mb-1">
+                  <label class="form-label fw-semibold mb-0"><i class="bi bi-diagram-3-fill text-primary me-1"></i>Jurusan yang Diampu</label>
+                  <button type="button" class="btn btn-link btn-sm p-0 text-decoration-none" style="font-size: 0.75rem;" onclick="openJurusanModal()">+ Kelola Jurusan</button>
+                </div>
+                <div class="border rounded-3 p-2 bg-light" style="max-height: 150px; overflow-y: auto;" id="crud-guru-jurusan-checklist">
+                  <div class="text-muted small py-2 text-center">Memuat jurusan...</div>
+                </div>
+                <small class="text-muted">Pilih jurusan yang diajar oleh guru ini (penting jika ada beberapa guru dengan mapel & tingkat kelas sama tetapi di jurusan berbeda).</small>
+              </div>
+              <div class="col-md-6">
+                <div class="d-flex justify-content-between align-items-center mb-1">
+                  <label class="form-label fw-semibold mb-0"><i class="bi bi-collection-fill text-success me-1"></i>Kelas / Tingkat yang Diampu</label>
+                  <button type="button" class="btn btn-link btn-sm p-0 text-decoration-none" style="font-size: 0.75rem;" onclick="openKelasModal()">+ Kelola Kelas</button>
+                </div>
+                <div class="border rounded-3 p-2 bg-light" style="max-height: 150px; overflow-y: auto;" id="crud-guru-kelas-checklist">
+                  <div class="text-muted small py-2 text-center">Memuat kelas...</div>
+                </div>
+                <small class="text-muted">Pilih tingkat angkatan (Tingkat X / XI / XII) atau rombel kelas spesifik yang diajar guru ini.</small>
+              </div>
               <div class="col-12">
                 <label class="form-label fw-semibold mb-1">Akses Paket Soal Spesifik (Opsional)</label>
-                <div class="border rounded-3 p-2 bg-light" style="max-height: 160px; overflow-y: auto;" id="crud-guru-paket-checklist">
+                <div class="border rounded-3 p-2 bg-light" style="max-height: 150px; overflow-y: auto;" id="crud-guru-paket-checklist">
                   <div class="text-muted small py-2 text-center">Memuat daftar paket soal...</div>
                 </div>
-                <small class="text-muted">Selain mencocokkan nama Mata Pelajaran secara otomatis, Anda juga dapat mencentang paket soal tertentu di atas agar bisa diakses oleh guru ini.</small>
+                <small class="text-muted">Selain mencocokkan Mapel, Jurusan & Kelas secara otomatis, Anda juga dapat mencentang paket soal tertentu di atas agar bisa diakses oleh guru ini.</small>
               </div>
               <div class="col-12">
                 <label for="crud-guru-pass" class="form-label fw-semibold">Password Login Guru</label>
@@ -1563,13 +1583,13 @@
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   
   <!-- CBT Modules -->
-  <script src="js/config.js?v=30"></script>
-  <script src="js/supabase-config.js?v=30"></script>
-  <script src="js/db-adapter.js?v=30"></script>
-  <script src="js/auth.js?v=30"></script>
-  <script src="js/excel-helpers.js?v=30"></script>
-  <script src="js/templates.js?v=30"></script>
-  <script src="js/admin.js?v=30"></script>
+  <script src="js/config.js?v=31"></script>
+  <script src="js/supabase-config.js?v=31"></script>
+  <script src="js/db-adapter.js?v=31"></script>
+  <script src="js/auth.js?v=31"></script>
+  <script src="js/excel-helpers.js?v=31"></script>
+  <script src="js/templates.js?v=31"></script>
+  <script src="js/admin.js?v=31"></script>
   <script>
     // Dark mode logic
     const themeToggleBtn = document.getElementById('theme-toggle-admin');
