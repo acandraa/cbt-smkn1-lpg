@@ -89,7 +89,7 @@
               <tbody>
                 <tr>
                   <td class="fw-semibold bg-light" style="width: 35%;">Mata Ujian</td>
-                  <td>Tes Potensi Akademik & Kelayakan (CBT)</td>
+                  <td><span id="dash-mapel" class="fw-bold text-dark">Memuat data ujian...</span></td>
                 </tr>
                 <tr>
                   <td class="fw-semibold bg-light">Jadwal Ujian</td>
@@ -109,6 +109,35 @@
                 </tr>
               </tbody>
             </table>
+          </div>
+
+          <!-- Card Konfirmasi Mata Pelajaran Agama (Otomatis muncul jika ada ujian Agama) -->
+          <div id="card-pilih-agama" class="alert alert-primary border-primary shadow-sm rounded-3 p-3 mt-3 d-none">
+            <div class="d-flex align-items-center justify-content-between flex-wrap gap-2 mb-2">
+              <div class="d-flex align-items-center gap-2">
+                <i class="bi bi-shield-check fs-4 text-primary"></i>
+                <div>
+                  <h6 class="mb-0 fw-bold text-primary">Konfirmasi Mata Pelajaran Agama</h6>
+                  <small class="text-muted">Pilih mata pelajaran yang sesuai dengan agama yang Anda anut:</small>
+                </div>
+              </div>
+              <span class="badge bg-primary-subtle text-primary border border-primary-subtle" id="badge-agama-count">Pilihan Agama</span>
+            </div>
+            <div class="row g-2 mt-1" id="list-opsi-agama">
+              <!-- Opsi Pilihan Agama Dinamis dirender oleh js/ujian.js -->
+            </div>
+          </div>
+
+          <!-- Card Pemilihan Paket Ujian (Jika ada lebih dari 1 ujian non-agama aktif) -->
+          <div id="card-pilih-paket" class="alert alert-info border-info shadow-sm rounded-3 p-3 mt-3 d-none">
+            <div class="d-flex align-items-center gap-2 mb-2">
+              <i class="bi bi-journal-bookmark-fill fs-5 text-info-emphasis"></i>
+              <h6 class="mb-0 fw-bold text-info-emphasis">Pilih Mata Pelajaran Ujian</h6>
+            </div>
+            <p class="small text-muted mb-2">Terdapat lebih dari satu mata ujian yang sedang aktif untuk rombel Anda:</p>
+            <select class="form-select" id="select-active-paket" onchange="switchActivePaketManually(this.value)">
+              <!-- Opsi paket aktif dinamis -->
+            </select>
           </div>
 
           <!-- Alert for already completed exams -->
@@ -156,7 +185,10 @@
           <!-- Exam HUD Header -->
           <div class="d-flex justify-content-between align-items-center mb-4 pb-3 border-bottom flex-wrap gap-2">
             <div>
-              <span class="badge bg-primary fs-6 font-heading mb-1" id="exam-soal-index">Soal 1 dari 40</span>
+              <div class="d-flex align-items-center gap-2 flex-wrap mb-1">
+                <span class="badge bg-primary fs-6 font-heading" id="exam-soal-index">Soal 1 dari 40</span>
+                <span class="badge bg-dark-subtle text-dark border font-heading" id="exam-mapel-badge">Mata Pelajaran</span>
+              </div>
               <div class="text-muted small d-flex align-items-center gap-1">
                 <i class="bi bi-cloud-check-fill text-success" id="sync-icon"></i>
                 <span id="sync-text">Jawaban disimpan otomatis</span>
@@ -319,11 +351,11 @@
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 
   <!-- CBT Modules -->
-  <script src="js/config.js?v=26"></script>
-  <script src="js/supabase-config.js?v=26"></script>
-  <script src="js/db-adapter.js?v=26"></script>
-  <script src="js/auth.js?v=26"></script>
-  <script src="js/ujian.js?v=26"></script>
+  <script src="js/config.js?v=29"></script>
+  <script src="js/supabase-config.js?v=29"></script>
+  <script src="js/db-adapter.js?v=29"></script>
+  <script src="js/auth.js?v=29"></script>
+  <script src="js/ujian.js?v=29"></script>
 
   <script>
     // Dark mode logic

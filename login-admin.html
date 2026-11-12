@@ -64,44 +64,90 @@
 
       <!-- Main Login Glass Card -->
       <div class="glass-card p-4">
-        <div class="text-center mb-4">
+        <div class="text-center mb-3">
           <svg width="60" height="60" viewBox="0 0 100 100" fill="none" xmlns="http://www.w3.org/2000/svg" class="mb-3">
             <circle cx="50" cy="50" r="45" fill="#0d6efd" stroke="#ffffff" stroke-width="4"/>
             <path d="M50 20 L25 40 L35 40 L35 75 L65 75 L65 40 L75 40 Z" fill="#ffffff"/>
             <path d="M45 45 H55 V65 H45 Z" fill="#0d6efd"/>
             <circle cx="50" cy="50" r="8" fill="#ffc107"/>
           </svg>
-          <h4 class="fw-bold" style="color: #1e3c72;">Portal Admin CBT</h4>
-          <p class="text-muted small">Silakan masuk dengan kredensial administrator</p>
+          <h4 class="fw-bold" style="color: #1e3c72;" id="portal-title">Portal Admin & Guru CBT</h4>
+          <p class="text-muted small mb-0" id="portal-subtitle">Pilih peran akun untuk masuk ke sistem manajemen</p>
         </div>
 
+        <!-- Role Switcher Tabs (Admin / Guru Mapel) -->
+        <ul class="nav nav-pills nav-fill bg-light p-1 rounded-3 mb-4 border" id="loginRoleTabs" role="tablist">
+          <li class="nav-item" role="presentation">
+            <button class="nav-link active fw-semibold small py-2 rounded-3" id="tab-btn-admin" type="button" onclick="switchLoginRole('admin')">
+              <i class="bi bi-shield-lock-fill me-1"></i>Administrator
+            </button>
+          </li>
+          <li class="nav-item" role="presentation">
+            <button class="nav-link fw-semibold small py-2 rounded-3" id="tab-btn-guru" type="button" onclick="switchLoginRole('guru')">
+              <i class="bi bi-person-workspace me-1"></i>Guru Mapel
+            </button>
+          </li>
+        </ul>
+
         <!-- Admin Login Form -->
-        <div id="admin">
-            <form id="form-admin" autocomplete="off">
-              <div class="mb-3">
-                <label for="admin-email" class="form-label font-heading fw-semibold">Email Admin</label>
-                <div class="input-group">
-                  <span class="input-group-text"><i class="bi bi-envelope-fill"></i></span>
-                  <input type="email" class="form-control" id="admin-email" placeholder="admin@smkn1lempuing.sch.id" required autocomplete="off">
-                </div>
+        <div id="panel-login-admin">
+          <form id="form-admin" autocomplete="off">
+            <div class="mb-3">
+              <label for="admin-email" class="form-label font-heading fw-semibold">Email Admin</label>
+              <div class="input-group">
+                <span class="input-group-text"><i class="bi bi-envelope-fill"></i></span>
+                <input type="email" class="form-control" id="admin-email" placeholder="admin@smkn1lempuing.sch.id" required autocomplete="off">
               </div>
-              <div class="mb-4">
-                <label for="admin-password" class="form-label font-heading fw-semibold">Password</label>
-                <div class="input-group">
-                  <span class="input-group-text"><i class="bi bi-lock-fill"></i></span>
-                  <input type="password" class="form-control" id="admin-password" placeholder="Ã¢â‚¬Â¢Ã¢â‚¬Â¢Ã¢â‚¬Â¢Ã¢â‚¬Â¢Ã¢â‚¬Â¢Ã¢â‚¬Â¢Ã¢â‚¬Â¢Ã¢â‚¬Â¢" required autocomplete="new-password">
-                  <button class="btn btn-outline-secondary" type="button" onclick="togglePassword('admin-password')">
-                    <i class="bi bi-eye" id="admin-password-eye"></i>
-                  </button>
-                </div>
-              </div>
-              <div class="d-grid mb-3">
-                <button type="submit" class="btn btn-primary-custom text-white" id="btn-login-admin">
-                  Login Admin <i class="bi bi-shield-check ms-1"></i>
+            </div>
+            <div class="mb-4">
+              <label for="admin-password" class="form-label font-heading fw-semibold">Password</label>
+              <div class="input-group">
+                <span class="input-group-text"><i class="bi bi-lock-fill"></i></span>
+                <input type="password" class="form-control" id="admin-password" placeholder="••••••••" required autocomplete="new-password">
+                <button class="btn btn-outline-secondary" type="button" onclick="togglePassword('admin-password')">
+                  <i class="bi bi-eye" id="admin-password-eye"></i>
                 </button>
               </div>
-            </form>
+            </div>
+            <div class="d-grid mb-2">
+              <button type="submit" class="btn btn-primary-custom text-white" id="btn-login-admin">
+                Login Admin <i class="bi bi-shield-check ms-1"></i>
+              </button>
+            </div>
+          </form>
+        </div>
+
+        <!-- Guru Mapel Login Form -->
+        <div id="panel-login-guru" class="d-none">
+          <div class="alert alert-primary bg-primary bg-opacity-10 border-primary border-opacity-25 py-2 px-3 small mb-3">
+            <i class="bi bi-info-circle-fill text-primary me-1"></i>
+            Masuk menggunakan <strong>Username & Password Guru</strong> yang telah dibuat oleh Admin untuk mengelola Bank Soal & mengunduh Nilai mata pelajaran yang Anda ampu.
           </div>
+          <form id="form-guru" autocomplete="off">
+            <div class="mb-3">
+              <label for="guru-username" class="form-label font-heading fw-semibold">Username Guru</label>
+              <div class="input-group">
+                <span class="input-group-text"><i class="bi bi-person-badge-fill"></i></span>
+                <input type="text" class="form-control" id="guru-username" placeholder="Contoh: guru_mtk" required autocomplete="off">
+              </div>
+            </div>
+            <div class="mb-4">
+              <label for="guru-password" class="form-label font-heading fw-semibold">Password</label>
+              <div class="input-group">
+                <span class="input-group-text"><i class="bi bi-lock-fill"></i></span>
+                <input type="password" class="form-control" id="guru-password" placeholder="••••••••" required autocomplete="new-password">
+                <button class="btn btn-outline-secondary" type="button" onclick="togglePassword('guru-password')">
+                  <i class="bi bi-eye" id="guru-password-eye"></i>
+                </button>
+              </div>
+            </div>
+            <div class="d-grid mb-2">
+              <button type="submit" class="btn btn-success text-white fw-semibold py-2" id="btn-login-guru">
+                Login Guru Mapel <i class="bi bi-box-arrow-in-right ms-1"></i>
+              </button>
+            </div>
+          </form>
+        </div>
 
       </div>
     </div>
@@ -115,14 +161,37 @@
   <!-- Supabase -->
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <!-- Configs & Auth -->
-  <script src="js/config.js?v=26"></script>
-  <script src="js/supabase-config.js?v=26"></script>
-  <script src="js/db-adapter.js?v=26"></script>
-  <script src="js/auth.js?v=26"></script>
+  <script src="js/config.js?v=30"></script>
+  <script src="js/supabase-config.js?v=30"></script>
+  <script src="js/db-adapter.js?v=30"></script>
+  <script src="js/auth.js?v=30"></script>
 
   <script>
+    function switchLoginRole(role) {
+      const btnAdmin = document.getElementById('tab-btn-admin');
+      const btnGuru = document.getElementById('tab-btn-guru');
+      const panelAdmin = document.getElementById('panel-login-admin');
+      const panelGuru = document.getElementById('panel-login-guru');
+
+      if (role === 'guru') {
+        btnAdmin.classList.remove('active');
+        btnGuru.classList.add('active');
+        panelAdmin.classList.add('d-none');
+        panelGuru.classList.remove('d-none');
+      } else {
+        btnGuru.classList.remove('active');
+        btnAdmin.classList.add('active');
+        panelGuru.classList.add('d-none');
+        panelAdmin.classList.remove('d-none');
+      }
+    }
+
     // Show configuration warnings or local demo notice
     document.addEventListener("DOMContentLoaded", () => {
+      const urlParamsInit = new URLSearchParams(window.location.search);
+      if (urlParamsInit.get('role') === 'guru') {
+        switchLoginRole('guru');
+      }
       if (!window.CBT_CONFIG.isConfigured) {
         document.getElementById('config-warning').className = 'alert alert-info';
         document.getElementById('config-warning').innerHTML = `
@@ -138,7 +207,6 @@
             </button>
           </div>
         `;
-        document.getElementById('btn-login-peserta').disabled = false;
         document.getElementById('btn-login-admin').disabled = false;
       }
 
@@ -146,7 +214,7 @@
       const urlParams = new URLSearchParams(window.location.search);
       const errorMsg = urlParams.get('error');
       if (errorMsg === 'unauthorized_admin') {
-        Swal.fire("Akses Ditolak", "Sesi login Anda tidak memiliki akses Administrator.", "error");
+        Swal.fire("Akses Ditolak", "Sesi login Anda tidak memiliki akses Administrator / Guru.", "error");
       } else if (errorMsg === 'unauthorized_peserta') {
         Swal.fire("Akses Ditolak", "Sesi login Anda tidak memiliki akses Peserta.", "error");
       } else if (errorMsg === 'config_missing') {
@@ -196,6 +264,34 @@
       } catch (err) {
         Swal.fire('Login Gagal', err.message || 'Terjadi kesalahan.', 'error');
         btn.innerHTML = `Login Admin <i class="bi bi-shield-check ms-1"></i>`;
+        btn.disabled = false;
+      }
+    });
+
+    // Handle Guru Login
+    document.getElementById('form-guru').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const username = document.getElementById('guru-username').value.trim();
+      const pass = document.getElementById('guru-password').value;
+      const btn = document.getElementById('btn-login-guru');
+
+      btn.innerHTML = `<span class="spinner-border spinner-border-sm me-1"></span> Memverifikasi Akun Guru...`;
+      btn.disabled = true;
+
+      try {
+        const guru = await DB.loginGuru(username, pass);
+        Swal.fire({
+          icon: 'success',
+          title: 'Login Guru Berhasil',
+          html: `Selamat datang, <strong>${guru.nama_lengkap}</strong><br><span class="badge bg-primary mt-1">Mapel: ${guru.mapel_diampu}</span>`,
+          timer: 1600,
+          showConfirmButton: false
+        }).then(() => {
+          window.location.href = 'admin.html';
+        });
+      } catch (err) {
+        Swal.fire('Login Guru Gagal', err.message || 'Username atau password salah.', 'error');
+        btn.innerHTML = `Login Guru Mapel <i class="bi bi-box-arrow-in-right ms-1"></i>`;
         btn.disabled = false;
       }
     });

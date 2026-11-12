@@ -71,7 +71,10 @@
         <div class="position-sticky pt-3">
           <div class="text-center py-3 mb-3 border-bottom border-secondary mx-3">
             <h6 class="fw-bold mb-0 text-white" id="admin-display-name">Administrator</h6>
-            <small class="text-muted">CBT Manager</small>
+            <small class="text-muted" id="admin-role-subtitle">CBT Manager</small>
+            <div id="guru-mapel-badge-sidebar" class="mt-2 d-none">
+              <span class="badge bg-success text-white text-wrap" id="guru-mapel-badge-text">Mapel</span>
+            </div>
           </div>
           <!-- Multi-Shard Selector (Muncul jika ada lebih dari 1 project Supabase) -->
           <div class="px-3 mb-3" id="admin-shard-selector-wrapper" style="display: none;">
@@ -80,32 +83,37 @@
             </select>
           </div>
           <ul class="nav flex-column">
-            <li class="nav-item">
+            <li class="nav-item" id="nav-item-dashboard">
               <a class="admin-nav-link active" href="#" onclick="switchTab('dashboard')">
                 <i class="bi bi-speedometer2"></i> Dashboard
               </a>
             </li>
-            <li class="nav-item">
+            <li class="nav-item" id="nav-item-peserta">
               <a class="admin-nav-link" href="#" onclick="switchTab('peserta')">
                 <i class="bi bi-people-fill"></i> Data Peserta
               </a>
             </li>
-            <li class="nav-item">
-              <a class="admin-nav-link" href="#" onclick="switchTab('soal')">
-                <i class="bi bi-journal-text"></i> Bank Soal
+            <li class="nav-item" id="nav-item-guru">
+              <a class="admin-nav-link" href="#" onclick="switchTab('guru')">
+                <i class="bi bi-person-workspace"></i> Data Guru Mapel
               </a>
             </li>
-            <li class="nav-item">
+            <li class="nav-item" id="nav-item-soal">
+              <a class="admin-nav-link" href="#" onclick="switchTab('soal')">
+                <i class="bi bi-journal-text"></i> <span id="nav-label-soal">Bank Soal</span>
+              </a>
+            </li>
+            <li class="nav-item" id="nav-item-jurusan">
               <a class="admin-nav-link" href="#" onclick="switchTab('jurusan')">
                 <i class="bi bi-diagram-3-fill"></i> Jurusan & Kelas
               </a>
             </li>
-            <li class="nav-item">
+            <li class="nav-item" id="nav-item-nilai">
               <a class="admin-nav-link" href="#" onclick="switchTab('nilai')">
-                <i class="bi bi-award-fill"></i> Hasil Ujian
+                <i class="bi bi-award-fill"></i> <span id="nav-label-nilai">Hasil Ujian</span>
               </a>
             </li>
-            <li class="nav-item">
+            <li class="nav-item" id="nav-item-pengaturan">
               <a class="admin-nav-link" href="#" onclick="switchTab('pengaturan')">
                 <i class="bi bi-sliders"></i> Pengaturan
               </a>
@@ -437,14 +445,76 @@
           </div>
         </section>
 
+        <!-- SECTION: DATA GURU MATA PELAJARAN -->
+        <section id="sec-guru" class="d-none">
+          <div class="d-flex justify-content-between flex-wrap flex-md-nowrap align-items-center pt-3 pb-2 mb-4 border-bottom">
+            <div>
+              <h1 class="h2 text-dark mb-1">Data Guru Mata Pelajaran</h1>
+              <p class="text-muted small mb-0">Kelola akun guru pengampu mata pelajaran agar guru dapat membuat soal (Manual / Excel / AI) dan mengunduh nilai sesuai mapel yang ditentukan Admin.</p>
+            </div>
+            <div class="btn-toolbar mb-2 mb-md-0 gap-2">
+              <button class="btn btn-outline-primary btn-sm rounded-pill px-3" onclick="loadGuru()">
+                <i class="bi bi-arrow-clockwise me-1"></i> Refresh
+              </button>
+              <button class="btn btn-primary btn-sm rounded-pill px-3" onclick="openGuruForm()">
+                <i class="bi bi-person-plus-fill me-1"></i> Tambah Akun Guru
+              </button>
+            </div>
+          </div>
+
+          <div class="alert alert-info border-0 shadow-sm d-flex align-items-center mb-4">
+            <i class="bi bi-person-workspace fs-4 me-3 text-primary"></i>
+            <div class="small">
+              <strong>Cara Kerja Akun Guru:</strong> Setiap guru yang didaftarkan di sini dapat login melalui halaman <code>Login Guru Mapel</code>. Guru <strong>hanya dapat melihat, membuat soal (Manual / Import Excel / AI Generator), dan mengunduh nilai (Excel)</strong> untuk Mata Pelajaran atau Paket Soal yang ditugaskan oleh Admin.
+            </div>
+          </div>
+
+          <div class="glass-card p-0 mb-4" style="min-height: 340px;">
+            <div class="table-responsive">
+              <table class="table table-hover align-middle mb-0 custom-table">
+                <thead>
+                  <tr>
+                    <th style="width: 55px;">No</th>
+                    <th style="min-width: 130px;">Username Login</th>
+                    <th style="min-width: 200px;">Nama Lengkap Guru</th>
+                    <th style="min-width: 220px;">Mata Pelajaran Diampu</th>
+                    <th style="min-width: 200px;">Akses Paket Soal</th>
+                    <th class="text-center" style="width: 140px;">Aksi</th>
+                  </tr>
+                </thead>
+                <tbody id="table-guru-body">
+                  <tr>
+                    <td colspan="6" class="text-center py-4 text-muted">
+                      <span class="spinner-border spinner-border-sm me-1 text-primary"></span> Memuat daftar akun guru...
+                    </td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </section>
+
         <!-- SECTION: DATA SOAL -->
         <section id="sec-soal" class="d-none">
-          <div class="d-flex justify-content-between flex-wrap flex-md-nowrap align-items-center pt-3 pb-2 mb-4 border-bottom">
-            <h1 class="h2 text-dark">Bank Soal & Paket Ujian</h1>
+          <div class="d-flex justify-content-between flex-wrap flex-md-nowrap align-items-center pt-3 pb-2 mb-3 border-bottom">
+            <div>
+              <h1 class="h2 text-dark mb-0" id="heading-sec-soal">Bank Soal & Paket Ujian</h1>
+            </div>
             <div class="btn-toolbar mb-2 mb-md-0 gap-2">
               <button class="btn btn-outline-primary btn-sm rounded-pill px-3" onclick="ExcelTemplates.downloadSoalTemplate()">
                 <i class="bi bi-cloud-download me-1"></i> Unduh Template Soal
               </button>
+            </div>
+          </div>
+
+          <!-- Banner Info khusus ketika login sebagai Guru Mapel -->
+          <div id="guru-scope-banner-soal" class="alert alert-success border-success border-opacity-25 d-none align-items-center justify-content-between flex-wrap gap-2 mb-4">
+            <div class="d-flex align-items-center">
+              <i class="bi bi-person-workspace fs-4 me-3 text-success"></i>
+              <div>
+                <div class="fw-bold text-dark">Mode Guru Pengampu Mata Pelajaran</div>
+                <div class="small text-muted">Anda memiliki akses penuh untuk membuat & mengelola soal (Manual, Import Excel, dan AI Generator) pada mata pelajaran: <strong class="text-success" id="guru-banner-mapel-soal">-</strong></div>
+              </div>
             </div>
           </div>
 
@@ -454,7 +524,7 @@
               <div class="glass-card p-3 h-100">
                 <div class="d-flex justify-content-between align-items-center mb-2">
                   <h5 class="fw-bold mb-0">Daftar Paket Soal</h5>
-                  <div class="btn-group btn-group-sm">
+                  <div class="btn-group btn-group-sm" id="btn-group-master-jurusan-kelas">
                     <button class="btn btn-outline-secondary py-0 px-2" onclick="openJurusanModal()" title="Kelola Master Jurusan">
                       <i class="bi bi-mortarboard-fill me-1"></i>Jurusan
                     </button>
@@ -647,12 +717,23 @@
 
         <!-- SECTION: HASIL & NILAI -->
         <section id="sec-nilai" class="d-none">
-          <div class="d-flex justify-content-between flex-wrap flex-md-nowrap align-items-center pt-3 pb-2 mb-4 border-bottom">
-            <h1 class="h2 text-dark">Hasil Nilai Ujian Seleksi</h1>
+          <div class="d-flex justify-content-between flex-wrap flex-md-nowrap align-items-center pt-3 pb-2 mb-3 border-bottom">
+            <h1 class="h2 text-dark mb-0" id="heading-sec-nilai">Hasil Nilai Ujian Seleksi</h1>
             <div class="btn-toolbar mb-2 mb-md-0 gap-2">
-              <button class="btn btn-outline-success btn-sm rounded-pill px-3" onclick="exportHasilUjian()">
-                <i class="bi bi-download me-1"></i> Export Nilai (Excel)
+              <button class="btn btn-success btn-sm rounded-pill px-3 fw-semibold shadow-sm" onclick="exportHasilUjian()">
+                <i class="bi bi-file-earmark-excel-fill me-1"></i> Download Nilai (Excel)
               </button>
+            </div>
+          </div>
+
+          <!-- Banner Info khusus ketika login sebagai Guru Mapel -->
+          <div id="guru-scope-banner-nilai" class="alert alert-primary border-primary border-opacity-25 d-none align-items-center justify-content-between flex-wrap gap-2 mb-4">
+            <div class="d-flex align-items-center">
+              <i class="bi bi-award-fill fs-4 me-3 text-primary"></i>
+              <div>
+                <div class="fw-bold text-dark">Rekapitulasi Nilai Mata Pelajaran Anda</div>
+                <div class="small text-muted">Menampilkan hasil ujian siswa khusus mata pelajaran: <strong class="text-primary" id="guru-banner-mapel-nilai">-</strong>. Klik tombol <strong>Download Nilai (Excel)</strong> di kanan atas untuk mengunduh rekap nilai.</div>
+              </div>
             </div>
           </div>
 
@@ -1011,6 +1092,77 @@
     </div>
   </div>
 
+  <!-- Modal: Guru Form (Add/Edit) -->
+  <div class="modal fade" id="guruFormModal" tabindex="-1">
+    <div class="modal-dialog modal-lg">
+      <div class="modal-content glass-card border-0">
+        <div class="modal-header">
+          <h5 class="modal-title fw-bold" id="guruFormTitle"><i class="bi bi-person-workspace me-2 text-primary"></i>Form Akun Guru Mapel</h5>
+          <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+        </div>
+        <form id="form-guru-crud">
+          <input type="hidden" id="guru-id">
+          <div class="modal-body">
+            <div class="row g-3">
+              <div class="col-md-6">
+                <label for="crud-guru-username" class="form-label fw-semibold">Username Login Guru <span class="text-danger">*</span></label>
+                <div class="input-group">
+                  <span class="input-group-text"><i class="bi bi-person-badge"></i></span>
+                  <input type="text" class="form-control" id="crud-guru-username" placeholder="Contoh: guru_mtk" required autocomplete="off">
+                </div>
+                <small class="text-muted">Gunakan huruf/angka tanpa spasi untuk login guru.</small>
+              </div>
+              <div class="col-md-6">
+                <label for="crud-guru-nama" class="form-label fw-semibold">Nama Lengkap & Gelar <span class="text-danger">*</span></label>
+                <input type="text" class="form-control" id="crud-guru-nama" placeholder="Contoh: Bpk. Hendra Wijaya, S.Pd." required>
+              </div>
+              <div class="col-12">
+                <label for="crud-guru-mapel" class="form-label fw-semibold">Mata Pelajaran yang Diampu <span class="text-danger">*</span></label>
+                <input type="text" class="form-control" id="crud-guru-mapel" placeholder="Contoh: Matematika (Pisahkan dengan koma jika lebih dari 1 mapel)" required>
+                <div class="d-flex align-items-center gap-1 flex-wrap mt-2">
+                  <span class="small text-muted me-1">Pilih Cepat Mapel:</span>
+                  <button type="button" class="btn btn-outline-secondary btn-sm py-0 px-2" style="font-size: 0.74rem;" onclick="appendGuruMapelPreset('Matematika')">Matematika</button>
+                  <button type="button" class="btn btn-outline-secondary btn-sm py-0 px-2" style="font-size: 0.74rem;" onclick="appendGuruMapelPreset('Bahasa Indonesia')">B. Indonesia</button>
+                  <button type="button" class="btn btn-outline-secondary btn-sm py-0 px-2" style="font-size: 0.74rem;" onclick="appendGuruMapelPreset('Bahasa Inggris')">B. Inggris</button>
+                  <button type="button" class="btn btn-outline-secondary btn-sm py-0 px-2" style="font-size: 0.74rem;" onclick="appendGuruMapelPreset('Pendidikan Agama Islam')">PAI</button>
+                  <button type="button" class="btn btn-outline-secondary btn-sm py-0 px-2" style="font-size: 0.74rem;" onclick="appendGuruMapelPreset('Pendidikan Agama Kristen')">Agama Kristen</button>
+                  <button type="button" class="btn btn-outline-secondary btn-sm py-0 px-2" style="font-size: 0.74rem;" onclick="appendGuruMapelPreset('Pendidikan Agama Hindu')">Agama Hindu</button>
+                  <button type="button" class="btn btn-outline-secondary btn-sm py-0 px-2" style="font-size: 0.74rem;" onclick="appendGuruMapelPreset('PKN / Pancasila')">PKN</button>
+                  <button type="button" class="btn btn-outline-secondary btn-sm py-0 px-2" style="font-size: 0.74rem;" onclick="appendGuruMapelPreset('Sejarah')">Sejarah</button>
+                  <button type="button" class="btn btn-outline-secondary btn-sm py-0 px-2" style="font-size: 0.74rem;" onclick="appendGuruMapelPreset('Produktif TKJ')">Produktif TKJ</button>
+                  <button type="button" class="btn btn-outline-secondary btn-sm py-0 px-2" style="font-size: 0.74rem;" onclick="appendGuruMapelPreset('Produktif RPL')">Produktif RPL</button>
+                </div>
+                <small class="text-muted d-block mt-1">Guru otomatis dapat membuat & mengelola paket soal yang sesuai dengan nama mata pelajaran di atas.</small>
+              </div>
+              <div class="col-12">
+                <label class="form-label fw-semibold mb-1">Akses Paket Soal Spesifik (Opsional)</label>
+                <div class="border rounded-3 p-2 bg-light" style="max-height: 160px; overflow-y: auto;" id="crud-guru-paket-checklist">
+                  <div class="text-muted small py-2 text-center">Memuat daftar paket soal...</div>
+                </div>
+                <small class="text-muted">Selain mencocokkan nama Mata Pelajaran secara otomatis, Anda juga dapat mencentang paket soal tertentu di atas agar bisa diakses oleh guru ini.</small>
+              </div>
+              <div class="col-12">
+                <label for="crud-guru-pass" class="form-label fw-semibold">Password Login Guru</label>
+                <div class="input-group">
+                  <span class="input-group-text"><i class="bi bi-key-fill"></i></span>
+                  <input type="password" class="form-control" id="crud-guru-pass" placeholder="Masukkan password akun guru">
+                  <button class="btn btn-outline-secondary" type="button" onclick="togglePasswordVisibility('crud-guru-pass')">
+                    <i class="bi bi-eye" id="crud-guru-pass-eye"></i>
+                  </button>
+                </div>
+                <small class="text-muted d-block mt-1" id="crud-guru-pass-help">Wajib diisi saat membuat akun guru baru. Kosongkan saat mengedit jika tidak ingin mengubah password.</small>
+              </div>
+            </div>
+          </div>
+          <div class="modal-footer">
+            <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Batal</button>
+            <button type="submit" class="btn btn-primary" id="btn-save-guru-crud"><i class="bi bi-save me-1"></i> Simpan Akun Guru</button>
+          </div>
+        </form>
+      </div>
+    </div>
+  </div>
+
   <!-- Modal: Peserta Form (Add/Edit) -->
   <div class="modal fade" id="pesertaFormModal" tabindex="-1">
     <div class="modal-dialog">
@@ -1176,7 +1328,18 @@
           <div class="modal-body">
             <div class="mb-3">
               <label for="crud-paket-nama" class="form-label fw-semibold">Nama Paket Soal</label>
-              <input type="text" class="form-control" id="crud-paket-nama" required placeholder="Cth: Ujian Matematika Sesi 1">
+              <input type="text" class="form-control" id="crud-paket-nama" required placeholder="Cth: Pendidikan Agama Islam - Kelas X" oninput="detectPaketAgamaHint(this.value)">
+              <div class="d-flex align-items-center gap-1 flex-wrap mt-2">
+                <span class="small text-muted me-1">Pilihan Cepat Mapel Agama:</span>
+                <button type="button" class="btn btn-outline-success btn-sm py-0 px-2" style="font-size: 0.75rem;" onclick="setPaketNamaPreset('Pendidikan Agama Islam')">PAI</button>
+                <button type="button" class="btn btn-outline-primary btn-sm py-0 px-2" style="font-size: 0.75rem;" onclick="setPaketNamaPreset('Pendidikan Agama Kristen')">Kristen</button>
+                <button type="button" class="btn btn-outline-danger btn-sm py-0 px-2" style="font-size: 0.75rem;" onclick="setPaketNamaPreset('Pendidikan Agama Katolik')">Katolik</button>
+                <button type="button" class="btn btn-outline-warning btn-sm py-0 px-2" style="font-size: 0.75rem;" onclick="setPaketNamaPreset('Pendidikan Agama Hindu')">Hindu</button>
+                <button type="button" class="btn btn-outline-info btn-sm py-0 px-2" style="font-size: 0.75rem;" onclick="setPaketNamaPreset('Pendidikan Agama Buddha')">Buddha</button>
+              </div>
+              <div id="paket-agama-hint" class="alert alert-success py-1 px-2 small mt-2 mb-0 d-none">
+                <i class="bi bi-shield-check me-1"></i> <strong>Paket Ujian Agama Terdeteksi:</strong> Siswa akan otomatis diminta mengonfirmasi agamanya di portal ujian sebelum mulai.
+              </div>
             </div>
             <div class="mb-3">
               <label for="crud-paket-jurusan" class="form-label fw-semibold">Jurusan Paket Soal</label>
@@ -1400,13 +1563,13 @@
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   
   <!-- CBT Modules -->
-  <script src="js/config.js?v=28"></script>
-  <script src="js/supabase-config.js?v=28"></script>
-  <script src="js/db-adapter.js?v=28"></script>
-  <script src="js/auth.js?v=28"></script>
-  <script src="js/excel-helpers.js?v=28"></script>
-  <script src="js/templates.js?v=28"></script>
-  <script src="js/admin.js?v=28"></script>
+  <script src="js/config.js?v=30"></script>
+  <script src="js/supabase-config.js?v=30"></script>
+  <script src="js/db-adapter.js?v=30"></script>
+  <script src="js/auth.js?v=30"></script>
+  <script src="js/excel-helpers.js?v=30"></script>
+  <script src="js/templates.js?v=30"></script>
+  <script src="js/admin.js?v=30"></script>
   <script>
     // Dark mode logic
     const themeToggleBtn = document.getElementById('theme-toggle-admin');

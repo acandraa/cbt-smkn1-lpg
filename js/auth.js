@@ -8,8 +8,9 @@ const Auth = {
       throw new Error("Koneksi Supabase belum dikonfigurasi.");
     }
 
-    // Simpan kredensial admin secara aman di sessionStorage untuk sinkronisasi otomatis antar shard
+    // Pastikan sesi guru dibersihkan saat login sebagai Admin penuh
     try {
+      sessionStorage.removeItem('CBT_GURU_SESSION');
       sessionStorage.setItem('CBT_ADMIN_AUTH_SYNC', JSON.stringify({ email, password }));
     } catch (e) {}
 
@@ -69,6 +70,58 @@ const Auth = {
     }
 
     return data.user;
+  },
+
+  // Login Guru Mata Pelajaran menggunakan Username dan Password
+  async loginGuru(username, password) {
+    const shards = (window.getSupabaseShards && window.getSupabaseShards()) || [];
+    const cleanUser = (username || '').trim();
+    if (!cleanUser || !password) {
+      throw new Error("Username dan Password Guru wajib diisi.");
+    }
+
+    // Autentikasi ke Supabase di latar belakang menggunakan akun sinkronisasi sistem agar akses RLS soal & nilai berjalan mulus
+    let syncCreds = null;
+    try {
+      syncCreds = JSON.parse(sessionStorage.getItem('CBT_ADMIN_AUTH_SYNC') || 'null');
+    } catch (e) {}
+    const sysEmail = (syncCreds && syncCreds.email) || 'admin@smkn1lempuing.sch.id';
+    const sysPass = (syncCreds && syncCreds.password) || 'admin123';
+
+    if (shards.length > 1) {
+      await Promise.allSettled(shards.map(async (shard) => {
+        if (!shard.client || !shard.client.auth) return null;
+        const { data } = await shard.client.auth.getSession();
+        if (!data || !data.session) {
+          await shard.client.auth.signInWithPassword({ email: sysEmail, password: sysPass });
+        }
+      }));
+      if (window.setActiveSupabaseShard) window.setActiveSupabaseShard('all');
+    } else if (window.supabaseClient && window.supabaseClient.auth) {
+      const { data } = await window.supabaseClient.auth.getSession();
+      if (!data || !data.session) {
+        await window.supabaseClient.auth.signInWithPassword({ email: sysEmail, password: sysPass });
+      }
+    }
+
+    // Verifikasi kredensial guru melalui DB Adapter
+    const guruUser = await window.DB.verifyGuruCredentials(cleanUser, password);
+    if (!guruUser) {
+      throw new Error("Username atau Password Guru salah, atau akun belum didaftarkan oleh Admin.");
+    }
+
+    const sessionGuru = {
+      id: guruUser.id,
+      username: guruUser.username,
+      email: `${guruUser.username}@guru.smkn1lempuing.sch.id`,
+      nama_lengkap: guruUser.nama_lengkap,
+      mapel_diampu: guruUser.mapel_diampu || '',
+      paket_ids: guruUser.paket_ids || '[]',
+      role: 'guru'
+    };
+
+    sessionStorage.setItem('CBT_GURU_SESSION', JSON.stringify(sessionGuru));
+    return sessionGuru;
   },
 
   // Login peserta using Nomor Peserta and Password (mendukung Multi-Shard Auto-Routing)
@@ -177,6 +230,7 @@ const Auth = {
       }
     }
     sessionStorage.removeItem('CBT_SESSION');
+    sessionStorage.removeItem('CBT_GURU_SESSION');
     sessionStorage.removeItem('CBT_ACTIVE_SHARD_ID');
     sessionStorage.removeItem('CBT_ACTIVE_SHARD_NAME');
     sessionStorage.removeItem('CBT_PESERTA_ACTIVE_SHARD_ID');
@@ -200,6 +254,62 @@ const Auth = {
     }
 
     const shards = (window.getSupabaseShards && window.getSupabaseShards()) || [];
+
+    // Cek apakah yang sedang login adalah Akun Guru Mata Pelajaran
+    if (requiredRole === 'admin') {
+      let guruSessionRaw = null;
+      try {
+        guruSessionRaw = sessionStorage.getItem('CBT_GURU_SESSION');
+      } catch (e) {}
+
+      if (guruSessionRaw) {
+        try {
+          const guruUser = JSON.parse(guruSessionRaw);
+          if (guruUser && guruUser.role === 'guru') {
+            // Pastikan koneksi ke shard Supabase tetap terautentikasi agar Guru bisa kelola soal & unduh nilai
+            let syncCreds = null;
+            try { syncCreds = JSON.parse(sessionStorage.getItem('CBT_ADMIN_AUTH_SYNC') || 'null'); } catch (e) {}
+            const sysEmail = (syncCreds && syncCreds.email) || 'admin@smkn1lempuing.sch.id';
+            const sysPass = (syncCreds && syncCreds.password) || 'admin123';
+
+            if (shards.length > 1) {
+              await Promise.allSettled(shards.map(async (ms) => {
+                if (ms.client && ms.client.auth) {
+                  const { data } = await ms.client.auth.getSession();
+                  if (!data || !data.session) {
+                    await ms.client.auth.signInWithPassword({ email: sysEmail, password: sysPass });
+                  }
+                }
+              }));
+            } else if (window.supabaseClient && window.supabaseClient.auth) {
+              const { data } = await window.supabaseClient.auth.getSession();
+              if (!data || !data.session) {
+                await window.supabaseClient.auth.signInWithPassword({ email: sysEmail, password: sysPass });
+              }
+            }
+
+            // Segarkan data mapel_diampu terbaru dari daftar guru jika memungkinkan
+            try {
+              if (window.DB && window.DB.getGuruList) {
+                const list = await window.DB.getGuruList();
+                const fresh = (list || []).find(g => g.id === guruUser.id || (g.username || '').toLowerCase() === (guruUser.username || '').toLowerCase());
+                if (fresh) {
+                  guruUser.nama_lengkap = fresh.nama_lengkap;
+                  guruUser.mapel_diampu = fresh.mapel_diampu;
+                  guruUser.paket_ids = fresh.paket_ids || '[]';
+                  sessionStorage.setItem('CBT_GURU_SESSION', JSON.stringify(guruUser));
+                }
+              }
+            } catch (e) {}
+
+            this.initAutoLogout(30); // Auto logout 30 menit untuk guru
+            return guruUser;
+          }
+        } catch (e) {
+          sessionStorage.removeItem('CBT_GURU_SESSION');
+        }
+      }
+    }
 
     let session = null;
     if (window.supabaseClient && window.supabaseClient.auth) {
@@ -310,6 +420,7 @@ const Auth = {
   clearSessionData() {
     localStorage.removeItem('CBT_SESSION_EXPIRE');
     sessionStorage.removeItem('CBT_ADMIN_AUTH_SYNC');
+    sessionStorage.removeItem('CBT_GURU_SESSION');
   },
 
   // Automatic logout on inactivity

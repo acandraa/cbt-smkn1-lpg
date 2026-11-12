@@ -372,6 +372,250 @@ const DB = {
       ];
       localStorage.setItem('CBT_LOCAL_KELAS', JSON.stringify(mockKelas));
     }
+
+    if (!localStorage.getItem('CBT_LOCAL_GURU')) {
+      const mockGuru = [
+        {
+          id: "guru-uuid-1",
+          username: "guru_mtk",
+          password_hash: "ef797c8118f02dfb649607dd5d3f8c7623048c9c063d532cc95c5ed7a898a64f", // "123456"
+          nama_lengkap: "Bpk. Hendra Wijaya, S.Pd.",
+          mapel_diampu: "Matematika",
+          paket_ids: '["paket-uuid-1"]',
+          created_at: new Date().toISOString()
+        }
+      ];
+      localStorage.setItem('CBT_LOCAL_GURU', JSON.stringify(mockGuru));
+    }
+  },
+
+  // -------------------------------------------------------------
+  // DATA GURU MATA PELAJARAN MANAGEMENT
+  // -------------------------------------------------------------
+  GURU_SYS_ROW_ID: '00000000-0000-4000-8000-000000000999',
+
+  async _readGuruFromSysRow(client) {
+    const target = client || window.supabaseClient;
+    if (!target) return [];
+    try {
+      const { data, error } = await target
+        .from('soal')
+        .select('id, pertanyaan')
+        .eq('id', this.GURU_SYS_ROW_ID)
+        .maybeSingle();
+      if (error || !data || !data.pertanyaan) return [];
+      const parsed = JSON.parse(data.pertanyaan);
+      return Array.isArray(parsed) ? parsed : [];
+    } catch (e) {
+      return [];
+    }
+  },
+
+  async _writeGuruToSysRow(client, guruList) {
+    const target = client || window.supabaseClient;
+    if (!target) return false;
+    return await this.executeWithAdminAuth(target, async (c) => {
+      const payload = {
+        id: this.GURU_SYS_ROW_ID,
+        paket_soal_id: null,
+        nomor: -999,
+        pertanyaan: JSON.stringify(guruList || []),
+        opsi_a: '__CBT_SYS_GURU__',
+        opsi_b: 'SYSTEM',
+        opsi_c: null,
+        opsi_d: null,
+        jawaban_benar: 'SYS',
+        bobot: 0
+      };
+      const { error } = await c.from('soal').upsert(payload, { onConflict: 'id' });
+      if (error) throw error;
+      return true;
+    });
+  },
+
+  async getGuruList() {
+    if (this.isLocal()) {
+      this.initLocalData();
+      return JSON.parse(localStorage.getItem('CBT_LOCAL_GURU')) || [];
+    }
+
+    const shards = (window.getSupabaseShards && window.getSupabaseShards()) || [];
+    const primaryClient = (shards[0] && shards[0].client) || window.supabaseClient;
+    if (!primaryClient) return [];
+
+    // 1. Coba baca dari tabel public.guru terlebih dahulu (jika sudah dibuat di SQL)
+    try {
+      const { data, error } = await primaryClient
+        .from('guru')
+        .select('*')
+        .order('nama_lengkap', { ascending: true });
+      if (!error && Array.isArray(data) && data.length > 0) {
+        return data;
+      }
+    } catch (e) {}
+
+    // 2. Fallback Zero-SQL: Baca dari baris registri sistem di tabel soal (atau gabungan antar shard)
+    if (shards.length > 1) {
+      const results = await Promise.allSettled(shards.map(s => this._readGuruFromSysRow(s.client)));
+      const mapByUser = new Map();
+      results.forEach(r => {
+        if (r.status === 'fulfilled' && Array.isArray(r.value)) {
+          r.value.forEach(g => {
+            const key = (g.username || g.id || '').toLowerCase();
+            if (key && !mapByUser.has(key)) {
+              mapByUser.set(key, g);
+            }
+          });
+        }
+      });
+      const list = Array.from(mapByUser.values());
+      if (list.length > 0) {
+        return list.sort((a, b) => (a.nama_lengkap || '').localeCompare(b.nama_lengkap || ''));
+      }
+    }
+
+    const list = await this._readGuruFromSysRow(primaryClient);
+    return list.sort((a, b) => (a.nama_lengkap || '').localeCompare(b.nama_lengkap || ''));
+  },
+
+  async saveGuru(id, payload, password = '') {
+    const cleanUsername = (payload.username || '').trim().toLowerCase();
+    const cleanNama = (payload.nama_lengkap || '').trim();
+    const cleanMapel = (payload.mapel_diampu || '').trim();
+    const paketIdsStr = typeof payload.paket_ids === 'string'
+      ? payload.paket_ids
+      : JSON.stringify(Array.isArray(payload.paket_ids) ? payload.paket_ids : []);
+
+    if (!cleanUsername || !cleanNama || !cleanMapel) {
+      throw new Error("Username, Nama Lengkap, dan Mata Pelajaran yang diampu wajib diisi.");
+    }
+
+    const passHash = password ? await this.sha256(password) : '';
+
+    if (this.isLocal()) {
+      this.initLocalData();
+      const list = JSON.parse(localStorage.getItem('CBT_LOCAL_GURU')) || [];
+      const dup = list.find(g => (g.username || '').toLowerCase() === cleanUsername && g.id !== id);
+      if (dup) {
+        throw new Error(`Username guru '${cleanUsername}' sudah digunakan.`);
+      }
+      if (id) {
+        const idx = list.findIndex(g => g.id === id);
+        if (idx === -1) throw new Error("Data guru tidak ditemukan.");
+        list[idx] = {
+          ...list[idx],
+          username: cleanUsername,
+          nama_lengkap: cleanNama,
+          mapel_diampu: cleanMapel,
+          paket_ids: paketIdsStr,
+          ...(passHash ? { password_hash: passHash } : {})
+        };
+        localStorage.setItem('CBT_LOCAL_GURU', JSON.stringify(list));
+        return list[idx];
+      } else {
+        if (!passHash) throw new Error("Password wajib diisi untuk akun guru baru.");
+        const newGuru = {
+          id: this.uuidv4(),
+          username: cleanUsername,
+          password_hash: passHash,
+          nama_lengkap: cleanNama,
+          mapel_diampu: cleanMapel,
+          paket_ids: paketIdsStr,
+          created_at: new Date().toISOString()
+        };
+        list.push(newGuru);
+        localStorage.setItem('CBT_LOCAL_GURU', JSON.stringify(list));
+        return newGuru;
+      }
+    }
+
+    // Mode Cloud Supabase: ambil daftar saat ini, mutakhirkan, lalu simpan ke tabel guru (jika ada) & baris registri sistem di seluruh shard
+    const currentList = await this.getGuruList();
+    const dup = currentList.find(g => (g.username || '').toLowerCase() === cleanUsername && g.id !== id);
+    if (dup) {
+      throw new Error(`Username guru '${cleanUsername}' sudah digunakan.`);
+    }
+
+    let savedRecord = null;
+    if (id) {
+      const idx = currentList.findIndex(g => g.id === id);
+      if (idx === -1) throw new Error("Data guru tidak ditemukan.");
+      savedRecord = {
+        ...currentList[idx],
+        username: cleanUsername,
+        nama_lengkap: cleanNama,
+        mapel_diampu: cleanMapel,
+        paket_ids: paketIdsStr,
+        ...(passHash ? { password_hash: passHash } : {})
+      };
+      currentList[idx] = savedRecord;
+    } else {
+      if (!passHash) throw new Error("Password wajib diisi untuk akun guru baru.");
+      savedRecord = {
+        id: this.uuidv4(),
+        username: cleanUsername,
+        password_hash: passHash,
+        nama_lengkap: cleanNama,
+        mapel_diampu: cleanMapel,
+        paket_ids: paketIdsStr,
+        created_at: new Date().toISOString()
+      };
+      currentList.push(savedRecord);
+    }
+
+    const shards = (window.getSupabaseShards && window.getSupabaseShards()) || [];
+    const targetClients = shards.length > 0 ? shards.map(s => s.client).filter(Boolean) : [window.supabaseClient].filter(Boolean);
+
+    await Promise.allSettled(targetClients.map(async (client) => {
+      // Coba simpan ke tabel native public.guru jika tersedia
+      try {
+        await this.executeWithAdminAuth(client, async (c) => {
+          await c.from('guru').upsert(savedRecord, { onConflict: 'id' });
+        });
+      } catch (e) {}
+      // Selalu sinkronkan ke baris registri sistem agar 100% jalan walau tabel guru belum dibuat
+      await this._writeGuruToSysRow(client, currentList);
+    }));
+
+    return savedRecord;
+  },
+
+  async deleteGuru(id) {
+    if (this.isLocal()) {
+      let list = JSON.parse(localStorage.getItem('CBT_LOCAL_GURU')) || [];
+      list = list.filter(g => g.id !== id);
+      localStorage.setItem('CBT_LOCAL_GURU', JSON.stringify(list));
+      return;
+    }
+
+    let currentList = await this.getGuruList();
+    currentList = currentList.filter(g => g.id !== id);
+
+    const shards = (window.getSupabaseShards && window.getSupabaseShards()) || [];
+    const targetClients = shards.length > 0 ? shards.map(s => s.client).filter(Boolean) : [window.supabaseClient].filter(Boolean);
+
+    await Promise.allSettled(targetClients.map(async (client) => {
+      try {
+        await this.executeWithAdminAuth(client, async (c) => {
+          await c.from('guru').delete().eq('id', id);
+        });
+      } catch (e) {}
+      await this._writeGuruToSysRow(client, currentList);
+    }));
+  },
+
+  async verifyGuruCredentials(username, password) {
+    const cleanUser = (username || '').trim().toLowerCase();
+    const list = await this.getGuruList();
+    const guru = (list || []).find(g => (g.username || '').trim().toLowerCase() === cleanUser);
+    if (!guru) return null;
+
+    const inputHash = await this.sha256(password);
+    const storedHash = (guru.password_hash || '').trim();
+    if (storedHash === inputHash || storedHash === password) {
+      return guru;
+    }
+    return null;
   },
 
   // -------------------------------------------------------------
@@ -1122,7 +1366,9 @@ const DB = {
     if (this.isLocal()) {
       this.initLocalData();
       const list = JSON.parse(localStorage.getItem('CBT_LOCAL_SOAL')) || [];
-      return list.filter(s => s.paket_soal_id === paketId).sort((a,b) => a.nomor - b.nomor);
+      return list
+        .filter(s => s.paket_soal_id === paketId && s.id !== this.GURU_SYS_ROW_ID && s.opsi_a !== '__CBT_SYS_GURU__')
+        .sort((a,b) => a.nomor - b.nomor);
     } else {
       const { data, error } = await window.supabaseClient
         .from('soal')
@@ -1130,7 +1376,7 @@ const DB = {
         .eq('paket_soal_id', paketId)
         .order('nomor', { ascending: true });
       if (error) throw error;
-      return data;
+      return (data || []).filter(s => s.id !== this.GURU_SYS_ROW_ID && s.opsi_a !== '__CBT_SYS_GURU__' && s.nomor !== -999);
     }
   },
 
@@ -1606,6 +1852,7 @@ const DB = {
   // -------------------------------------------------------------
   async loginAdmin(email, password) {
     if (this.isLocal()) {
+      sessionStorage.removeItem('CBT_GURU_SESSION');
       // Mock local admin check
       if (email === 'admin@smkn1lempuing.sch.id' && password === 'admin123') {
         const adminUser = { id: 'admin-uuid-local', email: email, role: 'admin' };
@@ -1616,6 +1863,30 @@ const DB = {
       }
     } else {
       return await Auth.loginAdmin(email, password);
+    }
+  },
+
+  async loginGuru(username, password) {
+    if (this.isLocal()) {
+      this.initLocalData();
+      const guru = await this.verifyGuruCredentials(username, password);
+      if (!guru) {
+        throw new Error("Username atau Password Guru salah (Demo mode: guru_mtk / 123456).");
+      }
+      const guruSession = {
+        id: guru.id,
+        username: guru.username,
+        email: `${guru.username}@guru.smkn1lempuing.sch.id`,
+        nama_lengkap: guru.nama_lengkap,
+        mapel_diampu: guru.mapel_diampu,
+        paket_ids: guru.paket_ids || '[]',
+        role: 'guru'
+      };
+      sessionStorage.setItem('CBT_SESSION', JSON.stringify(guruSession));
+      sessionStorage.setItem('CBT_GURU_SESSION', JSON.stringify(guruSession));
+      return guruSession;
+    } else {
+      return await Auth.loginGuru(username, password);
     }
   },
 
@@ -1643,13 +1914,16 @@ const DB = {
 
   async checkSession(role) {
     if (this.isLocal()) {
-      const sess = sessionStorage.getItem('CBT_SESSION');
+      const sess = sessionStorage.getItem('CBT_SESSION') || sessionStorage.getItem('CBT_GURU_SESSION');
       const loginPage = role === 'admin' ? 'login-admin.html' : 'login.html';
       if (!sess) {
         window.location.href = loginPage;
         return null;
       }
       const user = JSON.parse(sess);
+      if (role === 'admin' && (user.role === 'admin' || user.role === 'guru')) {
+        return user;
+      }
       if (user.role !== role) {
         window.location.href = `${loginPage}?error=unauthorized_${role}`;
         return null;
@@ -1662,6 +1936,7 @@ const DB = {
 
   async logout() {
     sessionStorage.removeItem('CBT_SESSION');
+    sessionStorage.removeItem('CBT_GURU_SESSION');
     await Auth.logout();
   },
 
@@ -1671,14 +1946,15 @@ const DB = {
   async getSoalList() {
     if (this.isLocal()) {
       this.initLocalData();
-      return JSON.parse(localStorage.getItem('CBT_LOCAL_SOAL')) || [];
+      const list = JSON.parse(localStorage.getItem('CBT_LOCAL_SOAL')) || [];
+      return list.filter(s => s.id !== this.GURU_SYS_ROW_ID && s.opsi_a !== '__CBT_SYS_GURU__' && s.nomor !== -999);
     } else {
       const { data, error } = await window.supabaseClient
         .from('soal')
         .select('*')
         .order('nomor', { ascending: true });
       if (error) throw error;
-      return data;
+      return (data || []).filter(s => s.id !== this.GURU_SYS_ROW_ID && s.opsi_a !== '__CBT_SYS_GURU__' && s.nomor !== -999);
     }
   },
 
@@ -1839,6 +2115,14 @@ const DB_PHP = {
 
   deleteKelas(id) { return DB.api('deleteKelas', { id }); },
 
+  getGuruList() { return DB.api('getGuruList'); },
+
+  saveGuru(id, payload, password = '') {
+    return DB.api('saveGuru', { id: id || '', payload, password: password || '' });
+  },
+
+  deleteGuru(id) { return DB.api('deleteGuru', { id }); },
+
   getPaketList() { return DB.api('getPaketList'); },
 
   savePaket(id, payload) { return DB.api('savePaket', { id: id || '', payload }); },
@@ -1911,6 +2195,11 @@ const DB_PHP = {
 
   async loginAdmin(email, password) {
     const user = await DB.api('loginAdmin', { email, password });
+    return user;
+  },
+
+  async loginGuru(username, password) {
+    const user = await DB.api('loginGuru', { username: (username || '').trim(), password });
     return user;
   },
 

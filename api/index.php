@@ -188,6 +188,11 @@ function currentAdmin(): ?array
     return $_SESSION['admin'] ?? null;
 }
 
+function currentGuru(): ?array
+{
+    return $_SESSION['guru'] ?? null;
+}
+
 function currentPesertaId(): ?string
 {
     return $_SESSION['peserta_id'] ?? null;
@@ -200,9 +205,35 @@ function requireAdmin(): array
     return $a;
 }
 
+function requireAdminOrGuru(): array
+{
+    $a = currentAdmin();
+    if ($a) return $a;
+    $g = currentGuru();
+    if ($g) return $g;
+    fail('Akses ditolak: Hanya Administrator atau Guru.', 403);
+}
+
 function requireAnyLogin(): void
 {
-    if (!currentAdmin() && !currentPesertaId()) fail('Sesi berakhir. Silakan login kembali.', 401);
+    if (!currentAdmin() && !currentGuru() && !currentPesertaId()) fail('Sesi berakhir. Silakan login kembali.', 401);
+}
+
+function ensureGuruTable(): void
+{
+    try {
+        db()->query("SELECT 1 FROM guru LIMIT 1");
+    } catch (Throwable $e) {
+        db()->exec("CREATE TABLE IF NOT EXISTS guru (
+            id CHAR(36) NOT NULL PRIMARY KEY,
+            username VARCHAR(50) NOT NULL UNIQUE,
+            password_hash VARCHAR(255) NOT NULL,
+            nama_lengkap VARCHAR(255) NOT NULL,
+            mapel_diampu TEXT NOT NULL,
+            paket_ids TEXT DEFAULT NULL,
+            created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
+    }
 }
 
 /**
@@ -245,7 +276,7 @@ try {
 
     // Aksi yang mengubah session harus tetap memegang lock session.
     // Aksi lain melepas lock agar request paralel (simpan jawaban) tidak antre.
-    if (!in_array($action, ['loginAdmin', 'loginPeserta', 'logout'], true)) {
+    if (!in_array($action, ['loginAdmin', 'loginGuru', 'loginPeserta', 'logout'], true)) {
         session_write_close();
     }
 
@@ -269,8 +300,41 @@ try {
                 fail('Email atau Password Admin salah.', 401);
             }
             session_regenerate_id(true);
+            unset($_SESSION['guru']);
             $_SESSION['admin'] = ['id' => $admin['id'], 'email' => $admin['email'], 'role' => 'admin'];
             respond($_SESSION['admin']);
+        }
+
+        case 'loginGuru': {
+            ensureGuruTable();
+            $username = trim((string)($req['username'] ?? ''));
+            $pass     = (string)($req['password'] ?? '');
+            $guru = fetchOne('SELECT * FROM guru WHERE LOWER(username) = LOWER(?)', [$username]);
+            if (!$guru) {
+                fail('Username Guru tidak ditemukan.', 401);
+            }
+            $sha256Pass = hash('sha256', $pass);
+            $validPass = password_verify($pass, $guru['password_hash']) || hash_equals($guru['password_hash'], $sha256Pass);
+            if (!$validPass) {
+                fail('Password Guru salah.', 401);
+            }
+            session_regenerate_id(true);
+            unset($_SESSION['admin']);
+            $paketIds = [];
+            if (!empty($guru['paket_ids'])) {
+                $decoded = json_decode((string)$guru['paket_ids'], true);
+                if (is_array($decoded)) $paketIds = $decoded;
+            }
+            $_SESSION['guru'] = [
+                'id'           => $guru['id'],
+                'username'     => $guru['username'],
+                'email'        => $guru['username'],
+                'nama_lengkap' => $guru['nama_lengkap'],
+                'mapel_diampu' => $guru['mapel_diampu'],
+                'paket_ids'    => $paketIds,
+                'role'         => 'guru',
+            ];
+            respond($_SESSION['guru']);
         }
 
         case 'loginPeserta': {
@@ -303,12 +367,35 @@ try {
 
         case 'session': {
             $role = (string)($req['role'] ?? '');
-            if ($role === 'admin') {
+            if ($role === 'admin' || $role === 'guru') {
                 $a = currentAdmin();
-                if (!$a) fail('Belum login sebagai admin.', 401);
-                // Pastikan admin masih ada di database
-                if (!fetchOne('SELECT id FROM admins WHERE id = ?', [$a['id']])) fail('Akun admin tidak ditemukan.', 403);
-                respond($a);
+                if ($a) {
+                    if (!fetchOne('SELECT id FROM admins WHERE id = ?', [$a['id']])) fail('Akun admin tidak ditemukan.', 403);
+                    respond($a);
+                }
+                $g = currentGuru();
+                if ($g) {
+                    ensureGuruTable();
+                    $fresh = fetchOne('SELECT * FROM guru WHERE id = ?', [$g['id']]);
+                    if (!$fresh) fail('Akun guru tidak ditemukan.', 403);
+                    $paketIds = [];
+                    if (!empty($fresh['paket_ids'])) {
+                        $decoded = json_decode((string)$fresh['paket_ids'], true);
+                        if (is_array($decoded)) $paketIds = $decoded;
+                    }
+                    $gSession = [
+                        'id'           => $fresh['id'],
+                        'username'     => $fresh['username'],
+                        'email'        => $fresh['username'],
+                        'nama_lengkap' => $fresh['nama_lengkap'],
+                        'mapel_diampu' => $fresh['mapel_diampu'],
+                        'paket_ids'    => $paketIds,
+                        'role'         => 'guru',
+                    ];
+                    $_SESSION['guru'] = $gSession;
+                    respond($gSession);
+                }
+                fail('Belum login sebagai admin atau guru.', 401);
             }
             if ($role === 'peserta') {
                 $pid = currentPesertaId();
@@ -322,6 +409,72 @@ try {
                 ]);
             }
             fail('Role tidak valid.');
+        }
+
+        // ---------------- DATA GURU ----------------
+        case 'getGuruList': {
+            requireAdmin();
+            ensureGuruTable();
+            $rows = fetchAll('SELECT id, username, nama_lengkap, mapel_diampu, paket_ids, created_at FROM guru ORDER BY nama_lengkap ASC');
+            $out = array_map(function ($r) {
+                $paketIds = [];
+                if (!empty($r['paket_ids'])) {
+                    $dec = json_decode((string)$r['paket_ids'], true);
+                    if (is_array($dec)) $paketIds = $dec;
+                }
+                $r['paket_ids'] = $paketIds;
+                return $r;
+            }, $rows);
+            respond($out);
+        }
+
+        case 'saveGuru': {
+            requireAdmin();
+            ensureGuruTable();
+            $id      = trim((string)($req['id'] ?? ''));
+            $payload = $req['payload'] ?? [];
+            $pass    = (string)($req['password'] ?? '');
+
+            $username = trim((string)($payload['username'] ?? ''));
+            $nama     = trim((string)($payload['nama_lengkap'] ?? ''));
+            $mapel    = trim((string)($payload['mapel_diampu'] ?? ''));
+            $paketIds = isset($payload['paket_ids']) && is_array($payload['paket_ids'])
+                ? json_encode(array_values($payload['paket_ids']))
+                : '[]';
+
+            if ($username === '' || $nama === '' || $mapel === '') {
+                fail('Username, Nama Lengkap, dan Mata Pelajaran yang diampu wajib diisi.');
+            }
+
+            if ($id) {
+                $dup = fetchOne('SELECT id FROM guru WHERE LOWER(username) = LOWER(?) AND id != ?', [$username, $id]);
+                if ($dup) fail('Username guru sudah digunakan akun lain.');
+                if ($pass !== '') {
+                    $hash = hash('sha256', $pass);
+                    exec_sql('UPDATE guru SET username = ?, password_hash = ?, nama_lengkap = ?, mapel_diampu = ?, paket_ids = ? WHERE id = ?',
+                        [$username, $hash, $nama, $mapel, $paketIds, $id]);
+                } else {
+                    exec_sql('UPDATE guru SET username = ?, nama_lengkap = ?, mapel_diampu = ?, paket_ids = ? WHERE id = ?',
+                        [$username, $nama, $mapel, $paketIds, $id]);
+                }
+            } else {
+                if ($pass === '') fail('Password wajib diisi untuk akun guru baru.');
+                $dup = fetchOne('SELECT id FROM guru WHERE LOWER(username) = LOWER(?)', [$username]);
+                if ($dup) fail('Username guru sudah terdaftar.');
+                $id = uuidv4();
+                $hash = hash('sha256', $pass);
+                exec_sql('INSERT INTO guru (id, username, password_hash, nama_lengkap, mapel_diampu, paket_ids, created_at) VALUES (?, ?, ?, ?, ?, ?, UTC_TIMESTAMP())',
+                    [$id, $username, $hash, $nama, $mapel, $paketIds]);
+            }
+            respond(fetchOne('SELECT id, username, nama_lengkap, mapel_diampu, paket_ids, created_at FROM guru WHERE id = ?', [$id]));
+        }
+
+        case 'deleteGuru': {
+            requireAdmin();
+            ensureGuruTable();
+            $id = trim((string)($req['id'] ?? ''));
+            exec_sql('DELETE FROM guru WHERE id = ?', [$id]);
+            respond(['ok' => true]);
         }
 
         case 'changeAdminPassword': {
@@ -617,7 +770,7 @@ try {
         }
 
         case 'savePaket': {
-            requireAdmin();
+            requireAdminOrGuru();
             try { db()->query("SELECT kelas FROM paket_soal LIMIT 1"); }
             catch (Throwable $e) { db()->exec("ALTER TABLE paket_soal ADD COLUMN kelas VARCHAR(50) DEFAULT NULL AFTER jurusan"); }
 
@@ -643,7 +796,7 @@ try {
         }
 
         case 'deletePaket':
-            requireAdmin();
+            requireAdminOrGuru();
             exec_sql('DELETE FROM paket_soal WHERE id = ?', [(string)($req['id'] ?? '')]);
             respond(['ok' => true]);
 
@@ -653,11 +806,11 @@ try {
             respond(fetchAll('SELECT * FROM soal WHERE paket_soal_id = ? ORDER BY nomor ASC', [(string)($req['paket_id'] ?? '')]));
 
         case 'getSoalList':
-            requireAdmin();
+            requireAdminOrGuru();
             respond(fetchAll('SELECT * FROM soal ORDER BY paket_soal_id, nomor ASC'));
 
         case 'saveSoal': {
-            requireAdmin();
+            requireAdminOrGuru();
             $id = (string)($req['id'] ?? '');
             $s = soalPayload($req['payload'] ?? []);
             if ($id) {
@@ -670,12 +823,12 @@ try {
         }
 
         case 'deleteSoal':
-            requireAdmin();
+            requireAdminOrGuru();
             exec_sql('DELETE FROM soal WHERE id = ?', [(string)($req['id'] ?? '')]);
             respond(['ok' => true]);
 
         case 'bulkInsertSoal': {
-            requireAdmin();
+            requireAdminOrGuru();
             $items = $req['items'] ?? [];
             if (!is_array($items)) fail('Format data soal tidak valid.');
             $pdo = db();
@@ -692,7 +845,7 @@ try {
 
         // ---------------- HASIL UJIAN ----------------
         case 'getHasilList': {
-            requireAdmin();
+            requireAdminOrGuru();
             // Pastikan kolom paket_soal_id ada di tabel hasil_ujian
             try { db()->query("SELECT paket_soal_id FROM hasil_ujian LIMIT 1"); }
             catch (Throwable $e) { db()->exec("ALTER TABLE hasil_ujian ADD COLUMN paket_soal_id CHAR(36) DEFAULT NULL AFTER peserta_id"); }

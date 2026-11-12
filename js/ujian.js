@@ -106,15 +106,59 @@ function checkKelasMatch(pKelas, studentKelas) {
   return { match: false, specificity: 0 };
 }
 
-// Helper: Mencocokkan paket soal aktif terbaik berdasarkan jadwal, jurusan, dan kelas siswa
-function findActivePaketForStudent(allPaket, profile) {
-  if (!allPaket || allPaket.length === 0 || !profile) return null;
+// -------------------------------------------------------------
+// MODUL UJIAN AGAMA & MULTI-PAKET AKTIF
+// -------------------------------------------------------------
+
+let candidateActivePakets = []; // Seluruh paket yang aktif saat ini untuk rombel siswa
+let candidateAgamaPakets = [];   // Khusus paket ujian agama aktif
+let chosenAgamaKey = null;       // Pilihan agama siswa (misal: 'islam', 'kristen')
+
+// Daftar 6 agama resmi di Indonesia dengan ikon & kata kunci pencocokan nama paket
+const AGAMA_DEFINITIONS = [
+  { key: 'islam', name: 'Pendidikan Agama Islam (PAI)', icon: 'bi-moon-stars-fill', iconText: '🕌', color: 'success', keywords: ['islam', 'pai', 'paibp'] },
+  { key: 'kristen', name: 'Pendidikan Agama Kristen', icon: 'bi-cross', iconText: '✝️', color: 'primary', keywords: ['kristen', 'protestan', 'pakp', 'pak'] },
+  { key: 'katolik', name: 'Pendidikan Agama Katolik', icon: 'bi-hospital', iconText: '⛪', color: 'danger', keywords: ['katolik'] },
+  { key: 'hindu', name: 'Pendidikan Agama Hindu', iconText: '🕉️', color: 'warning', keywords: ['hindu', 'pah'] },
+  { key: 'buddha', name: 'Pendidikan Agama Buddha', iconText: '☸️', color: 'info', keywords: ['buddha', 'budha'] },
+  { key: 'konghucu', name: 'Pendidikan Agama Konghucu', iconText: '☯️', color: 'secondary', keywords: ['konghucu', 'khonghucu'] }
+];
+
+// Deteksi apakah nama paket adalah mata pelajaran Agama
+function isAgamaPaket(namaPaket) {
+  if (!namaPaket) return false;
+  const n = namaPaket.toLowerCase();
+  return n.includes('agama') || 
+         n.includes('pai') || 
+         n.includes('paibp') || 
+         n.includes('pakp') || 
+         n.includes('kristen') || 
+         n.includes('katolik') || 
+         n.includes('hindu') || 
+         n.includes('buddha') || 
+         n.includes('konghucu');
+}
+
+// Deteksi kategori agama dari nama paket
+function detectAgamaCategory(namaPaket) {
+  if (!namaPaket) return null;
+  const n = namaPaket.toLowerCase();
+  for (const a of AGAMA_DEFINITIONS) {
+    if (a.keywords.some(kw => n.includes(kw))) {
+      return a;
+    }
+  }
+  return null;
+}
+
+// Helper: Mencocokkan seluruh paket soal aktif untuk siswa berdasarkan jadwal, jurusan, dan kelas
+function findAllActivePaketsForStudent(allPaket, profile) {
+  if (!allPaket || allPaket.length === 0 || !profile) return [];
   const now = new Date();
   const studentJurusan = (profile.jurusan || "").toLowerCase().trim();
   const studentKelas = (profile.kelas || "").toLowerCase().trim();
 
-  let bestPaket = null;
-  let bestScore = -1;
+  const matching = [];
 
   for (const p of allPaket) {
     if (!p.jadwal_mulai) continue;
@@ -127,45 +171,255 @@ function findActivePaketForStudent(allPaket, profile) {
       const kelasResult = checkKelasMatch(p.kelas, studentKelas);
 
       if (jurusanMatch && kelasResult.match) {
-        // Prioritas kecocokan:
-        // - Spesifik Jurusan: +4
-        // - Rombel Persis: +3
-        // - Tingkat Angkatan (X, XI, XII): +2
-        // - Umum / Sekolah: 0
         let score = 0;
         if (pJurusan && pJurusan !== "semua" && pJurusan === studentJurusan) score += 4;
         score += kelasResult.specificity;
-
-        if (score > bestScore) {
-          bestScore = score;
-          bestPaket = p;
-        }
+        matching.push({ ...p, matchScore: score });
       }
     }
   }
 
-  return bestPaket;
+  // Prioritaskan yang memiliki skor kecocokan tertinggi
+  matching.sort((a, b) => b.matchScore - a.matchScore);
+  return matching;
+}
+
+// Render Opsi Pemilihan Agama di Dashboard Siswa
+function renderAgamaSelector(agamaPakets) {
+  const container = document.getElementById('card-pilih-agama');
+  const listEl = document.getElementById('list-opsi-agama');
+  const countBadge = document.getElementById('badge-agama-count');
+  if (!container || !listEl) return;
+
+  if (!agamaPakets || agamaPakets.length === 0) {
+    container.classList.add('d-none');
+    return;
+  }
+
+  container.classList.remove('d-none');
+  if (countBadge) countBadge.innerText = `${agamaPakets.length} Paket Agama Tersedia`;
+
+  // Cek preferensi agama yang pernah dipilih sebelumnya dari localStorage
+  const savedAgama = localStorage.getItem(`CBT_STUDENT_AGAMA_${studentProfile.id}`);
+  if (savedAgama) {
+    chosenAgamaKey = savedAgama;
+  }
+
+  listEl.innerHTML = '';
+
+  AGAMA_DEFINITIONS.forEach(def => {
+    // Cari apakah paket soal agama ini dijadwalkan oleh admin
+    const matchedPaket = agamaPakets.find(p => {
+      const cat = detectAgamaCategory(p.nama_paket);
+      return cat && cat.key === def.key;
+    });
+
+    const isAvailable = Boolean(matchedPaket);
+    const isSelected = chosenAgamaKey === def.key || (!chosenAgamaKey && isAvailable && def.key === 'islam');
+    if (isSelected && isAvailable) {
+      chosenAgamaKey = def.key;
+    }
+
+    const cardCol = document.createElement('div');
+    cardCol.className = 'col-md-6 col-12';
+    
+    const iconDisplay = def.iconText ? `<span class="fs-5 me-2">${def.iconText}</span>` : `<i class="bi ${def.icon} fs-5 me-2 text-${def.color}"></i>`;
+
+    if (isAvailable) {
+      cardCol.innerHTML = `
+        <div class="card p-3 border rounded-3 h-100 cursor-pointer shadow-sm transition-all agama-option-card ${isSelected ? 'border-primary bg-primary-subtle' : 'bg-white'}" 
+             style="cursor: pointer; transition: all 0.2s ease;"
+             onclick="selectStudentAgama('${def.key}')">
+          <div class="d-flex align-items-center justify-content-between">
+            <div class="d-flex align-items-center">
+              ${iconDisplay}
+              <div>
+                <strong class="text-dark d-block">${def.name}</strong>
+                <small class="text-muted">${escapeHtml(matchedPaket.nama_paket)}</small>
+              </div>
+            </div>
+            <div class="form-check m-0">
+              <input class="form-check-input" type="radio" name="radioAgama" id="radio-agama-${def.key}" value="${def.key}" ${isSelected ? 'checked' : ''} onchange="selectStudentAgama('${def.key}')">
+            </div>
+          </div>
+        </div>
+      `;
+    } else {
+      cardCol.innerHTML = `
+        <div class="card p-3 border rounded-3 h-100 bg-light opacity-50" style="cursor: not-allowed;" title="Paket soal belum dibuat atau belum dijadwalkan oleh sekolah">
+          <div class="d-flex align-items-center justify-content-between">
+            <div class="d-flex align-items-center">
+              ${iconDisplay}
+              <div>
+                <span class="text-secondary fw-semibold d-block">${def.name}</span>
+                <small class="text-muted fst-italic">Belum dijadwalkan</small>
+              </div>
+            </div>
+            <span class="badge bg-secondary-subtle text-secondary small">Kosong</span>
+          </div>
+        </div>
+      `;
+    }
+    listEl.appendChild(cardCol);
+  });
+}
+
+// Siswa mengklik salah satu pilihan agama
+async function selectStudentAgama(agamaKey) {
+  chosenAgamaKey = agamaKey;
+  localStorage.setItem(`CBT_STUDENT_AGAMA_${studentProfile.id}`, agamaKey);
+
+  const matchedPaket = candidateAgamaPakets.find(p => {
+    const cat = detectAgamaCategory(p.nama_paket);
+    return cat && cat.key === agamaKey;
+  });
+
+  if (matchedPaket) {
+    currentActivePaket = matchedPaket;
+    localStorage.setItem(`CBT_SELECTED_PAKET_${studentProfile.id}`, matchedPaket.id);
+    await updateDashboardForSelectedPaket(matchedPaket);
+    renderAgamaSelector(candidateAgamaPakets);
+  }
+}
+
+// Render dropdown jika ada beberapa paket non-agama aktif serentak
+function renderPaketSelector(pakets) {
+  const container = document.getElementById('card-pilih-paket');
+  const selEl = document.getElementById('select-active-paket');
+  if (!container || !selEl) return;
+
+  if (!pakets || pakets.length <= 1) {
+    container.classList.add('d-none');
+    return;
+  }
+
+  container.classList.remove('d-none');
+  selEl.innerHTML = '';
+  pakets.forEach((p, idx) => {
+    const isSel = currentActivePaket && currentActivePaket.id === p.id ? 'selected' : '';
+    selEl.innerHTML += `<option value="${p.id}" ${isSel}>${idx + 1}. ${escapeHtml(p.nama_paket)}</option>`;
+  });
+}
+
+async function switchActivePaketManually(paketId) {
+  const target = candidateActivePakets.find(p => p.id === paketId);
+  if (target) {
+    currentActivePaket = target;
+    localStorage.setItem(`CBT_SELECTED_PAKET_${studentProfile.id}`, target.id);
+    await updateDashboardForSelectedPaket(target);
+  }
+}
+
+// Update tampilan informasi dashboard ketika paket soal berubah / terpilih
+async function updateDashboardForSelectedPaket(activePaket) {
+  if (!activePaket) return;
+  currentActivePaket = activePaket;
+
+  const mapelEl = document.getElementById('dash-mapel');
+  if (mapelEl) mapelEl.innerText = activePaket.nama_paket;
+
+  let questions = [];
+  try {
+    questions = await DB.getSoalByPaket(activePaket.id);
+  } catch (e) {
+    console.warn("Gagal getSoalByPaket:", e);
+  }
+
+  totalSoalCount = questions.length;
+  document.getElementById('dash-soal-count').innerText = totalSoalCount;
+
+  // Display Schedule Info
+  const dashJadwal = document.getElementById('dash-jadwal');
+  let jadwalStr = `${activePaket.nama_paket} (Terbuka)`;
+  if (activePaket.jadwal_mulai && activePaket.jadwal_selesai) {
+    const start = new Date(activePaket.jadwal_mulai).toLocaleString('id-ID', { dateStyle: 'medium', timeStyle: 'short' });
+    const end = new Date(activePaket.jadwal_selesai).toLocaleString('id-ID', { dateStyle: 'medium', timeStyle: 'short' });
+    jadwalStr = `${activePaket.nama_paket}: ${start} — ${end}`;
+  } else if (activePaket.jadwal_mulai) {
+    const start = new Date(activePaket.jadwal_mulai).toLocaleString('id-ID', { dateStyle: 'medium', timeStyle: 'short' });
+    jadwalStr = `${activePaket.nama_paket}: Mulai dari ${start}`;
+  }
+  if (dashJadwal) dashJadwal.innerText = jadwalStr;
+
+  // Cek apakah siswa sudah pernah menyelesaikan paket soal ini sebelumnya
+  const existingHasil = await DB.checkExistingHasil(studentProfile.id, activePaket.id);
+  const alertDone = document.getElementById('alert-already-done');
+  const btnMulai = document.getElementById('btn-mulai-ujian');
+
+  if (existingHasil) {
+    const completedTextEl = document.getElementById('completed-alert-text');
+    if (completedTextEl) {
+      completedTextEl.innerHTML = `Selamat, Anda telah menyelesaikan ujian <strong>${escapeHtml(activePaket.nama_paket)}</strong>. Terima kasih telah mengikuti ujian dengan tertib.`;
+    }
+    if (alertDone) alertDone.classList.remove('d-none');
+    if (btnMulai) {
+      btnMulai.disabled = true;
+      btnMulai.innerHTML = `<i class="bi bi-check-circle me-1"></i> Ujian Sudah Selesai`;
+      btnMulai.className = 'btn btn-secondary w-100 py-3 rounded-3 shadow-sm';
+    }
+  } else {
+    if (alertDone) alertDone.classList.add('d-none');
+    if (questions.length === 0) {
+      if (btnMulai) {
+        btnMulai.disabled = true;
+        btnMulai.innerHTML = `Paket Soal Masih Kosong`;
+        btnMulai.className = 'btn btn-secondary w-100 py-3 rounded-3 shadow-sm';
+      }
+    } else {
+      if (btnMulai) {
+        btnMulai.disabled = false;
+        const isSedangUjian = studentProfile.status_ujian === 'Sedang Ujian';
+        btnMulai.innerHTML = isSedangUjian
+          ? `Lanjutkan Ujian <i class="bi bi-arrow-right-circle-fill ms-2"></i>`
+          : `Mulai Ujian <i class="bi bi-play-circle-fill ms-2"></i>`;
+        btnMulai.className = 'btn btn-primary-custom text-white w-100 py-3 rounded-3 shadow-sm';
+      }
+    }
+  }
 }
 
 // Load config settings and verify if they can start the exam
 async function loadExamSetupAndVerify() {
   try {
-    // 1. Find active Paket Soal based on current time, jurusan, and kelas
+    // 1. Dapatkan daftar seluruh paket soal yang ada
     const allPaket = await DB.getPaketList();
-    const activePaket = findActivePaketForStudent(allPaket, studentProfile);
+
+    // 2. Dapatkan seluruh paket yang aktif & cocok dengan rombel/jurusan siswa saat ini
+    candidateActivePakets = findAllActivePaketsForStudent(allPaket, studentProfile);
+    candidateAgamaPakets = candidateActivePakets.filter(p => isAgamaPaket(p.nama_paket));
+
+    // 3. Tentukan paket aktif yang akan digunakan:
+    // Prioritas 1: Jika siswa sedang dalam pengerjaan (in-progress) di browser ini
+    const inProgressId = localStorage.getItem(`CBT_IN_PROGRESS_PAKET_${studentProfile.id}`);
+    let activePaket = null;
+    if (inProgressId) {
+      activePaket = (allPaket || []).find(p => p.id === inProgressId);
+    }
+
+    // Prioritas 2: Jika terdeteksi paket Agama aktif
+    if (!activePaket && candidateAgamaPakets.length > 0) {
+      const savedAgama = localStorage.getItem(`CBT_STUDENT_AGAMA_${studentProfile.id}`);
+      if (savedAgama) {
+        activePaket = candidateAgamaPakets.find(p => {
+          const cat = detectAgamaCategory(p.nama_paket);
+          return cat && cat.key === savedAgama;
+        });
+      }
+      if (!activePaket) {
+        activePaket = candidateAgamaPakets[0];
+      }
+      renderAgamaSelector(candidateAgamaPakets);
+    } else if (!activePaket && candidateActivePakets.length > 0) {
+      activePaket = candidateActivePakets[0];
+      if (candidateActivePakets.length > 1) {
+        renderPaketSelector(candidateActivePakets);
+      }
+    }
+
     currentActivePaket = activePaket;
 
-    let questions = [];
-    if (activePaket) {
-      questions = await DB.getSoalByPaket(activePaket.id);
-    }
-    
-    totalSoalCount = questions.length;
-    document.getElementById('dash-soal-count').innerText = totalSoalCount;
-
-    // 2. Get settings
+    // 4. Ambil Pengaturan Umum Ujian (Durasi, Passing Grade, Nilai)
     const settings = await DB.getSettings();
-
     if (settings) {
       document.getElementById('dash-duration').innerText = settings.durasi_menit;
       const dashPassing = document.getElementById('dash-passing');
@@ -174,61 +428,40 @@ async function loadExamSetupAndVerify() {
         tampilkanNilaiVal = settings.tampilkan_nilai;
       }
     }
-    
-    // Display Schedule Info
-    const dashJadwal = document.getElementById('dash-jadwal');
-    if (!activePaket) {
-      if (dashJadwal) dashJadwal.innerText = "Tidak Ada Ujian Aktif Saat Ini";
+
+    if (activePaket) {
+      await updateDashboardForSelectedPaket(activePaket);
     } else {
-      let jadwalStr = `${activePaket.nama_paket} (Terbuka)`;
-      if (activePaket.jadwal_mulai && activePaket.jadwal_selesai) {
-        const start = new Date(activePaket.jadwal_mulai).toLocaleString('id-ID', { dateStyle: 'medium', timeStyle: 'short' });
-        const end = new Date(activePaket.jadwal_selesai).toLocaleString('id-ID', { dateStyle: 'medium', timeStyle: 'short' });
-        jadwalStr = `${activePaket.nama_paket}: ${start} — ${end}`;
-      } else if (activePaket.jadwal_mulai) {
-        const start = new Date(activePaket.jadwal_mulai).toLocaleString('id-ID', { dateStyle: 'medium', timeStyle: 'short' });
-        jadwalStr = `${activePaket.nama_paket}: Mulai dari ${start}`;
+      const mapelEl = document.getElementById('dash-mapel');
+      if (mapelEl) mapelEl.innerText = "Tidak Ada Ujian Aktif";
+      const dashJadwal = document.getElementById('dash-jadwal');
+      if (dashJadwal) dashJadwal.innerText = "Tidak Ada Ujian Aktif Saat Ini";
+      const btnMulai = document.getElementById('btn-mulai-ujian');
+      if (btnMulai) {
+        btnMulai.disabled = true;
+        btnMulai.innerHTML = `Ujian Belum Tersedia`;
+        btnMulai.className = 'btn btn-secondary w-100 py-3 rounded-3 shadow-sm';
       }
-      if (dashJadwal) dashJadwal.innerText = jadwalStr;
     }
 
-    // 3. Check if exam results already exist for this student & paket
-    const existingHasil = await DB.checkExistingHasil(studentProfile.id, activePaket ? activePaket.id : null);
-
-    if (existingHasil) {
-      // Locking exam, show completed banner with Mapel info and logout button, NO SCORE
-      const mapelName = activePaket && activePaket.nama_paket ? activePaket.nama_paket : 'mata pelajaran ini';
-      const completedTextEl = document.getElementById('completed-alert-text');
-      if (completedTextEl) {
-        completedTextEl.innerHTML = `Selamat, Anda telah menyelesaikan ujian <strong>${escapeHtml(mapelName)}</strong>. Terima kasih telah mengikuti ujian dengan tertib.`;
-      }
-
-      document.getElementById('alert-already-done').classList.remove('d-none');
-      document.getElementById('btn-mulai-ujian').disabled = true;
-      document.getElementById('btn-mulai-ujian').innerHTML = `<i class="bi bi-check-circle me-1"></i> Ujian Sudah Selesai`;
-      document.getElementById('btn-mulai-ujian').classList.replace('btn-primary-custom', 'btn-secondary');
-      
-      // Update local profile status if synced wrong
-      if (studentProfile.status_ujian !== 'Sudah Ujian') {
-        await DB.updateStatusUjian(studentProfile.id, 'Sudah Ujian');
-        document.getElementById('dash-status').innerText = 'Sudah Ujian';
-        document.getElementById('dash-status').className = 'badge bg-success';
-      }
-    } else if (studentProfile.is_locked) {
-      // Siswa terkunci karena mencapai kelipatan 3x pelanggaran atau dikunci pengawas -> wajib masukkan Token Pembebas
+    // 5. Cek apakah siswa terkunci karena mencapai kelipatan 3x pelanggaran
+    if (studentProfile.is_locked) {
+      const dashJadwal = document.getElementById('dash-jadwal');
       if (dashJadwal) {
         dashJadwal.innerText = `Akses Ujian Terkunci (${violationCount}x Pelanggaran) — Wajib Token Pembebas`;
         dashJadwal.classList.add('text-danger', 'fw-bold');
       }
       const btnMulai = document.getElementById('btn-mulai-ujian');
-      btnMulai.disabled = false;
-      btnMulai.innerHTML = `<i class="bi bi-key-fill me-2"></i>Masukkan Token Pembebas`;
-      btnMulai.classList.replace('btn-primary-custom', 'btn-danger');
-      btnMulai.onclick = () => {
-        showTokenPembebasModal(() => {
-          window.location.reload();
-        });
-      };
+      if (btnMulai) {
+        btnMulai.disabled = false;
+        btnMulai.innerHTML = `<i class="bi bi-key-fill me-2"></i>Masukkan Token Pembebas`;
+        btnMulai.className = 'btn btn-danger w-100 py-3 rounded-3 shadow-sm';
+        btnMulai.onclick = () => {
+          showTokenPembebasModal(() => {
+            window.location.reload();
+          });
+        };
+      }
       document.getElementById('view-dashboard').classList.remove('d-none');
       setTimeout(() => {
         showTokenPembebasModal(() => {
@@ -236,26 +469,9 @@ async function loadExamSetupAndVerify() {
         });
       }, 300);
       return;
-    } else {
-      // Verify schedules window
-      if (!activePaket) {
-        document.getElementById('btn-mulai-ujian').disabled = true;
-        document.getElementById('btn-mulai-ujian').innerHTML = `Ujian Belum Tersedia`;
-        document.getElementById('btn-mulai-ujian').classList.replace('btn-primary-custom', 'btn-secondary');
-      } else if (questions.length === 0) {
-        document.getElementById('btn-mulai-ujian').disabled = true;
-        document.getElementById('btn-mulai-ujian').innerHTML = `Paket Soal Kosong`;
-        document.getElementById('btn-mulai-ujian').classList.replace('btn-primary-custom', 'btn-secondary');
-      }
-
-      // Check if student was in-progress and refreshed page
-      if (studentProfile.status_ujian === 'Sedang Ujian' && activePaket && questions.length > 0) {
-        document.getElementById('btn-mulai-ujian').innerHTML = `Lanjutkan Ujian <i class="bi bi-arrow-right-circle-fill ms-2"></i>`;
-      }
     }
 
     document.getElementById('view-dashboard').classList.remove('d-none');
-
   } catch (err) {
     console.error("Gagal verifikasi pendaftaran:", err);
     document.getElementById('view-dashboard').classList.remove('d-none');
@@ -331,6 +547,39 @@ function cetakKartuPesertaPDF() {
 async function mulaiUjianCBT() {
   const settings = await DB.getSettings();
 
+  // Konfirmasi Mata Pelajaran Agama jika paket ini adalah ujian Agama
+  if (currentActivePaket && isAgamaPaket(currentActivePaket.nama_paket)) {
+    const cat = detectAgamaCategory(currentActivePaket.nama_paket);
+    const agamaLabel = cat ? cat.name : currentActivePaket.nama_paket;
+    const confirmAgama = await Swal.fire({
+      icon: 'question',
+      title: 'Konfirmasi Mata Pelajaran Agama',
+      html: `
+        <div class="text-start small">
+          <p class="mb-2">Anda akan memulai ujian mata pelajaran:</p>
+          <div class="p-3 bg-light border rounded mb-3">
+            <h6 class="fw-bold text-primary mb-1">${escapeHtml(currentActivePaket.nama_paket)}</h6>
+            <div class="text-success fw-semibold"><i class="bi bi-shield-check me-1"></i>Kategori: ${escapeHtml(agamaLabel)}</div>
+            <div class="text-muted mt-1">Jumlah Soal: <strong>${totalSoalCount} Butir</strong> | Durasi: <strong>${document.getElementById('dash-duration').innerText} Menit</strong></div>
+          </div>
+          <p class="text-danger fw-semibold mb-0">
+            <i class="bi bi-exclamation-triangle-fill me-1"></i>
+            Pastikan agama yang Anda pilih sudah sesuai. Soal ujian akan disesuaikan dengan agama yang Anda pilih.
+          </p>
+        </div>
+      `,
+      showCancelButton: true,
+      confirmButtonText: '<i class="bi bi-play-circle-fill me-1"></i> Ya, Mulai Kerjakan',
+      cancelButtonText: 'Ganti Pilihan Agama',
+      confirmButtonColor: '#1e3c72'
+    });
+
+    if (!confirmAgama.isConfirmed) {
+      document.getElementById('card-pilih-agama')?.scrollIntoView({ behavior: 'smooth' });
+      return;
+    }
+  }
+
   if (settings && settings.token_aktif) {
     const { value: inputToken } = await Swal.fire({
       title: 'Masukkan Token Ujian',
@@ -370,15 +619,20 @@ async function mulaiUjianCBT() {
   await new Promise(r => setTimeout(r, jitterMs));
   
   try {
-    // 1. Find active Paket Soal
-    const allPaket = await DB.getPaketList();
-    const activePaket = findActivePaketForStudent(allPaket, studentProfile);
+    // 1. Ambil paket yang sedang dipilih atau aktif
+    let activePaket = currentActivePaket;
+    if (!activePaket) {
+      const allPaket = await DB.getPaketList();
+      const candidates = findAllActivePaketsForStudent(allPaket, studentProfile);
+      activePaket = candidates[0] || null;
+    }
 
     if (!activePaket) {
       throw new Error("Tidak ada paket ujian yang sedang aktif untuk jurusan & kelas Anda saat ini.");
     }
 
     currentActivePaket = activePaket;
+    localStorage.setItem(`CBT_IN_PROGRESS_PAKET_${studentProfile.id}`, activePaket.id);
 
     // 2. Fetch questions for the active paket
     let questions = await DB.getSoalByPaket(activePaket.id);
@@ -450,6 +704,12 @@ async function mulaiUjianCBT() {
     document.getElementById('view-dashboard').classList.add('d-none');
     document.getElementById('view-exam').classList.remove('d-none');
     
+    // Tampilkan nama mata pelajaran di header ujian
+    const mapelBadge = document.getElementById('exam-mapel-badge');
+    if (mapelBadge && currentActivePaket) {
+      mapelBadge.innerText = currentActivePaket.nama_paket;
+    }
+
     // Aktifkan mode ujian & layar penuh
     isExamActive = true;
     requestFullscreen();
@@ -837,6 +1097,7 @@ async function submitUjianFinal() {
     await DB.updateStatusUjian(studentProfile.id, 'Sudah Ujian');
 
     localStorage.removeItem(`CBT_TIMER_END_${studentProfile.id}`);
+    localStorage.removeItem(`CBT_IN_PROGRESS_PAKET_${studentProfile.id}`);
     const localKey = getLocalAnswerStorageKey();
     if (localKey) localStorage.removeItem(localKey);
 
@@ -876,6 +1137,8 @@ window.nextSoal = nextSoal;
 window.selectOption = selectOption;
 window.toggleRaguRagu = toggleRaguRagu;
 window.confirmSelesaiUjian = confirmSelesaiUjian;
+window.selectStudentAgama = selectStudentAgama;
+window.switchActivePaketManually = switchActivePaketManually;
 
 // -------------------------------------------------------------
 // ANTI-CHEAT MECHANICS & FULLSCREEN DETECTION (3X PELANGGARAN -> TOKEN PEMBEBAS)

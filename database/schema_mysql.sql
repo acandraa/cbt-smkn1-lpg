@@ -48,6 +48,17 @@ CREATE TABLE admins (
   created_at DATETIME DEFAULT CURRENT_TIMESTAMP
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
+-- 1b. Guru (Akun Guru Mapel yang ditentukan oleh Admin)
+CREATE TABLE IF NOT EXISTS guru (
+  id CHAR(36) NOT NULL PRIMARY KEY,
+  username VARCHAR(50) NOT NULL UNIQUE,
+  password_hash VARCHAR(255) NOT NULL,
+  nama_lengkap VARCHAR(255) NOT NULL,
+  mapel_diampu TEXT NOT NULL,
+  paket_ids TEXT DEFAULT NULL,
+  created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
 -- 2. Peserta
 CREATE TABLE peserta (
   id CHAR(36) NOT NULL PRIMARY KEY,
