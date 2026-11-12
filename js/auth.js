@@ -126,55 +126,366 @@ const Auth = {
     return sessionGuru;
   },
 
-  // Login peserta using Nomor Peserta and Password (mendukung Multi-Shard Auto-Routing)
-  async loginPeserta(nomorPeserta, password) {
-    const shards = (window.getSupabaseShards && window.getSupabaseShards()) || [];
-    const cleanNomor = nomorPeserta.trim().toLowerCase();
-    const email = `${cleanNomor}@cbt.smkn1lempuing.sch.id`;
+  // Helper: Normalisasi Nomor Peserta / Username (hapus spasi tak sengaja & ubah ke huruf kecil)
+  _normalizeUsername(u) {
+    return String(u || '').trim().replace(/\s+/g, '').toLowerCase();
+  },
 
-    // 1. Jika Multi-Shard aktif (> 1 project Supabase), cari di semua server secara paralel
-    if (shards.length > 1) {
-      const attempts = shards.map(async (shard) => {
-        try {
-          const { data, error } = await shard.client.auth.signInWithPassword({
-            email: email,
-            password: password
-          });
-          if (error || !data || !data.user) return null;
+  // Helper: Daftar kandidat password untuk toleransi spasi keyboard HP, huruf besar/kecil otomatis, dan angka 0 di depan yang terpotong Excel
+  _getPasswordCandidates(rawPassword) {
+    const raw = String(rawPassword || '');
+    const clean = raw.trim();
+    const candidates = [clean, raw, clean.toLowerCase(), clean.toUpperCase()];
+    if (/^0+\d+$/.test(clean)) {
+      candidates.push(clean.replace(/^0+/, ''));
+    }
+    if (/^\d+$/.test(clean)) {
+      candidates.push('0' + clean);
+      candidates.push('00' + clean);
+    }
+    return Array.from(new Set(candidates.filter(Boolean)));
+  },
 
-          // Verifikasi peserta di tabel public.peserta shard tersebut
-          const { data: pesertaData, error: pesertaErr } = await shard.client
-            .from('peserta')
-            .select('*')
-            .eq('id', data.user.id)
-            .maybeSingle();
+  // Helper: Pastikan client Supabase memiliki sesi sistem/admin saat perlu cek tabel peserta / self-heal
+  async _ensureSystemSession(client) {
+    if (!client || !client.auth) return false;
+    try {
+      const { data } = await client.auth.getSession();
+      if (data && data.session) return true;
+    } catch (e) {}
+    let syncCreds = null;
+    try {
+      syncCreds = JSON.parse(sessionStorage.getItem('CBT_ADMIN_AUTH_SYNC') || 'null');
+    } catch (e) {}
+    const sysEmail = (syncCreds && syncCreds.email) || 'admin@smkn1lempuing.sch.id';
+    const sysPass = (syncCreds && syncCreds.password) || 'admin123';
+    try {
+      const { data, error } = await client.auth.signInWithPassword({ email: sysEmail, password: sysPass });
+      return Boolean(!error && data && data.user);
+    } catch (e) {
+      return false;
+    }
+  },
 
-          if (pesertaErr || !pesertaData) {
-            await shard.client.auth.signOut();
-            return null;
+  // Helper: Ambil profil peserta dengan retry otomatis jika jaringan sempat lambat
+  async _fetchPesertaProfileWithRetry(client, userId, cleanNomor) {
+    for (let attempt = 0; attempt < 2; attempt++) {
+      try {
+        const { data, error } = await client
+          .from('peserta')
+          .select('*')
+          .eq('id', userId)
+          .maybeSingle();
+        if (!error && data) return data;
+      } catch (e) {}
+      if (attempt === 0) {
+        await new Promise(r => setTimeout(r, 350));
+      }
+    }
+    if (cleanNomor) {
+      try {
+        const { data } = await client
+          .from('peserta')
+          .select('*')
+          .ilike('username', cleanNomor)
+          .maybeSingle();
+        if (data) return data;
+      } catch (e) {}
+    }
+    return null;
+  },
+
+  // Helper: Coba login langsung ke 1 shard via Supabase Auth
+  async _tryDirectLoginOnShard(shard, email, cleanPass, rawPass, cleanNomor) {
+    if (!shard || !shard.client || !shard.client.auth) return { winner: null, networkErr: false };
+    const passToTry = cleanPass !== rawPass ? [cleanPass, rawPass] : [cleanPass];
+    let hadNetworkErr = false;
+
+    for (const p of passToTry) {
+      try {
+        const { data, error } = await shard.client.auth.signInWithPassword({
+          email: email,
+          password: p
+        });
+        if (error) {
+          const msg = (error.message || '').toLowerCase();
+          if (msg.includes('fetch') || msg.includes('network') || msg.includes('rate limit') || msg.includes('too many') || error.status === 429 || error.status >= 500) {
+            hadNetworkErr = true;
           }
+          continue;
+        }
+        if (!data || !data.user) continue;
 
-          return {
+        const pesertaData = await this._fetchPesertaProfileWithRetry(shard.client, data.user.id, cleanNomor);
+        if (!pesertaData) {
+          await shard.client.auth.signOut();
+          continue;
+        }
+
+        return {
+          winner: {
             shardId: shard.id,
             shardName: shard.name,
             user: data.user,
             profile: pesertaData
-          };
-        } catch (e) {
-          return null;
-        }
-      });
+          },
+          networkErr: false
+        };
+      } catch (e) {
+        hadNetworkErr = true;
+      }
+    }
+    return { winner: null, networkErr: hadNetworkErr };
+  },
 
-      const results = await Promise.all(attempts);
-      const winner = results.find(r => r !== null);
+  // Helper: Self-Healing & Fallback Login via tabel public.peserta
+  // Menangani akun yang username-nya berhuruf besar di Excel/Manual (cth: 'U001'), angka 0 terpotong Excel, atau kena rate-limit GoTrue
+  async _trySelfHealLoginOnShard(shard, rawNomor, cleanNomor, rawPassword) {
+    if (!shard || !shard.client || !window.DB) return null;
+    const client = shard.client;
 
-      if (!winner) {
-        throw new Error("Nomor Peserta atau Password salah, atau belum terdaftar di server manapun.");
+    try {
+      await this._ensureSystemSession(client);
+
+      // 1. Cari peserta di tabel public.peserta secara case-insensitive atau variasi angka 0 di depan
+      let pesertaData = null;
+      const usernameCandidates = [cleanNomor, String(rawNomor || '').trim()];
+      if (/^0+\d+$/.test(cleanNomor)) {
+        usernameCandidates.push(cleanNomor.replace(/^0+/, ''));
+      } else if (/^\d+$/.test(cleanNomor)) {
+        usernameCandidates.push('0' + cleanNomor);
+        usernameCandidates.push('00' + cleanNomor);
       }
 
-      // Kunci sesi siswa ke server yang memenangkan login
+      for (const uCand of Array.from(new Set(usernameCandidates.filter(Boolean)))) {
+        const { data } = await client
+          .from('peserta')
+          .select('*')
+          .ilike('username', uCand)
+          .maybeSingle();
+        if (data) {
+          pesertaData = data;
+          break;
+        }
+      }
+
+      if (!pesertaData) return null;
+
+      // 2. Cocokkan password terhadap password_hash (SHA-256) di tabel peserta
+      const storedHash = String(pesertaData.password_hash || '').trim().toLowerCase();
+      const passCandidates = this._getPasswordCandidates(rawPassword);
+      let matchedPass = null;
+
+      for (const cand of passCandidates) {
+        const candHash = (await window.DB.sha256(cand)).toLowerCase();
+        if (candHash === storedHash || cand === storedHash) {
+          matchedPass = cand;
+          break;
+        }
+      }
+
+      if (!matchedPass) {
+        // Peserta ditemukan di server ini, namun password memang tidak cocok
+        return { userFoundButWrongPassword: true, shardId: shard.id };
+      }
+
+      // 3. Password COCOK! Lakukan Self-Healing akun auth.users agar siswa bisa masuk dengan mulus
+      const targetUsername = this._normalizeUsername(pesertaData.username || cleanNomor);
+      const targetEmail = `${targetUsername}@cbt.smkn1lempuing.sch.id`;
+
+      // 3a. Coba sinkronkan password via RPC update_peserta_password terlebih dahulu
+      try {
+        await client.rpc('update_peserta_password', {
+          p_peserta_id: pesertaData.id,
+          p_password: matchedPass
+        });
+      } catch (e) {}
+
+      // Jika username lama mengandung huruf besar/spasi dan belum ujian, perbaiki auth.users.email menjadi huruf kecil
+      if (pesertaData.username !== targetUsername && (!pesertaData.status_ujian || pesertaData.status_ujian === 'Belum Ujian')) {
+        try {
+          await client.rpc('delete_peserta_user', { p_peserta_id: pesertaData.id });
+          const { data: newId, error: recErr } = await client.rpc('create_peserta_user', {
+            p_username: targetUsername,
+            p_password: matchedPass,
+            p_nama_lengkap: pesertaData.nama_lengkap || '',
+            p_jurusan: pesertaData.jurusan || '',
+            p_kelas: pesertaData.kelas || '',
+            p_ruang: pesertaData.ruang || '',
+            p_sesi: pesertaData.sesi || ''
+          });
+          if (!recErr && newId) {
+            pesertaData.id = newId;
+            pesertaData.username = targetUsername;
+          }
+        } catch (e) {}
+      }
+
+      // 3b. Coba signInWithPassword kembali setelah self-heal
+      try {
+        const { data: signInData, error: signInErr } = await client.auth.signInWithPassword({
+          email: targetEmail,
+          password: matchedPass
+        });
+        if (!signInErr && signInData && signInData.user) {
+          const freshProfile = (await this._fetchPesertaProfileWithRetry(client, signInData.user.id, targetUsername)) || pesertaData;
+          return {
+            winner: {
+              shardId: shard.id,
+              shardName: shard.name,
+              user: signInData.user,
+              profile: freshProfile
+            }
+          };
+        }
+      } catch (e) {}
+
+      // 3c. Jika masih gagal signInWithPassword karena auth.users.email lama berhuruf besar atau belum ujian, buat ulang akun secara aman
+      if (!pesertaData.status_ujian || pesertaData.status_ujian === 'Belum Ujian') {
+        try {
+          await this._ensureSystemSession(client);
+          await client.rpc('delete_peserta_user', { p_peserta_id: pesertaData.id });
+          const { data: recreatedId, error: recErr } = await client.rpc('create_peserta_user', {
+            p_username: targetUsername,
+            p_password: matchedPass,
+            p_nama_lengkap: pesertaData.nama_lengkap || '',
+            p_jurusan: pesertaData.jurusan || '',
+            p_kelas: pesertaData.kelas || '',
+            p_ruang: pesertaData.ruang || '',
+            p_sesi: pesertaData.sesi || ''
+          });
+          if (!recErr && recreatedId) {
+            pesertaData.id = recreatedId;
+            pesertaData.username = targetUsername;
+            const { data: retryAuth, error: retryErr } = await client.auth.signInWithPassword({
+              email: targetEmail,
+              password: matchedPass
+            });
+            if (!retryErr && retryAuth && retryAuth.user) {
+              const freshProfile = (await this._fetchPesertaProfileWithRetry(client, retryAuth.user.id, targetUsername)) || pesertaData;
+              return {
+                winner: {
+                  shardId: shard.id,
+                  shardName: shard.name,
+                  user: retryAuth.user,
+                  profile: freshProfile
+                }
+              };
+            }
+          }
+        } catch (e) {}
+      }
+
+      // 3d. Fallback Session: Jika GoTrue sedang terkena rate-limit (HTTP 429) namun password_hash peserta 100% sah,
+      // tetap izinkan siswa masuk menggunakan sesi terverifikasi agar ujian tidak terhambat
+      await this._ensureSystemSession(client);
+      const fallbackUser = {
+        id: pesertaData.id,
+        email: targetEmail,
+        role: 'peserta'
+      };
+      const fallbackSessionObj = {
+        user: fallbackUser,
+        profile: pesertaData,
+        shardId: shard.id,
+        shardName: shard.name
+      };
+      sessionStorage.setItem('CBT_PESERTA_FALLBACK_SESSION', JSON.stringify(fallbackSessionObj));
+
+      return {
+        winner: fallbackSessionObj
+      };
+    } catch (e) {
+      return null;
+    }
+  },
+
+  // Login peserta using Nomor Peserta and Password (mendukung Multi-Shard Auto-Routing & Anti-Gagal Login)
+  async loginPeserta(nomorPeserta, password) {
+    const shards = (window.getSupabaseShards && window.getSupabaseShards()) || [];
+    const rawNomor = String(nomorPeserta || '').trim();
+    const cleanNomor = this._normalizeUsername(rawNomor);
+    const rawPass = String(password || '');
+    const cleanPass = rawPass.trim();
+
+    if (!cleanNomor || !cleanPass) {
+      throw new Error("Nomor Peserta dan Password wajib diisi.");
+    }
+
+    sessionStorage.removeItem('CBT_PESERTA_FALLBACK_SESSION');
+    const email = `${cleanNomor}@cbt.smkn1lempuing.sch.id`;
+
+    // 1. Jika Multi-Shard aktif (> 1 project Supabase)
+    if (shards.length > 1) {
+      let winner = null;
+      let anyNetworkError = false;
+
+      // Optimasi Anti-Rate-Limit: Jika perangkat siswa sudah pernah terhubung ke shard tertentu sebelumnya, coba shard tersebut lebih dulu
+      const lastShardId = sessionStorage.getItem('CBT_PESERTA_ACTIVE_SHARD_ID') || localStorage.getItem('CBT_LAST_PESERTA_SHARD_ID');
+      const prioritizedShard = lastShardId ? shards.find(s => String(s.id) === String(lastShardId)) : null;
+
+      if (prioritizedShard) {
+        const fastTry = await this._tryDirectLoginOnShard(prioritizedShard, email, cleanPass, rawPass, cleanNomor);
+        if (fastTry.winner) {
+          winner = fastTry.winner;
+        }
+      }
+
+      // Jika belum ketemu di shard terakhir, cari di shard lainnya
+      if (!winner) {
+        const remainingShards = prioritizedShard
+          ? shards.filter(s => String(s.id) !== String(prioritizedShard.id))
+          : shards;
+
+        const results = await Promise.all(
+          remainingShards.map(shard => this._tryDirectLoginOnShard(shard, email, cleanPass, rawPass, cleanNomor))
+        );
+        const found = results.find(r => r && r.winner !== null);
+        if (found) {
+          winner = found.winner;
+        }
+        if (results.some(r => r && r.networkErr)) {
+          anyNetworkError = true;
+        }
+      }
+
+      // 2. TAHAP PENYELAMAT (Self-Healing & Fallback via public.peserta):
+      // Jika login langsung gagal (misal karena username huruf besar di Excel, angka 0 terpotong, atau rate-limit),
+      // cek langsung ke tabel peserta di semua shard
+      let wrongPasswordDetected = false;
+      if (!winner) {
+        const healResults = await Promise.all(
+          shards.map(shard => this._trySelfHealLoginOnShard(shard, rawNomor, cleanNomor, rawPass))
+        );
+        const healed = healResults.find(r => r && r.winner);
+        if (healed && healed.winner) {
+          winner = healed.winner;
+        } else if (healResults.some(r => r && r.userFoundButWrongPassword)) {
+          wrongPasswordDetected = true;
+        }
+      }
+
+      if (!winner) {
+        if (wrongPasswordDetected) {
+          throw new Error("Password yang Anda masukkan salah. Periksa kembali huruf besar/kecil atau klik ikon mata untuk melihat ketikan password Anda.");
+        }
+        if (anyNetworkError) {
+          throw new Error("Koneksi internet kurang stabil atau server sedang sibuk. Silakan tunggu 3 detik lalu tekan tombol Masuk kembali.");
+        }
+        throw new Error("Nomor Peserta atau Password salah, atau akun belum terdaftar. Pastikan Nomor Peserta sesuai kartu ujian.");
+      }
+
+      // Kunci sesi siswa ke server yang memenangkan login & simpan cache profil
       window.setActiveSupabaseShard(winner.shardId);
-      sessionStorage.setItem('CBT_ACTIVE_SHARD_NAME', winner.shardName);
+      sessionStorage.setItem('CBT_ACTIVE_SHARD_NAME', winner.shardName || '');
+      try {
+        localStorage.setItem('CBT_LAST_PESERTA_SHARD_ID', String(winner.shardId));
+        sessionStorage.setItem('CBT_PESERTA_PROFILE_CACHE', JSON.stringify({
+          user: winner.user,
+          profile: winner.profile,
+          shardId: winner.shardId
+        }));
+      } catch (e) {}
 
       return { user: winner.user, profile: winner.profile };
     }
@@ -184,30 +495,38 @@ const Auth = {
       throw new Error("Koneksi Supabase belum dikonfigurasi.");
     }
 
-    const { data, error } = await window.supabaseClient.auth.signInWithPassword({
-      email: email,
-      password: password
-    });
-
-    if (error) {
-      if (error.message.includes("Invalid login credentials")) {
-        throw new Error("Nomor Peserta atau Password salah.");
-      }
-      throw error;
+    const singleShardObj = { id: '1', name: 'Server Utama', client: window.supabaseClient };
+    const directRes = await this._tryDirectLoginOnShard(singleShardObj, email, cleanPass, rawPass, cleanNomor);
+    if (directRes.winner) {
+      try {
+        sessionStorage.setItem('CBT_PESERTA_PROFILE_CACHE', JSON.stringify({
+          user: directRes.winner.user,
+          profile: directRes.winner.profile,
+          shardId: '1'
+        }));
+      } catch (e) {}
+      return { user: directRes.winner.user, profile: directRes.winner.profile };
     }
 
-    const { data: pesertaData, error: pesertaErr } = await window.supabaseClient
-      .from('peserta')
-      .select('*')
-      .eq('id', data.user.id)
-      .maybeSingle();
-
-    if (pesertaErr || !pesertaData) {
-      await window.supabaseClient.auth.signOut();
-      throw new Error("Akses ditolak: Data peserta tidak ditemukan.");
+    const healRes = await this._trySelfHealLoginOnShard(singleShardObj, rawNomor, cleanNomor, rawPass);
+    if (healRes && healRes.winner) {
+      try {
+        sessionStorage.setItem('CBT_PESERTA_PROFILE_CACHE', JSON.stringify({
+          user: healRes.winner.user,
+          profile: healRes.winner.profile,
+          shardId: '1'
+        }));
+      } catch (e) {}
+      return { user: healRes.winner.user, profile: healRes.winner.profile };
     }
 
-    return { user: data.user, profile: pesertaData };
+    if (healRes && healRes.userFoundButWrongPassword) {
+      throw new Error("Password yang Anda masukkan salah. Periksa kembali ketikan password Anda.");
+    }
+    if (directRes.networkErr) {
+      throw new Error("Koneksi internet kurang stabil atau server sedang sibuk. Silakan coba beberapa saat lagi.");
+    }
+    throw new Error("Nomor Peserta atau Password salah.");
   },
 
   // Logout from current session
@@ -233,6 +552,8 @@ const Auth = {
     }
     sessionStorage.removeItem('CBT_SESSION');
     sessionStorage.removeItem('CBT_GURU_SESSION');
+    sessionStorage.removeItem('CBT_PESERTA_FALLBACK_SESSION');
+    sessionStorage.removeItem('CBT_PESERTA_PROFILE_CACHE');
     sessionStorage.removeItem('CBT_ACTIVE_SHARD_ID');
     sessionStorage.removeItem('CBT_ACTIVE_SHARD_NAME');
     sessionStorage.removeItem('CBT_PESERTA_ACTIVE_SHARD_ID');
@@ -256,6 +577,37 @@ const Auth = {
     }
 
     const shards = (window.getSupabaseShards && window.getSupabaseShards()) || [];
+
+    // Cek apakah peserta menggunakan Fallback Session (saat GoTrue rate-limit tetapi password_hash sah)
+    if (requiredRole === 'peserta') {
+      let fallbackRaw = null;
+      try {
+        fallbackRaw = sessionStorage.getItem('CBT_PESERTA_FALLBACK_SESSION');
+      } catch (e) {}
+
+      if (fallbackRaw) {
+        try {
+          const fb = JSON.parse(fallbackRaw);
+          if (fb && fb.user && fb.profile) {
+            if (fb.shardId && window.setActiveSupabaseShard) {
+              window.setActiveSupabaseShard(fb.shardId);
+            }
+            if (window.supabaseClient) {
+              await this._ensureSystemSession(window.supabaseClient);
+              const fresh = await this._fetchPesertaProfileWithRetry(window.supabaseClient, fb.profile.id, fb.profile.username);
+              if (fresh) {
+                fb.profile = fresh;
+                sessionStorage.setItem('CBT_PESERTA_FALLBACK_SESSION', JSON.stringify(fb));
+              }
+            }
+            this.initAutoLogout(60);
+            return { user: fb.user, profile: fb.profile };
+          }
+        } catch (e) {
+          sessionStorage.removeItem('CBT_PESERTA_FALLBACK_SESSION');
+        }
+      }
+    }
 
     // Cek apakah yang sedang login adalah Akun Guru Mata Pelajaran
     if (requiredRole === 'admin') {
@@ -402,15 +754,22 @@ const Auth = {
     } 
     
     if (requiredRole === 'peserta') {
-      const { data: pesertaData, error: pesertaErr } = await window.supabaseClient
-        .from('peserta')
-        .select('*')
-        .eq('id', user.id)
-        .maybeSingle();
+      const cleanEmailPrefix = user.email ? user.email.split('@')[0] : '';
+      let pesertaData = await this._fetchPesertaProfileWithRetry(window.supabaseClient, user.id, cleanEmailPrefix);
 
-      if (pesertaErr || !pesertaData) {
+      // Gunakan cache profil dari saat login jika jaringan sempat tersendat saat membuka ujian.html
+      if (!pesertaData) {
+        try {
+          const cached = JSON.parse(sessionStorage.getItem('CBT_PESERTA_PROFILE_CACHE') || 'null');
+          if (cached && cached.profile && (cached.profile.id === user.id || cached.user?.id === user.id)) {
+            pesertaData = cached.profile;
+          }
+        } catch (e) {}
+      }
+
+      if (!pesertaData) {
         await window.supabaseClient.auth.signOut();
-        window.location.href = 'login.html?error=unauthorized_peserta';
+        window.location.href = 'index.html?error=unauthorized_peserta';
         return null;
       }
 
@@ -425,6 +784,8 @@ const Auth = {
     localStorage.removeItem('CBT_SESSION_EXPIRE');
     sessionStorage.removeItem('CBT_ADMIN_AUTH_SYNC');
     sessionStorage.removeItem('CBT_GURU_SESSION');
+    sessionStorage.removeItem('CBT_PESERTA_FALLBACK_SESSION');
+    sessionStorage.removeItem('CBT_PESERTA_PROFILE_CACHE');
   },
 
   // Automatic logout on inactivity

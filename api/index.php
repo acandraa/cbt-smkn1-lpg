@@ -346,20 +346,52 @@ try {
         }
 
         case 'loginPeserta': {
-            $username = trim((string)($req['username'] ?? ''));
-            $pass     = (string)($req['password'] ?? '');
-            $st = db()->prepare('SELECT * FROM peserta WHERE username = ?');
-            $st->execute([$username]);
-            $p = $st->fetch();
-            if (!$p || !password_verify($pass, $p['password_hash'])) {
+            $rawUsername = trim((string)($req['username'] ?? ''));
+            $cleanUser   = strtolower((string)preg_replace('/\s+/', '', $rawUsername));
+            $pass        = (string)($req['password'] ?? '');
+            $cleanPass   = trim($pass);
+
+            $p = fetchOne('SELECT * FROM peserta WHERE LOWER(TRIM(username)) = LOWER(?)', [$cleanUser]);
+            if (!$p && $rawUsername !== $cleanUser) {
+                $p = fetchOne('SELECT * FROM peserta WHERE LOWER(TRIM(username)) = LOWER(?)', [$rawUsername]);
+            }
+            if (!$p && preg_match('/^0+\d+$/', $cleanUser)) {
+                $noZeroUser = ltrim($cleanUser, '0');
+                $p = fetchOne('SELECT * FROM peserta WHERE LOWER(TRIM(username)) = LOWER(?)', [$noZeroUser]);
+            }
+
+            if (!$p) {
                 fail('Nomor Peserta atau Password salah.', 401);
             }
+
+            $passCandidates = array_values(array_unique(array_filter([
+                $cleanPass,
+                $pass,
+                strtolower($cleanPass),
+                strtoupper($cleanPass),
+                preg_match('/^0+\d+$/', $cleanPass) ? ltrim($cleanPass, '0') : '',
+                preg_match('/^\d+$/', $cleanPass) ? ('0' . $cleanPass) : '',
+            ], fn($v) => $v !== '')));
+
+            $storedHash = trim((string)($p['password_hash'] ?? ''));
+            $isValid = false;
+            foreach ($passCandidates as $cand) {
+                if (password_verify($cand, $storedHash) || hash_equals($storedHash, hash('sha256', $cand)) || hash_equals($storedHash, $cand)) {
+                    $isValid = true;
+                    break;
+                }
+            }
+
+            if (!$isValid) {
+                fail('Nomor Peserta atau Password salah.', 401);
+            }
+
             session_regenerate_id(true);
             $_SESSION['peserta_id'] = $p['id'];
             unset($p['password_hash']);
             $profile = normalizeRow($p);
             respond([
-                'user'    => ['id' => $p['id'], 'email' => $p['username'] . '@cbt.smkn1lempuing.sch.id', 'role' => 'peserta'],
+                'user'    => ['id' => $p['id'], 'email' => strtolower(trim((string)$p['username'])) . '@cbt.smkn1lempuing.sch.id', 'role' => 'peserta'],
                 'profile' => $profile,
             ]);
         }
@@ -538,13 +570,26 @@ try {
 
         case 'registerPeserta': {
             requireAdmin();
-            $username = trim((string)($req['username'] ?? ''));
-            $pass     = (string)($req['password'] ?? '');
+            $username = strtolower((string)preg_replace('/\s+/', '', trim((string)($req['username'] ?? ''))));
+            $pass     = trim((string)($req['password'] ?? ''));
             $nama     = trim((string)($req['nama_lengkap'] ?? ''));
             if ($username === '' || $pass === '' || $nama === '') fail('Username, password, dan nama wajib diisi.');
-            if (fetchOne('SELECT id FROM peserta WHERE username = ?', [$username])) {
-                fail("Username '$username' sudah terdaftar.", 409);
+
+            $existing = fetchOne('SELECT id FROM peserta WHERE LOWER(TRIM(username)) = LOWER(?)', [$username]);
+            if ($existing) {
+                $existingId = (string)$existing['id'];
+                exec_sql(
+                    'UPDATE peserta SET username = ?, password_hash = ?, nama_lengkap = ?, jurusan = ?, kelas = ?, ruang = ?, sesi = ? WHERE id = ?',
+                    [
+                        $username, password_hash($pass, PASSWORD_BCRYPT), $nama,
+                        emptyToNull($req['jurusan'] ?? null), emptyToNull($req['kelas'] ?? null),
+                        emptyToNull($req['ruang'] ?? null), emptyToNull($req['sesi'] ?? null),
+                        $existingId,
+                    ]
+                );
+                respond($existingId);
             }
+
             $id = uuidv4();
             exec_sql(
                 'INSERT INTO peserta (id, username, password_hash, nama_lengkap, jurusan, kelas, ruang, sesi, created_at)
@@ -563,14 +608,16 @@ try {
             $id = (string)($req['id'] ?? '');
             $payload = pick($req['payload'] ?? [], ['username', 'nama_lengkap', 'jurusan', 'kelas', 'ruang', 'sesi']);
             if ($payload) {
-                if (isset($payload['username']) &&
-                    fetchOne('SELECT id FROM peserta WHERE username = ? AND id <> ?', [$payload['username'], $id])) {
-                    fail("Username '{$payload['username']}' sudah dipakai peserta lain.", 409);
+                if (isset($payload['username'])) {
+                    $payload['username'] = strtolower((string)preg_replace('/\s+/', '', trim((string)$payload['username'])));
+                    if (fetchOne('SELECT id FROM peserta WHERE LOWER(TRIM(username)) = LOWER(?) AND id <> ?', [$payload['username'], $id])) {
+                        fail("Username '{$payload['username']}' sudah dipakai peserta lain.", 409);
+                    }
                 }
                 $sets = implode(', ', array_map(fn($c) => "`$c` = ?", array_keys($payload)));
                 exec_sql("UPDATE peserta SET $sets WHERE id = ?", [...array_values($payload), $id]);
             }
-            $pass = (string)($req['password'] ?? '');
+            $pass = trim((string)($req['password'] ?? ''));
             if ($pass !== '') {
                 exec_sql('UPDATE peserta SET password_hash = ? WHERE id = ?', [password_hash($pass, PASSWORD_BCRYPT), $id]);
             }

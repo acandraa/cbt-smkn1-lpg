@@ -6,13 +6,21 @@ const ExcelTemplates = {
     const headers = ['Username', 'Password', 'Nama Lengkap', 'Jurusan', 'Kelas', 'Ruang', 'Sesi'];
     const rows = [
       headers,
-      ['U001', 'pass123', 'Budi Santoso', 'TKJ', 'X TKJ 1', 'Ruang 1', 'Sesi 1'],
-      ['U002', 'pass456', 'Siti Aminah', 'RPL', 'X RPL 2', 'Ruang 2', 'Sesi 2'],
-      ['U003', 'pass789', 'Agus Setiawan', 'Multimedia', 'XI MM 1', 'Ruang 1', 'Sesi 1']
+      ['u001', 'pass123', 'Budi Santoso', 'TKJ', 'X TKJ 1', 'Ruang 1', 'Sesi 1'],
+      ['u002', 'pass456', 'Siti Aminah', 'AKL', 'X AKL 2', 'Ruang 2', 'Sesi 2'],
+      ['u003', 'pass789', 'Agus Setiawan', 'TBSM', 'XI TBSM 1', 'Ruang 1', 'Sesi 1']
     ];
 
     const wb = XLSX.utils.book_new();
     const ws = XLSX.utils.aoa_to_sheet(rows);
+
+    // Format kolom Username & Password sebagai Text ('@') agar angka 0 di depan tidak hilang di Excel
+    ['A2', 'A3', 'A4', 'B2', 'B3', 'B4'].forEach(cellRef => {
+      if (ws[cellRef]) {
+        ws[cellRef].t = 's';
+        ws[cellRef].z = '@';
+      }
+    });
 
     // Auto sizing columns
     ws['!cols'] = [

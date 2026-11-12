@@ -11,8 +11,8 @@ const ExcelHelpers = {
           const workbook = XLSX.read(data, { type: 'array', cellDates: true });
           const firstSheet = workbook.Sheets[workbook.SheetNames[0]];
           
-          // Read as array of rows
-          const rows = XLSX.utils.sheet_to_json(firstSheet, { header: 1 });
+          // Read as array of rows (raw: false menjaga angka '0' di depan seperti NISN / 00123 agar tidak terpotong oleh Excel)
+          const rows = XLSX.utils.sheet_to_json(firstSheet, { header: 1, raw: false, defval: '' });
           if (rows.length < 2) {
             return reject(new Error("File Excel kosong atau tidak memiliki baris data."));
           }
@@ -36,11 +36,13 @@ const ExcelHelpers = {
           const pesertaList = [];
           for (let i = 1; i < rows.length; i++) {
             const row = rows[i];
-            if (!row || row.length === 0 || !row[idx['Username']]) continue; // skip empty rows
+            if (!row || row.length === 0 || row[idx['Username']] === undefined || row[idx['Username']] === null) continue;
+            const cleanUser = row[idx['Username']].toString().trim().replace(/\s+/g, '').toLowerCase();
+            if (!cleanUser) continue; // skip empty rows
 
             pesertaList.push({
-              username: row[idx['Username']].toString().trim(),
-              password: row[idx['Password']] ? row[idx['Password']].toString().trim() : '',
+              username: cleanUser,
+              password: (row[idx['Password']] !== undefined && row[idx['Password']] !== null) ? row[idx['Password']].toString().trim() : '',
               nama_lengkap: row[idx['Nama Lengkap']] ? row[idx['Nama Lengkap']].toString().trim() : '',
               jurusan: row[idx['Jurusan']] ? row[idx['Jurusan']].toString().trim() : '',
               kelas: row[idx['Kelas']] ? row[idx['Kelas']].toString().trim() : '',

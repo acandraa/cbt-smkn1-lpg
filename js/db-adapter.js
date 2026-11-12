@@ -1080,60 +1080,165 @@ const DB = {
   },
 
   async registerPeserta(username, pass, nama, jurusan, kelas, ruang, sesi) {
+    const cleanUsername = String(username || '').trim().replace(/\s+/g, '').toLowerCase();
+    const cleanPass = String(pass || '').trim();
+    const cleanNama = String(nama || '').trim();
+    const cleanJurusan = String(jurusan || '').trim();
+    const cleanKelas = String(kelas || '').trim();
+    const cleanRuang = String(ruang || '').trim();
+    const cleanSesi = String(sesi || '').trim();
+
+    if (!cleanUsername || !cleanPass || !cleanNama) {
+      throw new Error("Username, Password, dan Nama Lengkap peserta wajib diisi.");
+    }
+
     if (this.isLocal()) {
-      const hash = await this.sha256(pass);
+      const hash = await this.sha256(cleanPass);
+      const list = JSON.parse(localStorage.getItem('CBT_LOCAL_PESERTA')) || [];
+      const existing = list.find(p => (p.username || '').trim().toLowerCase() === cleanUsername);
       const payload = {
-        username: username,
+        username: cleanUsername,
         password_hash: hash,
-        nama_lengkap: nama,
-        jurusan: jurusan,
-        kelas: kelas,
-        ruang: ruang,
-        sesi: sesi,
-        status_ujian: 'Belum Ujian',
-        pelanggaran: 0,
-        is_locked: false
+        nama_lengkap: cleanNama,
+        jurusan: cleanJurusan,
+        kelas: cleanKelas,
+        ruang: cleanRuang,
+        sesi: cleanSesi,
+        status_ujian: existing ? (existing.status_ujian || 'Belum Ujian') : 'Belum Ujian',
+        pelanggaran: existing ? (existing.pelanggaran || 0) : 0,
+        is_locked: existing ? Boolean(existing.is_locked) : false
       };
-      return await this.savePesertaLocal(null, payload);
+      return await this.savePesertaLocal(existing ? existing.id : null, payload);
     } else {
       // Auto-Routing: Tentukan server tujuan berdasarkan jurusan/sesi
-      const targetShard = (window.getShardForPeserta && window.getShardForPeserta(jurusan, sesi)) || null;
+      const targetShard = (window.getShardForPeserta && window.getShardForPeserta(cleanJurusan, cleanSesi)) || null;
       const client = (targetShard && targetShard.client) || window.supabaseClient;
-      const { data, error } = await client.rpc('create_peserta_user', {
-        p_username: username,
-        p_password: pass,
-        p_nama_lengkap: nama,
-        p_jurusan: jurusan,
-        p_kelas: kelas,
-        p_ruang: ruang,
-        p_sesi: sesi
+
+      return await this.executeWithAdminAuth(client, async (c) => {
+        const { data, error } = await c.rpc('create_peserta_user', {
+          p_username: cleanUsername,
+          p_password: cleanPass,
+          p_nama_lengkap: cleanNama,
+          p_jurusan: cleanJurusan,
+          p_kelas: cleanKelas,
+          p_ruang: cleanRuang,
+          p_sesi: cleanSesi
+        });
+
+        if (!error) return data;
+
+        // Jika gagal karena username sudah ada (misal saat import ulang Excel atau ada akun lama berhuruf besar),
+        // otomatis perbarui profil & password akun tersebut agar tidak gagal (Upsert & Self-Heal)
+        const errMsg = ((error.message || '') + ' ' + (error.details || '')).toLowerCase();
+        if (errMsg.includes('duplicate') || errMsg.includes('unique') || errMsg.includes('already exists')) {
+          const { data: existing } = await c
+            .from('peserta')
+            .select('*')
+            .ilike('username', cleanUsername)
+            .maybeSingle();
+
+          if (existing && existing.id) {
+            // Jika username lama mengandung huruf besar/spasi dan belum ujian, buat ulang agar email auth.users huruf kecil
+            if (existing.username !== cleanUsername && (!existing.status_ujian || existing.status_ujian === 'Belum Ujian')) {
+              await c.rpc('delete_peserta_user', { p_peserta_id: existing.id });
+              const { data: recreatedId, error: recErr } = await c.rpc('create_peserta_user', {
+                p_username: cleanUsername,
+                p_password: cleanPass,
+                p_nama_lengkap: cleanNama,
+                p_jurusan: cleanJurusan,
+                p_kelas: cleanKelas,
+                p_ruang: cleanRuang,
+                p_sesi: cleanSesi
+              });
+              if (!recErr) return recreatedId;
+            }
+
+            const passHash = await this.sha256(cleanPass);
+            await c.from('peserta').update({
+              username: cleanUsername,
+              password_hash: passHash,
+              nama_lengkap: cleanNama,
+              jurusan: cleanJurusan,
+              kelas: cleanKelas,
+              ruang: cleanRuang,
+              sesi: cleanSesi
+            }).eq('id', existing.id);
+
+            await c.rpc('update_peserta_password', {
+              p_peserta_id: existing.id,
+              p_password: cleanPass
+            });
+
+            return existing.id;
+          }
+        }
+
+        throw error;
       });
-      if (error) throw error;
-      return data;
     }
   },
 
   async editPesertaProfile(id, payload, pass, shardId = null) {
+    const cleanPayload = { ...payload };
+    if (cleanPayload.username !== undefined) {
+      cleanPayload.username = String(cleanPayload.username || '').trim().replace(/\s+/g, '').toLowerCase();
+    }
+    if (cleanPayload.nama_lengkap !== undefined) {
+      cleanPayload.nama_lengkap = String(cleanPayload.nama_lengkap || '').trim();
+    }
+    const cleanPass = String(pass || '').trim();
+
     if (this.isLocal()) {
-      if (pass) {
-        payload.password_hash = await this.sha256(pass);
+      if (cleanPass) {
+        cleanPayload.password_hash = await this.sha256(cleanPass);
       }
-      return await this.savePesertaLocal(id, payload);
+      return await this.savePesertaLocal(id, cleanPayload);
     } else {
       const client = this.getClientForShard(shardId);
-      const { error: profileErr } = await client
-        .from('peserta')
-        .update(payload)
-        .eq('id', id);
-      if (profileErr) throw profileErr;
+      return await this.executeWithAdminAuth(client, async (c) => {
+        const { data: oldRow } = await c.from('peserta').select('*').eq('id', id).maybeSingle();
 
-      if (pass) {
-        const { error: passErr } = await client.rpc('update_peserta_password', {
-          p_peserta_id: id,
-          p_password: pass
-        });
-        if (passErr) throw passErr;
-      }
+        // Jika username diubah (atau sebelumnya huruf besar) dan ada password baru serta belum ujian,
+        // buat ulang auth.users agar email login di Supabase 100% sinkron dengan username baru
+        if (
+          oldRow &&
+          cleanPayload.username &&
+          oldRow.username !== cleanPayload.username &&
+          cleanPass &&
+          (!oldRow.status_ujian || oldRow.status_ujian === 'Belum Ujian')
+        ) {
+          await c.rpc('delete_peserta_user', { p_peserta_id: id });
+          const { data: newId, error: createErr } = await c.rpc('create_peserta_user', {
+            p_username: cleanPayload.username,
+            p_password: cleanPass,
+            p_nama_lengkap: cleanPayload.nama_lengkap || oldRow.nama_lengkap || '',
+            p_jurusan: cleanPayload.jurusan !== undefined ? cleanPayload.jurusan : (oldRow.jurusan || ''),
+            p_kelas: cleanPayload.kelas !== undefined ? cleanPayload.kelas : (oldRow.kelas || ''),
+            p_ruang: cleanPayload.ruang !== undefined ? cleanPayload.ruang : (oldRow.ruang || ''),
+            p_sesi: cleanPayload.sesi !== undefined ? cleanPayload.sesi : (oldRow.sesi || '')
+          });
+          if (createErr) throw createErr;
+          return newId;
+        }
+
+        if (cleanPass) {
+          cleanPayload.password_hash = await this.sha256(cleanPass);
+        }
+
+        const { error: profileErr } = await c
+          .from('peserta')
+          .update(cleanPayload)
+          .eq('id', id);
+        if (profileErr) throw profileErr;
+
+        if (cleanPass) {
+          const { error: passErr } = await c.rpc('update_peserta_password', {
+            p_peserta_id: id,
+            p_password: cleanPass
+          });
+          if (passErr) throw passErr;
+        }
+      });
     }
   },
 
@@ -1704,19 +1809,26 @@ const DB = {
       localStorage.setItem('CBT_LOCAL_HASIL', JSON.stringify(list));
       return payload;
     } else {
+      const insertPayload = {
+        peserta_id: pesertaId,
+        paket_soal_id: paketSoalId || null,
+        jumlah_benar: benar,
+        jumlah_salah: salah,
+        nilai: nilai,
+        status_kelulusan: status,
+        waktu_mulai: start,
+        waktu_selesai: end
+      };
       const { data, error } = await window.supabaseClient
         .from('hasil_ujian')
-        .insert({
-          peserta_id: pesertaId,
-          paket_soal_id: paketSoalId || null,
-          jumlah_benar: benar,
-          jumlah_salah: salah,
-          nilai: nilai,
-          status_kelulusan: status,
-          waktu_mulai: start,
-          waktu_selesai: end
+        .insert(insertPayload);
+      if (error) {
+        return await this.executeWithAdminAuth(window.supabaseClient, async (c) => {
+          const { data: retryData, error: retryErr } = await c.from('hasil_ujian').insert(insertPayload);
+          if (retryErr) throw retryErr;
+          return retryData;
         });
-      if (error) throw error;
+      }
       return data;
     }
   },
@@ -1820,17 +1932,26 @@ const DB = {
       localStorage.setItem('CBT_LOCAL_JAWABAN', JSON.stringify(list));
       return payload;
     } else {
+      const upsertPayload = {
+        peserta_id: pesertaId,
+        soal_id: soalId,
+        jawaban: option,
+        benar: isCorrect,
+        ragu_ragu: isRagu,
+        created_at: new Date().toISOString()
+      };
       const { data, error } = await window.supabaseClient
         .from('jawaban_peserta')
-        .upsert({
-          peserta_id: pesertaId,
-          soal_id: soalId,
-          jawaban: option,
-          benar: isCorrect,
-          ragu_ragu: isRagu,
-          created_at: new Date().toISOString()
-        }, { onConflict: 'peserta_id,soal_id' });
-      if (error) throw error;
+        .upsert(upsertPayload, { onConflict: 'peserta_id,soal_id' });
+      if (error) {
+        return await this.executeWithAdminAuth(window.supabaseClient, async (c) => {
+          const { data: retryData, error: retryErr } = await c
+            .from('jawaban_peserta')
+            .upsert(upsertPayload, { onConflict: 'peserta_id,soal_id' });
+          if (retryErr) throw retryErr;
+          return retryData;
+        });
+      }
       return data;
     }
   },
@@ -1869,7 +1990,14 @@ const DB = {
       const { data, error } = await window.supabaseClient
         .from('jawaban_peserta')
         .upsert(payloads, { onConflict: 'peserta_id,soal_id' });
-      if (error) throw error;
+      if (error) {
+        await this.executeWithAdminAuth(window.supabaseClient, async (c) => {
+          const { error: retryErr } = await c
+            .from('jawaban_peserta')
+            .upsert(payloads, { onConflict: 'peserta_id,soal_id' });
+          if (retryErr) throw retryErr;
+        });
+      }
       return { ok: true, count: answersArray.length };
     }
   },
@@ -1922,18 +2050,21 @@ const DB = {
   async loginPeserta(username, password) {
     if (this.isLocal()) {
       this.initLocalData();
+      const cleanUser = String(username || '').trim().replace(/\s+/g, '').toLowerCase();
+      const cleanPass = String(password || '').trim();
       const list = JSON.parse(localStorage.getItem('CBT_LOCAL_PESERTA')) || [];
-      const student = list.find(p => p.username === username);
+      const student = list.find(p => String(p.username || '').trim().replace(/\s+/g, '').toLowerCase() === cleanUser);
       if (!student) {
-        throw new Error("Username tidak ditemukan.");
+        throw new Error("Nomor Peserta tidak ditemukan.");
       }
 
-      const inputHash = await this.sha256(password);
-      if (student.password_hash !== inputHash) {
+      const inputHash = await this.sha256(cleanPass);
+      const rawHash = await this.sha256(String(password || ''));
+      if (student.password_hash !== inputHash && student.password_hash !== rawHash && student.password_hash !== cleanPass) {
         throw new Error("Password Peserta salah (Demo mode password: '123456').");
       }
 
-      const sessionObj = { id: student.id, email: `${username}@cbt.smkn1lempuing.sch.id`, role: 'peserta', profile: student };
+      const sessionObj = { id: student.id, email: `${cleanUser}@cbt.smkn1lempuing.sch.id`, role: 'peserta', profile: student };
       sessionStorage.setItem('CBT_SESSION', JSON.stringify(sessionObj));
       return sessionObj;
     } else {
@@ -1944,7 +2075,7 @@ const DB = {
   async checkSession(role) {
     if (this.isLocal()) {
       const sess = sessionStorage.getItem('CBT_SESSION') || sessionStorage.getItem('CBT_GURU_SESSION');
-      const loginPage = role === 'admin' ? 'login-admin.html' : 'login.html';
+      const loginPage = role === 'admin' ? 'login-admin.html' : 'index.html';
       if (!sess) {
         window.location.href = loginPage;
         return null;
@@ -1966,6 +2097,8 @@ const DB = {
   async logout() {
     sessionStorage.removeItem('CBT_SESSION');
     sessionStorage.removeItem('CBT_GURU_SESSION');
+    sessionStorage.removeItem('CBT_PESERTA_FALLBACK_SESSION');
+    sessionStorage.removeItem('CBT_PESERTA_PROFILE_CACHE');
     await Auth.logout();
   },
 
@@ -2237,7 +2370,7 @@ const DB_PHP = {
   },
 
   async checkSession(role) {
-    const loginPage = role === 'admin' ? 'login-admin.html' : 'login.html';
+    const loginPage = role === 'admin' ? 'login-admin.html' : 'index.html';
     try {
       const data = await DB.api('session', { role });
       Auth.initAutoLogout(role === 'admin' ? 15 : 60);

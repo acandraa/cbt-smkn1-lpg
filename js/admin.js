@@ -1896,13 +1896,13 @@ function editPeserta(id) {
 async function handlePesertaCrudSubmit(e) {
   e.preventDefault();
   const id = document.getElementById('peserta-id').value;
-  const user = document.getElementById('crud-peserta-username').value.trim();
+  const user = document.getElementById('crud-peserta-username').value.trim().replace(/\s+/g, '').toLowerCase();
   const nama = document.getElementById('crud-peserta-nama').value.trim();
   const jurusan = document.getElementById('crud-peserta-jurusan').value.trim();
   const kelas = document.getElementById('crud-peserta-kelas').value.trim();
   const ruang = document.getElementById('crud-peserta-ruang').value.trim();
   const sesi = document.getElementById('crud-peserta-sesi').value.trim();
-  const pass = document.getElementById('crud-peserta-pass').value;
+  const pass = document.getElementById('crud-peserta-pass').value.trim();
 
   const submitBtn = document.getElementById('btn-save-peserta-crud');
   submitBtn.disabled = true;
@@ -4260,11 +4260,12 @@ async function saveImportedData() {
     if (importMode === 'peserta') {
       let success = 0;
       let fails = 0;
+      const failedDetails = [];
 
       for (let i = 0; i < importedDataCache.length; i++) {
         const item = importedDataCache[i];
         Swal.update({
-          html: `Mengimpor baris ${i + 1} dari ${importedDataCache.length}...<br>Berhasil: ${success}, Gagal: ${fails}`
+          html: `Mengimpor baris ${i + 1} dari ${importedDataCache.length}...<br>Berhasil: <strong>${success}</strong>, Gagal: <strong>${fails}</strong>`
         });
 
         try {
@@ -4281,10 +4282,22 @@ async function saveImportedData() {
         } catch (err) {
           console.error("Gagal mengimpor peserta:", item.username, err);
           fails++;
+          if (failedDetails.length < 15) {
+            failedDetails.push(`<li><code>${escapeHtml(item.username)}</code> (${escapeHtml(item.nama_lengkap)}): ${escapeHtml(err.message || 'Gagal disimpan')}</li>`);
+          }
         }
       }
 
-      Swal.fire('Import Selesai', `Proses import peserta selesai. Berhasil: ${success}, Gagal: ${fails}`, 'info');
+      let resultHtml = `Proses import peserta selesai.<br>Berhasil: <strong>${success}</strong>, Gagal: <strong>${fails}</strong>`;
+      if (failedDetails.length > 0) {
+        resultHtml += `<div class="text-start small mt-3 p-2 bg-light border rounded" style="max-height:160px;overflow-y:auto;"><strong>Daftar baris yang gagal:</strong><ul class="mb-0 ps-3 mt-1">${failedDetails.join('')}</ul></div>`;
+      }
+
+      Swal.fire({
+        title: 'Import Selesai',
+        html: resultHtml,
+        icon: fails === 0 ? 'success' : 'warning'
+      });
       await loadPeserta();
       await refreshJurusanDanKelas();
     } else {

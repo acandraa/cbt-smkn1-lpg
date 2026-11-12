@@ -181,6 +181,8 @@ CREATE OR REPLACE FUNCTION public.create_peserta_user(
 RETURNS UUID AS $$
 DECLARE
   v_user_id UUID;
+  v_clean_username VARCHAR;
+  v_clean_pass TEXT;
   v_email VARCHAR;
   v_pass_hash TEXT;
 BEGIN
@@ -189,8 +191,10 @@ BEGIN
     RAISE EXCEPTION 'Akses ditolak: Hanya Administrator yang dapat mendaftarkan peserta.';
   END IF;
 
-  v_email := p_username || '@cbt.smkn1lempuing.sch.id';
-  v_pass_hash := encode(digest(p_password, 'sha256'), 'hex');
+  v_clean_username := LOWER(REGEXP_REPLACE(TRIM(p_username), '\s+', '', 'g'));
+  v_clean_pass := TRIM(p_password);
+  v_email := v_clean_username || '@cbt.smkn1lempuing.sch.id';
+  v_pass_hash := encode(digest(v_clean_pass, 'sha256'), 'hex');
 
   -- Create in auth.users
   INSERT INTO auth.users (
@@ -205,12 +209,12 @@ BEGIN
     'authenticated',
     'authenticated',
     v_email,
-    crypt(p_password, gen_salt('bf')),
+    crypt(v_clean_pass, gen_salt('bf')),
     now(),
     now(),
     now(),
     '{"provider":"email","providers":["email"]}',
-    jsonb_build_object('role', 'peserta', 'username', p_username),
+    jsonb_build_object('role', 'peserta', 'username', v_clean_username),
     now(),
     now(),
     '',
@@ -226,13 +230,13 @@ BEGIN
   )
   VALUES (
     v_user_id,
-    p_username,
+    v_clean_username,
     v_pass_hash,
-    p_nama_lengkap,
-    p_jurusan,
-    p_kelas,
-    p_ruang,
-    p_sesi
+    TRIM(p_nama_lengkap),
+    TRIM(p_jurusan),
+    TRIM(p_kelas),
+    TRIM(p_ruang),
+    TRIM(p_sesi)
   );
 
   RETURN v_user_id;
@@ -259,21 +263,28 @@ CREATE OR REPLACE FUNCTION public.update_peserta_password(
   p_password TEXT
 )
 RETURNS VOID AS $$
+DECLARE
+  v_clean_pass TEXT;
 BEGIN
   -- Only admins can call this function
   IF NOT public.is_admin() THEN
     RAISE EXCEPTION 'Akses ditolak: Hanya Administrator yang dapat mengubah password peserta.';
   END IF;
 
-  -- Update password in auth.users
-  UPDATE auth.users
-  SET encrypted_password = crypt(p_password, gen_salt('bf')),
-      updated_at = now()
-  WHERE id = p_peserta_id;
+  v_clean_pass := TRIM(p_password);
 
-  -- Update password_hash in public.peserta
+  -- Update password & normalize email in auth.users
+  UPDATE auth.users u
+  SET encrypted_password = crypt(v_clean_pass, gen_salt('bf')),
+      email = LOWER(REGEXP_REPLACE(TRIM(p.username), '\s+', '', 'g')) || '@cbt.smkn1lempuing.sch.id',
+      updated_at = now()
+  FROM public.peserta p
+  WHERE u.id = p_peserta_id AND p.id = p_peserta_id;
+
+  -- Update password_hash & normalize username in public.peserta
   UPDATE public.peserta
-  SET password_hash = encode(digest(p_password, 'sha256'), 'hex')
+  SET password_hash = encode(digest(v_clean_pass, 'sha256'), 'hex'),
+      username = LOWER(REGEXP_REPLACE(TRIM(username), '\s+', '', 'g'))
   WHERE id = p_peserta_id;
 END;
 $$ LANGUAGE plpgsql SECURITY DEFINER;
@@ -325,7 +336,7 @@ CREATE POLICY "Peserta can submit their own exam results"
 
 -- Jawaban Peserta Table
 CREATE POLICY "Admins can view all answers"
-  ON public.jawaban_peserta FOR SELECT TO authenticated USING (public.is_admin());
+  ON public.jawaban_peserta FOR ALL TO authenticated USING (public.is_admin());
 
 CREATE POLICY "Peserta can manage their own answers"
   ON public.jawaban_peserta FOR ALL TO authenticated 
