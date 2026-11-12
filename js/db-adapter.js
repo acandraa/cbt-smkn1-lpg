@@ -1030,6 +1030,7 @@ const DB = {
           }
           return (data || []).map(p => ({
             ...p,
+            password: p.password_plain || p.password || '',
             _shardId: shard.id,
             _shardName: shard.name
           }));
@@ -1055,6 +1056,7 @@ const DB = {
       const activeName = activeShard ? activeShard.name : '';
       return (data || []).map(p => ({
         ...p,
+        password: p.password_plain || p.password || '',
         _shardId: activeId,
         _shardName: activeName
       }));
@@ -1099,6 +1101,8 @@ const DB = {
       const payload = {
         username: cleanUsername,
         password_hash: hash,
+        password_plain: cleanPass,
+        password: cleanPass,
         nama_lengkap: cleanNama,
         jurusan: cleanJurusan,
         kelas: cleanKelas,
@@ -1157,6 +1161,7 @@ const DB = {
             await c.from('peserta').update({
               username: cleanUsername,
               password_hash: passHash,
+              password_plain: cleanPass,
               nama_lengkap: cleanNama,
               jurusan: cleanJurusan,
               kelas: cleanKelas,

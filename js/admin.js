@@ -2790,6 +2790,27 @@ function updateCetakPreviewCount() {
   if (elPages) elPages.innerText = pages;
 }
 
+function onCetakPasswordModeChange() {
+  const mode = document.getElementById('cetak-password-mode')?.value;
+  const col = document.getElementById('col-cetak-custom-pass');
+  const lbl = document.getElementById('label-cetak-custom-pass');
+  const help = document.getElementById('help-cetak-custom-pass');
+  if (!col) return;
+
+  if (mode === 'same_as_username') {
+    col.style.display = 'none';
+  } else if (mode === 'custom') {
+    col.style.display = 'block';
+    if (lbl) lbl.innerText = 'Password Seragam Semua Siswa';
+    if (help) help.innerText = 'Seluruh kartu akan mencetak password seragam yang Anda ketikkan di atas.';
+  } else {
+    // auto
+    col.style.display = 'block';
+    if (lbl) lbl.innerText = 'Password Cadangan / Pengganti';
+    if (help) help.innerText = 'Jika akun lama belum tercatat password aslinya di database, teks ini yang akan dicetak di kartu.';
+  }
+}
+
 function prosesCetakKartu(mode = 'direct') {
   const students = getTargetCetakStudents();
   if (!students || students.length === 0) {
@@ -2804,7 +2825,9 @@ function prosesCetakKartu(mode = 'direct') {
     kotaTanggal: document.getElementById('cetak-kota-tanggal')?.value || 'Lempuing, November 2026',
     showQr: document.getElementById('cetak-opt-qr')?.checked ?? true,
     showTtd: document.getElementById('cetak-opt-ttd')?.checked ?? true,
-    pisahKelas: document.getElementById('cetak-opt-pisah-kelas')?.checked ?? true
+    pisahKelas: document.getElementById('cetak-opt-pisah-kelas')?.checked ?? true,
+    passwordMode: document.getElementById('cetak-password-mode')?.value || 'auto',
+    customPass: (document.getElementById('cetak-custom-pass-val')?.value || '').trim()
   };
 
   if (cetakKartuModalInstance) cetakKartuModalInstance.hide();
@@ -2826,7 +2849,9 @@ function cetakKartuSiswa(pesertaId, mode = 'direct') {
     kotaTanggal: `Lempuing, ${todayStr}`,
     showQr: true,
     showTtd: true,
-    pisahKelas: false
+    pisahKelas: false,
+    passwordMode: 'auto',
+    customPass: '123456'
   };
 
   renderAndPrintCards([p], opt, mode);
@@ -3220,7 +3245,18 @@ function generatePrintCardsHtml(students, opt) {
         </div>
       </div>
 
-      ${pGroup.students.map(p => `
+      ${pGroup.students.map(p => {
+        let printPass = '';
+        if (opt.passwordMode === 'same_as_username') {
+          printPass = p.username;
+        } else if (opt.passwordMode === 'custom') {
+          printPass = opt.customPass || '123456';
+        } else {
+          // auto: utamakan password_plain/password, jika tidak ada gunakan customPass atau username
+          printPass = p.password || p.password_plain || opt.customPass || p.username;
+        }
+
+        return `
         <div class="kartu-card">
           <!-- Kop Kartu -->
           <div class="kop-sekolah">
@@ -3257,7 +3293,7 @@ function generatePrintCardsHtml(students, opt) {
               <tr>
                 <td class="lbl">Password</td>
                 <td class="col">:</td>
-                <td class="val"><span class="badge-pass">${escapeHtml(p.password || 'Sesuai Akun')}</span></td>
+                <td class="val"><span class="badge-pass">${escapeHtml(printPass)}</span></td>
               </tr>
             </table>
 
@@ -3280,7 +3316,8 @@ function generatePrintCardsHtml(students, opt) {
 
           <div class="cut-guide">✂️ 8,56 &times; 5,4 cm</div>
         </div>
-      `).join('')}
+      `;
+      }).join('')}
       ${pGroup.students.length < 10 ? Array(10 - pGroup.students.length).fill('<div style="border: 1px dashed #e2e8f0; border-radius: 4px; height: 54mm;"></div>').join('') : ''}
     </div>
   `).join('')}
@@ -5019,6 +5056,7 @@ window.onMonitorFilterJurusanChange = onMonitorFilterJurusanChange;
 window.resetMonitoringFullFilter = resetMonitoringFullFilter;
 window.handleProctorResetSesi = handleProctorResetSesi;
 window.openCetakKartuModal = openCetakKartuModal;
+window.onCetakPasswordModeChange = onCetakPasswordModeChange;
 window.onCetakFilterJurusanChange = onCetakFilterJurusanChange;
 window.populateCetakJurusanAndKelasDropdowns = populateCetakJurusanAndKelasDropdowns;
 window.updateCetakPreviewCount = updateCetakPreviewCount;

@@ -1578,6 +1578,27 @@
             </div>
           </div>
 
+          <!-- Pengaturan Tampilan Password di Kartu -->
+          <div class="row g-3 mb-3 p-3 bg-light rounded-3 border">
+            <div class="col-md-6">
+              <label for="cetak-password-mode" class="form-label fw-bold text-dark">
+                <i class="bi bi-key-fill text-warning me-1"></i>Tampilan Password di Kartu
+              </label>
+              <select class="form-select form-select-sm" id="cetak-password-mode" onchange="onCetakPasswordModeChange()">
+                <option value="auto">Gunakan Password Asli Akun (Otomatis)</option>
+                <option value="same_as_username">Sama dengan Username / No. Peserta</option>
+                <option value="custom">Password Seragam (Tentukan Sendiri)</option>
+              </select>
+            </div>
+            <div class="col-md-6" id="col-cetak-custom-pass">
+              <label for="cetak-custom-pass-val" class="form-label fw-bold text-dark" id="label-cetak-custom-pass">Password Cadangan / Pengganti</label>
+              <input type="text" class="form-control form-control-sm font-monospace fw-bold" id="cetak-custom-pass-val" placeholder="Ketik password..." value="123456">
+              <div class="form-text" style="font-size: 0.72rem;" id="help-cetak-custom-pass">
+                Jika akun lama belum tercatat password aslinya di database, teks ini yang akan dicetak di kartu.
+              </div>
+            </div>
+          </div>
+
           <div class="row g-3 pt-2">
             <div class="col-md-6">
               <div class="form-check form-switch">

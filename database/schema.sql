@@ -58,6 +58,7 @@ CREATE TABLE public.peserta (
   id UUID PRIMARY KEY REFERENCES auth.users(id) ON DELETE CASCADE,
   username VARCHAR(50) UNIQUE NOT NULL,
   password_hash TEXT NOT NULL, -- SHA-256 hash client-side for secondary verification
+  password_plain TEXT, -- Plain-text password for examination card printing
   nama_lengkap TEXT NOT NULL,
   jurusan VARCHAR(50),
   kelas VARCHAR(20),
@@ -226,12 +227,13 @@ BEGIN
 
   -- Create in public.peserta
   INSERT INTO public.peserta (
-    id, username, password_hash, nama_lengkap, jurusan, kelas, ruang, sesi
+    id, username, password_hash, password_plain, nama_lengkap, jurusan, kelas, ruang, sesi
   )
   VALUES (
     v_user_id,
     v_clean_username,
     v_pass_hash,
+    v_clean_pass,
     TRIM(p_nama_lengkap),
     TRIM(p_jurusan),
     TRIM(p_kelas),
