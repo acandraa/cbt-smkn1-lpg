@@ -299,7 +299,7 @@ function applyGuruRoleUI() {
   }
 }
 
-// Refresh all database cache
+// Refresh all database cache (dioptimasi: 1 batch paralel tanpa duplikasi request)
 async function refreshAllData() {
   if (isGuruMode()) {
     await Promise.all([
@@ -310,16 +310,42 @@ async function refreshAllData() {
     ]);
     return;
   }
-  await Promise.all([
-    loadDashboardStats(),
-    loadPeserta(),
-    loadGuru(),
-    loadPaket(),
-    loadJurusan(),
-    loadKelas(),
-    loadHasil(),
-    loadSettings()
-  ]);
+
+  try {
+    const [pesertaRes, hasilRes, guruRes, paketRes, jurRes, klsRes] = await Promise.all([
+      DB.getPesertaList(),
+      DB.getHasilList(),
+      DB.getGuruList(),
+      DB.getPaketList(),
+      DB.getJurusanList(),
+      DB.getKelasList()
+    ]);
+
+    allPeserta = pesertaRes || [];
+    allHasil = hasilRes || [];
+    allGuru = guruRes || [];
+    allPaketUnfiltered = paketRes || [];
+    allPaket = allPaketUnfiltered;
+    allJurusan = jurRes || [];
+    allKelas = klsRes || [];
+
+    // Render komponen langsung dari memory cache secara instan
+    renderDashboardStatsView();
+    populateJurusanDropdowns();
+    populateKelasDropdowns();
+    populateHasilFilterDropdowns();
+    renderPesertaTable(allPeserta);
+    renderGuruTable(allGuru);
+    renderPaketList(allPaket);
+    renderJurusanTable();
+    renderKelasTable();
+    renderHasilTable(allHasil);
+
+    // Ambil pengaturan ujian
+    await loadSettings();
+  } catch (err) {
+    console.error("Gagal refreshAllData:", err);
+  }
 }
 
 async function refreshJurusanDanKelas() {
@@ -660,6 +686,8 @@ async function quickRotateTokenPembebas() {
 // LIVE MONITORING & DASHBOARD STATISTICS
 // -------------------------------------------------------------
 
+let isDashboardStatsLoading = false;
+
 function toggleAutoRefresh(enabled) {
   if (autoRefreshTimer) {
     clearInterval(autoRefreshTimer);
@@ -670,11 +698,14 @@ function toggleAutoRefresh(enabled) {
       if (activeTab === 'dashboard') {
         loadDashboardStats(false);
       }
-    }, 10000);
+    }, 15000);
   }
 }
 
 async function loadDashboardStats(showIndicator = false) {
+  if (isDashboardStatsLoading) return;
+  isDashboardStatsLoading = true;
+
   const icon = document.getElementById('icon-refresh-dashboard');
   if (showIndicator && icon) icon.classList.add('spin-animation');
 
@@ -686,75 +717,80 @@ async function loadDashboardStats(showIndicator = false) {
     allPeserta = pesertaList || [];
     allHasil = hasilList || [];
 
-    const totalPeserta = allPeserta.length;
-    const sudahUjian = allPeserta.filter(p => p.status_ujian === 'Sudah Ujian').length;
-    const sedangUjian = allPeserta.filter(p => p.status_ujian === 'Sedang Ujian').length;
-    const belumUjian = totalPeserta - sudahUjian - sedangUjian;
-    const terkunciOrWarning = allPeserta.filter(p => Boolean(p.is_locked) || (parseInt(p.pelanggaran || 0) > 0)).length;
-
-    // Update KPI counters
-    const elTotal = document.getElementById('stat-total-peserta');
-    const elSedang = document.getElementById('stat-sedang-ujian');
-    const elSudah = document.getElementById('stat-sudah-ujian');
-    const elBelum = document.getElementById('stat-belum-ujian');
-    const elTerkunci = document.getElementById('stat-terkunci-count');
-
-    if (elTotal) elTotal.innerText = totalPeserta;
-    if (elSedang) elSedang.innerText = sedangUjian;
-    if (elSudah) elSudah.innerText = sudahUjian;
-    if (elBelum) elBelum.innerText = belumUjian;
-    if (elTerkunci) elTerkunci.innerText = terkunciOrWarning;
-
-    // Populate filter dropdowns
-    populateMonitoringFilterDropdowns();
-
-    // Render Live Monitoring Cards & Table
-    renderMonitoringKelasCards();
-    filterMonitoringTable();
-
-    // Calculate score analytics
-    let maxVal = 0;
-    let avgVal = 0;
-    let lulusCount = 0;
-    let tidakLulusCount = 0;
-    const bins = [0, 0, 0, 0, 0]; // 0-20, 21-40, 41-60, 61-80, 81-100
-
-    if (allHasil && allHasil.length > 0) {
-      let sum = 0;
-      allHasil.forEach(h => {
-        const val = parseFloat(h.nilai) || 0;
-        sum += val;
-        if (val > maxVal) maxVal = val;
-        if (h.status_kelulusan === 'Lulus') lulusCount++;
-        else tidakLulusCount++;
-
-        if (val <= 20) bins[0]++;
-        else if (val <= 40) bins[1]++;
-        else if (val <= 60) bins[2]++;
-        else if (val <= 80) bins[3]++;
-        else bins[4]++;
-      });
-      avgVal = (sum / allHasil.length).toFixed(1);
-    }
-
-    const elMax = document.getElementById('stat-nilai-tertinggi');
-    const elAvg = document.getElementById('stat-nilai-rata');
-    const elLulus = document.getElementById('stat-lulus-count');
-    const elTdkLulus = document.getElementById('stat-tidak-lulus-count');
-
-    if (elMax) elMax.innerText = maxVal.toFixed(1);
-    if (elAvg) elAvg.innerText = avgVal;
-    if (elLulus) elLulus.innerText = lulusCount;
-    if (elTdkLulus) elTdkLulus.innerText = tidakLulusCount;
-
-    renderCharts(bins, lulusCount, tidakLulusCount);
+    renderDashboardStatsView();
   } catch (err) {
     console.error("Gagal memuat dashboard stats:", err);
   } finally {
+    isDashboardStatsLoading = false;
     if (icon) {
       setTimeout(() => icon.classList.remove('spin-animation'), 600);
     }
   }
+}
+
+function renderDashboardStatsView() {
+  const totalPeserta = (allPeserta || []).length;
+  const sudahUjian = (allPeserta || []).filter(p => p.status_ujian === 'Sudah Ujian').length;
+  const sedangUjian = (allPeserta || []).filter(p => p.status_ujian === 'Sedang Ujian').length;
+  const belumUjian = totalPeserta - sudahUjian - sedangUjian;
+  const terkunciOrWarning = (allPeserta || []).filter(p => Boolean(p.is_locked) || (parseInt(p.pelanggaran || 0) > 0)).length;
+
+  // Update KPI counters
+  const elTotal = document.getElementById('stat-total-peserta');
+  const elSedang = document.getElementById('stat-sedang-ujian');
+  const elSudah = document.getElementById('stat-sudah-ujian');
+  const elBelum = document.getElementById('stat-belum-ujian');
+  const elTerkunci = document.getElementById('stat-terkunci-count');
+
+  if (elTotal) elTotal.innerText = totalPeserta;
+  if (elSedang) elSedang.innerText = sedangUjian;
+  if (elSudah) elSudah.innerText = sudahUjian;
+  if (elBelum) elBelum.innerText = belumUjian;
+  if (elTerkunci) elTerkunci.innerText = terkunciOrWarning;
+
+  // Populate filter dropdowns
+  populateMonitoringFilterDropdowns();
+
+  // Render Live Monitoring Cards & Table
+  renderMonitoringKelasCards();
+  filterMonitoringTable();
+
+  // Calculate score analytics
+  let maxVal = 0;
+  let avgVal = 0;
+  let lulusCount = 0;
+  let tidakLulusCount = 0;
+  const bins = [0, 0, 0, 0, 0]; // 0-20, 21-40, 41-60, 61-80, 81-100
+
+  if (allHasil && allHasil.length > 0) {
+    let sum = 0;
+    allHasil.forEach(h => {
+      const val = parseFloat(h.nilai) || 0;
+      sum += val;
+      if (val > maxVal) maxVal = val;
+      if (h.status_kelulusan === 'Lulus') lulusCount++;
+      else tidakLulusCount++;
+
+      if (val <= 20) bins[0]++;
+      else if (val <= 40) bins[1]++;
+      else if (val <= 60) bins[2]++;
+      else if (val <= 80) bins[3]++;
+      else bins[4]++;
+    });
+    avgVal = (sum / allHasil.length).toFixed(1);
+  }
+
+  const elMax = document.getElementById('stat-nilai-tertinggi');
+  const elAvg = document.getElementById('stat-nilai-rata');
+  const elLulus = document.getElementById('stat-lulus-count');
+  const elTdkLulus = document.getElementById('stat-tidak-lulus-count');
+
+  if (elMax) elMax.innerText = maxVal.toFixed(1);
+  if (elAvg) elAvg.innerText = avgVal;
+  if (elLulus) elLulus.innerText = lulusCount;
+  if (elTdkLulus) elTdkLulus.innerText = tidakLulusCount;
+
+  renderCharts(bins, lulusCount, tidakLulusCount);
 }
 
 function populateMonitoringFilterDropdowns() {
@@ -773,10 +809,11 @@ function populateMonitoringFilterDropdowns() {
   const selCardJur = document.getElementById('monitor-card-filter-jurusan');
   if (selCardJur) {
     const cur = selCardJur.value;
-    selCardJur.innerHTML = '<option value="">Semua Jurusan</option>';
+    const jurOpts = ['<option value="">Semua Jurusan</option>'];
     sortedJurusan.forEach(j => {
-      selCardJur.innerHTML += `<option value="${escapeHtml(j)}">${escapeHtml(j)}</option>`;
+      jurOpts.push(`<option value="${escapeHtml(j)}">${escapeHtml(j)}</option>`);
     });
+    selCardJur.innerHTML = jurOpts.join('');
     if (cur && sortedJurusan.includes(cur)) selCardJur.value = cur;
   }
 
@@ -784,10 +821,11 @@ function populateMonitoringFilterDropdowns() {
   const selTblJur = document.getElementById('monitor-table-filter-jurusan');
   if (selTblJur) {
     const cur = selTblJur.value;
-    selTblJur.innerHTML = '<option value="">Semua Jurusan</option>';
+    const jurOpts = ['<option value="">Semua Jurusan</option>'];
     sortedJurusan.forEach(j => {
-      selTblJur.innerHTML += `<option value="${escapeHtml(j)}">${escapeHtml(j)}</option>`;
+      jurOpts.push(`<option value="${escapeHtml(j)}">${escapeHtml(j)}</option>`);
     });
+    selTblJur.innerHTML = jurOpts.join('');
     if (cur && sortedJurusan.includes(cur)) selTblJur.value = cur;
   }
 
@@ -795,10 +833,11 @@ function populateMonitoringFilterDropdowns() {
   const selTblKls = document.getElementById('monitor-table-filter-kelas');
   if (selTblKls) {
     const cur = selTblKls.value;
-    selTblKls.innerHTML = '<option value="">Semua Kelas</option>';
+    const klsOpts = ['<option value="">Semua Kelas</option>'];
     sortedKelas.forEach(k => {
-      selTblKls.innerHTML += `<option value="${escapeHtml(k)}">${escapeHtml(k)}</option>`;
+      klsOpts.push(`<option value="${escapeHtml(k)}">${escapeHtml(k)}</option>`);
     });
+    selTblKls.innerHTML = klsOpts.join('');
     if (cur && sortedKelas.includes(cur)) selTblKls.value = cur;
   }
 }
@@ -1140,59 +1179,65 @@ async function handleProctorResetSesi(pesertaId, nama) {
 
 function renderCharts(distributionData, lulus, tidakLulus) {
   const canvas1 = document.getElementById('scoreDistributionChart');
-  if (!canvas1) return;
-
-  const ctx1 = canvas1.getContext('2d');
-  if (scoreDistChart) scoreDistChart.destroy();
-
-  scoreDistChart = new Chart(ctx1, {
-    type: 'bar',
-    data: {
-      labels: ['0 - 20', '21 - 40', '41 - 60', '61 - 80', '81 - 100'],
-      datasets: [{
-        label: 'Jumlah Peserta',
-        data: distributionData,
-        backgroundColor: 'rgba(13, 110, 253, 0.7)',
-        borderColor: '#0d6efd',
-        borderWidth: 1,
-        borderRadius: 5
-      }]
-    },
-    options: {
-      responsive: true,
-      maintainAspectRatio: false,
-      scales: {
-        y: {
-          beginAtZero: true,
-          ticks: { stepSize: 1 }
+  if (canvas1) {
+    if (scoreDistChart) {
+      scoreDistChart.data.datasets[0].data = distributionData;
+      scoreDistChart.update('none');
+    } else {
+      const ctx1 = canvas1.getContext('2d');
+      scoreDistChart = new Chart(ctx1, {
+        type: 'bar',
+        data: {
+          labels: ['0 - 20', '21 - 40', '41 - 60', '61 - 80', '81 - 100'],
+          datasets: [{
+            label: 'Jumlah Peserta',
+            data: distributionData,
+            backgroundColor: 'rgba(13, 110, 253, 0.7)',
+            borderColor: '#0d6efd',
+            borderWidth: 1,
+            borderRadius: 5
+          }]
+        },
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          scales: {
+            y: {
+              beginAtZero: true,
+              ticks: { stepSize: 1 }
+            }
+          }
         }
-      }
+      });
     }
-  });
+  }
 
   const canvas2 = document.getElementById('passingRateChart');
   if (canvas2) {
-    const ctx2 = canvas2.getContext('2d');
-    if (passRateChart) passRateChart.destroy();
-
-    passRateChart = new Chart(ctx2, {
-      type: 'doughnut',
-      data: {
-        labels: ['Lulus', 'Tidak Lulus'],
-        datasets: [{
-          data: [lulus, tidakLulus],
-          backgroundColor: ['#198754', '#dc3545'],
-          borderWidth: 1
-        }]
-      },
-      options: {
-        responsive: true,
-        maintainAspectRatio: false,
-        plugins: {
-          legend: { position: 'bottom' }
+    if (passRateChart) {
+      passRateChart.data.datasets[0].data = [lulus, tidakLulus];
+      passRateChart.update('none');
+    } else {
+      const ctx2 = canvas2.getContext('2d');
+      passRateChart = new Chart(ctx2, {
+        type: 'doughnut',
+        data: {
+          labels: ['Lulus', 'Tidak Lulus'],
+          datasets: [{
+            data: [lulus, tidakLulus],
+            backgroundColor: ['#198754', '#dc3545'],
+            borderWidth: 1
+          }]
+        },
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          plugins: {
+            legend: { position: 'bottom' }
+          }
         }
-      }
-    });
+      });
+    }
   }
 }
 
@@ -1387,15 +1432,13 @@ function populateJurusanDropdowns() {
     if (pk.jurusan && pk.jurusan.toLowerCase() !== 'semua') allNamesSet.add(pk.jurusan.toUpperCase());
   });
   const sortedList = Array.from(allNamesSet).sort();
+  const optionsHtml = sortedList.map(j => `<option value="${escapeHtml(j)}">${escapeHtml(j)}</option>`).join('');
 
   // 1. Dropdown Form Peserta (crud-peserta-jurusan)
   const selPeserta = document.getElementById('crud-peserta-jurusan');
   if (selPeserta) {
     const cur = selPeserta.value;
-    selPeserta.innerHTML = '<option value="">Pilih Jurusan...</option>';
-    sortedList.forEach(j => {
-      selPeserta.innerHTML += `<option value="${escapeHtml(j)}">${escapeHtml(j)}</option>`;
-    });
+    selPeserta.innerHTML = '<option value="">Pilih Jurusan...</option>' + optionsHtml;
     if (cur) selPeserta.value = cur;
   }
 
@@ -1403,10 +1446,7 @@ function populateJurusanDropdowns() {
   const selPaket = document.getElementById('crud-paket-jurusan');
   if (selPaket) {
     const cur = selPaket.value;
-    selPaket.innerHTML = '<option value="">Semua Jurusan (Umum)</option>';
-    sortedList.forEach(j => {
-      selPaket.innerHTML += `<option value="${escapeHtml(j)}">${escapeHtml(j)}</option>`;
-    });
+    selPaket.innerHTML = '<option value="">Semua Jurusan (Umum)</option>' + optionsHtml;
     if (cur) selPaket.value = cur;
   }
 
@@ -1414,10 +1454,7 @@ function populateJurusanDropdowns() {
   const fPaket = document.getElementById('filter-jurusan-paket');
   if (fPaket) {
     const cur = fPaket.value;
-    fPaket.innerHTML = '<option value="">Semua Jurusan</option>';
-    sortedList.forEach(j => {
-      fPaket.innerHTML += `<option value="${escapeHtml(j)}">${escapeHtml(j)}</option>`;
-    });
+    fPaket.innerHTML = '<option value="">Semua Jurusan</option>' + optionsHtml;
     if (cur) fPaket.value = cur;
   }
 
@@ -1425,10 +1462,7 @@ function populateJurusanDropdowns() {
   const fPeserta = document.getElementById('filter-jurusan-peserta');
   if (fPeserta) {
     const cur = fPeserta.value;
-    fPeserta.innerHTML = '<option value="">Semua Jurusan</option>';
-    sortedList.forEach(j => {
-      fPeserta.innerHTML += `<option value="${escapeHtml(j)}">${escapeHtml(j)}</option>`;
-    });
+    fPeserta.innerHTML = '<option value="">Semua Jurusan</option>' + optionsHtml;
     if (cur) fPeserta.value = cur;
   }
 
@@ -1436,10 +1470,7 @@ function populateJurusanDropdowns() {
   const fHasil = document.getElementById('filter-jurusan-hasil');
   if (fHasil) {
     const cur = fHasil.value;
-    fHasil.innerHTML = '<option value="">Semua Jurusan</option>';
-    sortedList.forEach(j => {
-      fHasil.innerHTML += `<option value="${escapeHtml(j)}">${escapeHtml(j)}</option>`;
-    });
+    fHasil.innerHTML = '<option value="">Semua Jurusan</option>' + optionsHtml;
     if (cur) fHasil.value = cur;
   }
 }
@@ -1645,15 +1676,13 @@ function populateKelasDropdowns() {
     }
   });
   const sortedList = Array.from(allNamesSet).sort();
+  const rawOptionsHtml = sortedList.map(k => `<option value="${escapeHtml(k)}">${escapeHtml(k)}</option>`).join('');
 
   // 1. Dropdown Form Peserta (crud-peserta-kelas)
   const selPeserta = document.getElementById('crud-peserta-kelas');
   if (selPeserta) {
     const cur = selPeserta.value;
-    selPeserta.innerHTML = '<option value="">Pilih Kelas...</option>';
-    sortedList.forEach(k => {
-      selPeserta.innerHTML += `<option value="${escapeHtml(k)}">${escapeHtml(k)}</option>`;
-    });
+    selPeserta.innerHTML = '<option value="">Pilih Kelas...</option>' + rawOptionsHtml;
     if (cur) selPeserta.value = cur;
   }
 
@@ -1669,11 +1698,9 @@ function populateKelasDropdowns() {
         <option value="TINGKAT:XII">Tingkat XII (Semua Kelas XII: XII TKJ 1, XII TKJ 2, dll)</option>
       </optgroup>
       <optgroup label="Rombel Spesifik (Hanya Kelas Tertentu Saja)">
+        ${rawOptionsHtml}
+      </optgroup>
     `;
-    sortedList.forEach(k => {
-      selPaket.innerHTML += `<option value="${escapeHtml(k)}">${escapeHtml(k)}</option>`;
-    });
-    selPaket.innerHTML += `</optgroup>`;
     if (cur) selPaket.value = cur;
   }
 
@@ -1689,11 +1716,9 @@ function populateKelasDropdowns() {
         <option value="TINGKAT:XII">Tingkat XII</option>
       </optgroup>
       <optgroup label="Rombel Spesifik">
+        ${rawOptionsHtml}
+      </optgroup>
     `;
-    sortedList.forEach(k => {
-      fPaket.innerHTML += `<option value="${escapeHtml(k)}">${escapeHtml(k)}</option>`;
-    });
-    fPaket.innerHTML += `</optgroup>`;
     if (cur) fPaket.value = cur;
   }
 
@@ -1701,10 +1726,7 @@ function populateKelasDropdowns() {
   const fPeserta = document.getElementById('filter-kelas-peserta');
   if (fPeserta) {
     const cur = fPeserta.value;
-    fPeserta.innerHTML = '<option value="">Semua Kelas</option>';
-    sortedList.forEach(k => {
-      fPeserta.innerHTML += `<option value="${escapeHtml(k)}">${escapeHtml(k)}</option>`;
-    });
+    fPeserta.innerHTML = '<option value="">Semua Kelas</option>' + rawOptionsHtml;
     if (cur) fPeserta.value = cur;
   }
 
@@ -1712,10 +1734,7 @@ function populateKelasDropdowns() {
   const fHasil = document.getElementById('filter-kelas-hasil');
   if (fHasil) {
     const cur = fHasil.value;
-    fHasil.innerHTML = '<option value="">Semua Kelas</option>';
-    sortedList.forEach(k => {
-      fHasil.innerHTML += `<option value="${escapeHtml(k)}">${escapeHtml(k)}</option>`;
-    });
+    fHasil.innerHTML = '<option value="">Semua Kelas</option>' + rawOptionsHtml;
     if (cur) fHasil.value = cur;
   }
 }
@@ -1735,12 +1754,86 @@ async function loadPeserta() {
   }
 }
 
-function renderPesertaTable(list) {
-  const tbody = document.getElementById('table-peserta-body');
-  tbody.innerHTML = '';
+let pesertaCurrentPage = 1;
+let pesertaPageSize = 50;
+let currentFilteredPeserta = [];
 
-  if (list.length === 0) {
+function changePesertaPageSize(size) {
+  pesertaPageSize = size === 'all' ? 'all' : (parseInt(size, 10) || 50);
+  pesertaCurrentPage = 1;
+  renderPesertaTable(currentFilteredPeserta, true);
+}
+
+function goToPesertaPage(page) {
+  pesertaCurrentPage = Math.max(1, parseInt(page, 10) || 1);
+  renderPesertaTable(currentFilteredPeserta, true);
+}
+
+function renderPaginationNav(navEl, currentPage, totalPages, goToFuncName) {
+  if (!navEl) return;
+  if (totalPages <= 1) {
+    navEl.innerHTML = '';
+    return;
+  }
+  const pages = [];
+  const maxButtons = 7;
+  if (totalPages <= maxButtons) {
+    for (let i = 1; i <= totalPages; i++) pages.push(i);
+  } else {
+    pages.push(1);
+    if (currentPage > 3) pages.push('...');
+    const start = Math.max(2, currentPage - 1);
+    const end = Math.min(totalPages - 1, currentPage + 1);
+    for (let i = start; i <= end; i++) {
+      if (!pages.includes(i)) pages.push(i);
+    }
+    if (currentPage < totalPages - 2) pages.push('...');
+    if (!pages.includes(totalPages)) pages.push(totalPages);
+  }
+
+  const items = [];
+  items.push(`
+    <li class="page-item ${currentPage === 1 ? 'disabled' : ''}">
+      <button class="page-link" type="button" onclick="${goToFuncName}(${currentPage - 1})" aria-label="Sebelumnya">
+        <i class="bi bi-chevron-left"></i>
+      </button>
+    </li>
+  `);
+
+  pages.forEach(p => {
+    if (p === '...') {
+      items.push(`<li class="page-item disabled"><span class="page-link">&hellip;</span></li>`);
+    } else {
+      items.push(`
+        <li class="page-item ${p === currentPage ? 'active' : ''}">
+          <button class="page-link" type="button" onclick="${goToFuncName}(${p})">${p}</button>
+        </li>
+      `);
+    }
+  });
+
+  items.push(`
+    <li class="page-item ${currentPage === totalPages ? 'disabled' : ''}">
+      <button class="page-link" type="button" onclick="${goToFuncName}(${currentPage + 1})" aria-label="Selanjutnya">
+        <i class="bi bi-chevron-right"></i>
+      </button>
+    </li>
+  `);
+
+  navEl.innerHTML = items.join('');
+}
+
+function renderPesertaTable(list, keepPage = false) {
+  currentFilteredPeserta = list || [];
+  const tbody = document.getElementById('table-peserta-body');
+  const infoEl = document.getElementById('peserta-pagination-info');
+  const navEl = document.getElementById('peserta-pagination-nav');
+  if (!tbody) return;
+
+  if (!list || list.length === 0) {
     tbody.innerHTML = `<tr><td colspan="9" class="text-center text-muted py-4">Data peserta kosong atau tidak ditemukan.</td></tr>`;
+    if (infoEl) infoEl.innerText = 'Menampilkan 0 dari 0 peserta';
+    if (navEl) navEl.innerHTML = '';
     return;
   }
 
@@ -1750,12 +1843,40 @@ function renderPesertaTable(list) {
     const jB = (b.jurusan || 'Tanpa Jurusan').toUpperCase();
     if (jA < jB) return -1;
     if (jA > jB) return 1;
-    return a.nama_lengkap.localeCompare(b.nama_lengkap);
+    return (a.nama_lengkap || '').localeCompare(b.nama_lengkap || '');
   });
 
-  let currentJurusan = null;
+  const totalItems = sortedList.length;
+  let pagedItems = sortedList;
+  let totalPages = 1;
+  let startIdx = 0;
+  let endIdx = totalItems;
 
-  sortedList.forEach(p => {
+  if (pesertaPageSize !== 'all') {
+    const pageSizeNum = parseInt(pesertaPageSize, 10) || 50;
+    totalPages = Math.max(1, Math.ceil(totalItems / pageSizeNum));
+    if (!keepPage) pesertaCurrentPage = 1;
+    if (pesertaCurrentPage > totalPages) pesertaCurrentPage = totalPages;
+    if (pesertaCurrentPage < 1) pesertaCurrentPage = 1;
+
+    startIdx = (pesertaCurrentPage - 1) * pageSizeNum;
+    endIdx = Math.min(startIdx + pageSizeNum, totalItems);
+    pagedItems = sortedList.slice(startIdx, endIdx);
+  } else {
+    pesertaCurrentPage = 1;
+  }
+
+  if (infoEl) {
+    infoEl.innerText = `Menampilkan ${startIdx + 1} - ${endIdx} dari total ${totalItems} peserta`;
+  }
+  if (navEl) {
+    renderPaginationNav(navEl, pesertaCurrentPage, totalPages, 'goToPesertaPage');
+  }
+
+  let currentJurusan = null;
+  const rows = [];
+
+  pagedItems.forEach(p => {
     let statusClass = "bg-secondary";
     if (p.status_ujian === 'Sedang Ujian') statusClass = "bg-warning text-dark";
     if (p.status_ujian === 'Sudah Ujian') statusClass = "bg-success";
@@ -1764,17 +1885,17 @@ function renderPesertaTable(list) {
 
     // Group Header Row
     if (currentJurusan !== pJurusan) {
-      tbody.innerHTML += `
+      rows.push(`
         <tr class="table-light">
           <td colspan="9" class="fw-bold text-primary py-2" style="background-color: #f8f9fa;">
-            <i class="bi bi-bookmark-fill me-2"></i>JURUSAN: ${pJurusan}
+            <i class="bi bi-bookmark-fill me-2"></i>JURUSAN: ${escapeHtml(pJurusan)}
           </td>
         </tr>
-      `;
+      `);
       currentJurusan = pJurusan;
     }
 
-    tbody.innerHTML += `
+    rows.push(`
       <tr>
         <td class="font-monospace text-primary"><strong>${escapeHtml(p.username)}</strong></td>
         <td class="cell-wrap fw-semibold">${escapeHtml(p.nama_lengkap)}</td>
@@ -1810,8 +1931,10 @@ function renderPesertaTable(list) {
           </div>
         </td>
       </tr>
-    `;
+    `);
   });
+
+  tbody.innerHTML = rows.join('');
 }
 
 function filterPesertaList() {
@@ -1840,7 +1963,7 @@ function filterPesertaList() {
     return matchesSearch && matchesJurusan && matchesKelas && matchesSesi && matchesStatus;
   });
 
-  renderPesertaTable(filtered);
+  renderPesertaTable(filtered, false);
 }
 
 function openPesertaForm() {
@@ -2186,7 +2309,7 @@ function renderGuruTable(list) {
     if (pk && pk.id) paketLookup.set(String(pk.id), pk);
   });
 
-  list.forEach((g, idx) => {
+  const rows = list.map((g, idx) => {
     const mapelBadges = String(g.mapel_diampu || '')
       .split(',')
       .map(m => m.trim())
@@ -2229,7 +2352,7 @@ function renderGuruTable(list) {
         }).join('')
       : `<span class="text-muted small"><i class="bi bi-magic me-1"></i>Otomatis sesuai Mapel, Jurusan & Kelas</span>`;
 
-    tbody.innerHTML += `
+    return `
       <tr>
         <td>${idx + 1}</td>
         <td class="font-monospace fw-bold text-primary">${escapeHtml(g.username)}</td>
@@ -2253,6 +2376,8 @@ function renderGuruTable(list) {
       </tr>
     `;
   });
+
+  tbody.innerHTML = rows.join('');
 }
 
 function getAllAvailableJurusanNames() {
@@ -2592,29 +2717,20 @@ function onCetakLingkupChange() {
     selSpesifik.disabled = false;
     labelSpesifik.innerText = 'Pilih Kelas';
     const classes = Array.from(new Set((allPeserta || []).map(p => (p.kelas || '').toUpperCase()).filter(Boolean))).sort();
-    selSpesifik.innerHTML = '<option value="">Semua Kelas</option>';
-    classes.forEach(k => {
-      selSpesifik.innerHTML += `<option value="${escapeHtml(k)}">${escapeHtml(k)}</option>`;
-    });
+    selSpesifik.innerHTML = '<option value="">Semua Kelas</option>' + classes.map(k => `<option value="${escapeHtml(k)}">${escapeHtml(k)}</option>`).join('');
   } else if (lingkup === 'jurusan') {
     selSpesifik.disabled = false;
     labelSpesifik.innerText = 'Pilih Jurusan';
     const jurusans = Array.from(new Set((allPeserta || []).map(p => (p.jurusan || '').toUpperCase()).filter(Boolean))).sort();
-    selSpesifik.innerHTML = '<option value="">Semua Jurusan</option>';
-    jurusans.forEach(j => {
-      selSpesifik.innerHTML += `<option value="${escapeHtml(j)}">${escapeHtml(j)}</option>`;
-    });
+    selSpesifik.innerHTML = '<option value="">Semua Jurusan</option>' + jurusans.map(j => `<option value="${escapeHtml(j)}">${escapeHtml(j)}</option>`).join('');
   } else if (lingkup === 'sesi') {
     selSpesifik.disabled = false;
     labelSpesifik.innerText = 'Pilih Sesi';
     const sesis = Array.from(new Set((allPeserta || []).map(p => p.sesi).filter(Boolean))).sort();
-    selSpesifik.innerHTML = '<option value="">Semua Sesi</option>';
     if (sesis.length === 0) {
-      selSpesifik.innerHTML += '<option value="Sesi 1">Sesi 1</option><option value="Sesi 2">Sesi 2</option><option value="Sesi 3">Sesi 3</option>';
+      selSpesifik.innerHTML = '<option value="">Semua Sesi</option><option value="Sesi 1">Sesi 1</option><option value="Sesi 2">Sesi 2</option><option value="Sesi 3">Sesi 3</option>';
     } else {
-      sesis.forEach(s => {
-        selSpesifik.innerHTML += `<option value="${escapeHtml(s)}">${escapeHtml(s)}</option>`;
-      });
+      selSpesifik.innerHTML = '<option value="">Semua Sesi</option>' + sesis.map(s => `<option value="${escapeHtml(s)}">${escapeHtml(s)}</option>`).join('');
     }
   } else if (lingkup === 'filter_tabel') {
     selSpesifik.disabled = true;
@@ -3280,7 +3396,7 @@ function renderPaketList(list) {
     return;
   }
 
-  filtered.forEach(p => {
+  const items = filtered.map(p => {
     const isActive = p.id === activePaketId ? 'active' : '';
     const jurusanBadge = p.jurusan && p.jurusan.toLowerCase() !== 'semua' ? `<span class="badge bg-info text-dark ms-1">${escapeHtml(p.jurusan)}</span>` : `<span class="badge bg-secondary ms-1">Semua Jurusan</span>`;
     
@@ -3297,7 +3413,7 @@ function renderPaketList(list) {
     const soalCount = p.total_soal !== undefined ? p.total_soal : (p.soal_count || 0);
     const soalBadge = `<span class="badge ${soalCount > 0 ? 'bg-primary text-white' : 'bg-warning text-dark'} ms-1"><i class="bi bi-question-circle me-1"></i>${soalCount} Soal</span>`;
 
-    container.innerHTML += `
+    return `
       <a href="#" class="list-group-item list-group-item-action ${isActive}" onclick="selectPaket('${p.id}'); return false;">
         <div class="d-flex justify-content-between align-items-center mb-1">
           <h6 class="mb-0 fw-bold">${escapeHtml(p.nama_paket)}</h6>
@@ -3308,6 +3424,8 @@ function renderPaketList(list) {
       </a>
     `;
   });
+
+  container.innerHTML = items.join('');
 }
 
 function filterPaketList() {
@@ -3585,7 +3703,7 @@ function renderSoalList(list) {
     return;
   }
 
-  list.forEach((s, idx) => {
+  const items = list.map((s, idx) => {
     const isBs = !s.opsi_c && !s.opsi_d;
     const hasImg = s.gambar ? `<span class="badge bg-warning text-dark mb-2 ms-1"><i class="bi bi-image"></i> Gambar</span>` : '';
 
@@ -3608,7 +3726,7 @@ function renderSoalList(list) {
     }
     optionsHtml += `</div>`;
 
-    container.innerHTML += `
+    return `
       <div class="card mb-3 border-0 bg-light p-3 shadow-sm rounded-3">
         <div class="d-flex justify-content-between align-items-start gap-3">
           <div class="flex-grow-1">
@@ -3634,6 +3752,8 @@ function renderSoalList(list) {
       </div>
     `;
   });
+
+  container.innerHTML = items.join('');
 }
 
 function handleImageUpload(e) {
@@ -3862,30 +3982,24 @@ function populateHasilFilterDropdowns() {
   const fMapel = document.getElementById('filter-mapel-hasil');
   if (fMapel) {
     const fMapelVal = fMapel.value;
-    fMapel.innerHTML = '<option value="">📚 Semua Mata Pelajaran</option>';
-    Array.from(mapelSet).sort().forEach(m => {
-      fMapel.innerHTML += `<option value="${escapeHtml(m)}">${escapeHtml(m)}</option>`;
-    });
+    fMapel.innerHTML = '<option value="">📚 Semua Mata Pelajaran</option>' + 
+      Array.from(mapelSet).sort().map(m => `<option value="${escapeHtml(m)}">${escapeHtml(m)}</option>`).join('');
     fMapel.value = fMapelVal;
   }
 
   const fJurusan = document.getElementById('filter-jurusan-hasil');
   if (fJurusan) {
     const fJurusanVal = fJurusan.value;
-    fJurusan.innerHTML = '<option value="">Semua Jurusan</option>';
-    Array.from(jurusanSet).sort().forEach(j => {
-      fJurusan.innerHTML += `<option value="${escapeHtml(j)}">${escapeHtml(j)}</option>`;
-    });
+    fJurusan.innerHTML = '<option value="">Semua Jurusan</option>' + 
+      Array.from(jurusanSet).sort().map(j => `<option value="${escapeHtml(j)}">${escapeHtml(j)}</option>`).join('');
     fJurusan.value = fJurusanVal;
   }
 
   const fKelas = document.getElementById('filter-kelas-hasil');
   if (fKelas) {
     const fKelasVal = fKelas.value;
-    fKelas.innerHTML = '<option value="">Semua Kelas</option>';
-    Array.from(kelasSet).sort().forEach(k => {
-      fKelas.innerHTML += `<option value="${escapeHtml(k)}">${escapeHtml(k)}</option>`;
-    });
+    fKelas.innerHTML = '<option value="">Semua Kelas</option>' + 
+      Array.from(kelasSet).sort().map(k => `<option value="${escapeHtml(k)}">${escapeHtml(k)}</option>`).join('');
     fKelas.value = fKelasVal;
   }
 }
@@ -3912,12 +4026,32 @@ async function loadHasil() {
   }
 }
 
-function renderHasilTable(list) {
-  const tbody = document.getElementById('table-hasil-body');
-  tbody.innerHTML = '';
+let hasilCurrentPage = 1;
+let hasilPageSize = 50;
+let currentFilteredHasil = [];
 
-  if (list.length === 0) {
+function changeHasilPageSize(size) {
+  hasilPageSize = size === 'all' ? 'all' : (parseInt(size, 10) || 50);
+  hasilCurrentPage = 1;
+  renderHasilTable(currentFilteredHasil, true);
+}
+
+function goToHasilPage(page) {
+  hasilCurrentPage = Math.max(1, parseInt(page, 10) || 1);
+  renderHasilTable(currentFilteredHasil, true);
+}
+
+function renderHasilTable(list, keepPage = false) {
+  currentFilteredHasil = list || [];
+  const tbody = document.getElementById('table-hasil-body');
+  const infoEl = document.getElementById('hasil-pagination-info');
+  const navEl = document.getElementById('hasil-pagination-nav');
+  if (!tbody) return;
+
+  if (!list || list.length === 0) {
     tbody.innerHTML = `<tr><td colspan="10" class="text-center text-muted py-4">Belum ada hasil ujian yang cocok atau tersimpan.</td></tr>`;
+    if (infoEl) infoEl.innerText = 'Menampilkan 0 dari 0 nilai';
+    if (navEl) navEl.innerHTML = '';
     return;
   }
 
@@ -3940,15 +4074,41 @@ function renderHasilTable(list) {
     if (kA < kB) return -1;
     if (kA > kB) return 1;
     
-    return b.nilai - a.nilai;
+    return (parseFloat(b.nilai) || 0) - (parseFloat(a.nilai) || 0);
   });
 
+  const totalItems = sortedList.length;
+  let pagedItems = sortedList;
+  let totalPages = 1;
+  let startIdx = 0;
+  let endIdx = totalItems;
+
+  if (hasilPageSize !== 'all') {
+    const pageSizeNum = parseInt(hasilPageSize, 10) || 50;
+    totalPages = Math.max(1, Math.ceil(totalItems / pageSizeNum));
+    if (!keepPage) hasilCurrentPage = 1;
+    if (hasilCurrentPage > totalPages) hasilCurrentPage = totalPages;
+    if (hasilCurrentPage < 1) hasilCurrentPage = 1;
+
+    startIdx = (hasilCurrentPage - 1) * pageSizeNum;
+    endIdx = Math.min(startIdx + pageSizeNum, totalItems);
+    pagedItems = sortedList.slice(startIdx, endIdx);
+  } else {
+    hasilCurrentPage = 1;
+  }
+
+  if (infoEl) {
+    infoEl.innerText = `Menampilkan ${startIdx + 1} - ${endIdx} dari total ${totalItems} nilai`;
+  }
+  if (navEl) {
+    renderPaginationNav(navEl, hasilCurrentPage, totalPages, 'goToHasilPage');
+  }
+
   let currentGroup = null;
+  const rows = [];
 
-  sortedList.forEach(h => {
+  pagedItems.forEach(h => {
     const p = h.peserta || { username: '-', nama_lengkap: 'Akun Terhapus', kelas: '-', jurusan: '-' };
-    const lulusBadge = h.status_kelulusan === 'Lulus' ? 'bg-success' : 'bg-danger';
-
     const pMapel = h.nama_mapel || 'Umum';
     const pJurusan = (p.jurusan || 'Tanpa Jurusan').toUpperCase();
     const pKelas = (p.kelas || 'Tanpa Kelas').toUpperCase();
@@ -3956,7 +4116,7 @@ function renderHasilTable(list) {
 
     // Group Header Row
     if (currentGroup !== groupKey) {
-      tbody.innerHTML += `
+      rows.push(`
         <tr class="table-light">
           <td colspan="9" class="fw-bold text-success py-2" style="background-color: #f8f9fa;">
             <i class="bi bi-book-half me-2 text-primary"></i>MAPEL: <span class="text-primary">${escapeHtml(pMapel)}</span>
@@ -3966,11 +4126,11 @@ function renderHasilTable(list) {
             KELAS: ${escapeHtml(pKelas)}
           </td>
         </tr>
-      `;
+      `);
       currentGroup = groupKey;
     }
 
-    tbody.innerHTML += `
+    rows.push(`
       <tr>
         <td class="font-monospace text-primary"><strong>${escapeHtml(p.username)}</strong></td>
         <td class="cell-wrap fw-semibold">${escapeHtml(p.nama_lengkap)}</td>
@@ -3979,7 +4139,7 @@ function renderHasilTable(list) {
         <td class="cell-wrap">${escapeHtml(p.jurusan || '-')}</td>
         <td class="text-center text-success fw-bold">${h.jumlah_benar}</td>
         <td class="text-center text-danger">${h.jumlah_salah}</td>
-        <td class="text-center fw-bold" style="font-size: 1.1rem; color: var(--primary-dark);">${parseFloat(h.nilai).toFixed(1)}</td>
+        <td class="text-center fw-bold" style="font-size: 1.1rem; color: var(--primary-dark);">${(parseFloat(h.nilai) || 0).toFixed(1)}</td>
         <td class="text-center">
           ${isGuruMode() ? `
             <span class="badge bg-success-subtle text-success border border-success-subtle px-2 py-1"><i class="bi bi-check-circle-fill me-1"></i>Selesai</span>
@@ -3990,8 +4150,10 @@ function renderHasilTable(list) {
           `}
         </td>
       </tr>
-    `;
+    `);
   });
+
+  tbody.innerHTML = rows.join('');
 }
 
 function getFilteredHasilList() {
@@ -4021,7 +4183,7 @@ function getFilteredHasilList() {
 
 function filterHasilList() {
   const filtered = getFilteredHasilList();
-  renderHasilTable(filtered);
+  renderHasilTable(filtered, false);
 }
 
 async function resetUjianPeserta(hasilId, pesertaId, name) {
@@ -4651,10 +4813,9 @@ function renderAiSoalPreview() {
     saveBtn.innerHTML = `<i class="bi bi-cloud-arrow-up-fill me-2"></i>Simpan ${selectedCount} Soal ke Bank Soal`;
   }
 
-  cardsList.innerHTML = '';
-  aiGeneratedQuestions.forEach((q, idx) => {
+  const items = aiGeneratedQuestions.map((q, idx) => {
     const isChecked = q.selected ? 'checked' : '';
-    cardsList.innerHTML += `
+    return `
       <div class="card border rounded-3 p-3 ${q.selected ? 'bg-white shadow-sm' : 'bg-light opacity-75'}">
         <div class="d-flex justify-content-between align-items-start gap-2 mb-2">
           <div class="form-check">
@@ -4701,6 +4862,7 @@ function renderAiSoalPreview() {
       </div>
     `;
   });
+  cardsList.innerHTML = items.join('');
 }
 
 function toggleAiQuestionSelected(idx, isSelected) {
@@ -4843,4 +5005,8 @@ window.toggleAiQuestionSelected = toggleAiQuestionSelected;
 window.toggleSelectAllAiQuestions = toggleSelectAllAiQuestions;
 window.removeAiQuestion = removeAiQuestion;
 window.saveAiGeneratedSoalToBank = saveAiGeneratedSoalToBank;
+window.changePesertaPageSize = changePesertaPageSize;
+window.goToPesertaPage = goToPesertaPage;
+window.changeHasilPageSize = changeHasilPageSize;
+window.goToHasilPage = goToHasilPage;
 window.togglePasswordVisibility = togglePasswordVisibility;
