@@ -3729,7 +3729,8 @@ async function handleGenerateSoalAI() {
   } catch (e) {}
 
   const apiKey = customKey || savedKey || defaultSystemKey;
-  const model = document.getElementById('ai-model-select')?.value || 'gemini-2.5-flash';
+  const customModel = document.getElementById('ai-model-select')?.value || 'gemini-3.5-flash';
+  const modelCandidates = [customModel, 'gemini-3.5-flash', 'gemini-flash-latest', 'gemini-3.8-flash', 'gemini-3.7-flash', 'gemini-flash-lite-latest'].filter((v, i, a) => v && a.indexOf(v) === i);
   const topik = (document.getElementById('ai-topik-input')?.value || '').trim();
   const kesulitan = document.getElementById('ai-kesulitan-select')?.value || 'Campuran';
   const jumlah = parseInt(document.getElementById('ai-jumlah-select')?.value || '10');
@@ -3789,31 +3790,48 @@ Setiap elemen array harus berupa objek JSON dengan struktur kunci berikut:
 ]`;
 
   try {
-    const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
-    const response = await fetch(url, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        contents: [{
-          parts: [{ text: promptText }]
-        }],
-        generationConfig: {
-          temperature: 0.7,
-          responseMimeType: "application/json"
-        }
-      })
-    });
+    let candidateText = null;
+    let lastError = null;
 
-    if (!response.ok) {
-      const errJson = await response.json().catch(() => ({}));
-      const errMsg = (errJson && errJson.error && errJson.error.message) || `HTTP error ${response.status}`;
-      throw new Error(`Gagal memanggil Gemini API: ${errMsg}`);
+    for (const curModel of modelCandidates) {
+      try {
+        const url = `https://generativelanguage.googleapis.com/v1beta/models/${curModel}:generateContent?key=${apiKey}`;
+        const response = await fetch(url, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            contents: [{
+              parts: [{ text: promptText }]
+            }],
+            generationConfig: {
+              temperature: 0.7,
+              responseMimeType: "application/json"
+            }
+          })
+        });
+
+        if (!response.ok) {
+          const errJson = await response.json().catch(() => ({}));
+          const errMsg = (errJson && errJson.error && errJson.error.message) || `HTTP error ${response.status}`;
+          lastError = new Error(errMsg);
+          console.warn(`[CBT AI] Model ${curModel} belum berhasil: ${errMsg}. Mencoba model alternatif...`);
+          continue;
+        }
+
+        const resData = await response.json();
+        candidateText = resData?.candidates?.[0]?.content?.parts?.[0]?.text;
+        if (candidateText) {
+          console.info(`[CBT AI] Sukses membuat soal dengan model: ${curModel}`);
+          break;
+        }
+      } catch (callErr) {
+        lastError = callErr;
+        console.warn(`[CBT AI] Request error pada ${curModel}:`, callErr.message);
+      }
     }
 
-    const resData = await response.json();
-    const candidateText = resData?.candidates?.[0]?.content?.parts?.[0]?.text;
     if (!candidateText) {
-      throw new Error("Respon dari Gemini AI kosong. Silakan coba lagi.");
+      throw lastError || new Error("Respon dari Gemini AI kosong. Silakan coba lagi.");
     }
 
     let parsedQuestions = null;
