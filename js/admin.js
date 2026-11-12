@@ -4706,8 +4706,17 @@ async function handleGenerateSoalAI() {
   } catch (e) {}
 
   const apiKey = customKey || savedKey || defaultSystemKey;
-  const customModel = document.getElementById('ai-model-select')?.value || 'gemini-3.5-flash';
-  const modelCandidates = [customModel, 'gemini-3.5-flash', 'gemini-flash-latest', 'gemini-3.8-flash', 'gemini-3.7-flash', 'gemini-flash-lite-latest'].filter((v, i, a) => v && a.indexOf(v) === i);
+  const customModel = document.getElementById('ai-model-select')?.value || 'gemini-3.1-flash-lite';
+  const modelCandidates = [
+    customModel,
+    'gemini-3.1-flash-lite',
+    'gemini-3-flash-preview',
+    'gemini-flash-lite-latest',
+    'gemini-3.8-flash',
+    'gemini-3.5-flash-lite',
+    'gemini-3.7-flash',
+    'gemini-3.5-flash'
+  ].filter((v, i, a) => v && a.indexOf(v) === i);
   const topik = (document.getElementById('ai-topik-input')?.value || '').trim();
   const kesulitan = document.getElementById('ai-kesulitan-select')?.value || 'Campuran';
   const jumlah = parseInt(document.getElementById('ai-jumlah-select')?.value || '10');
@@ -4771,11 +4780,14 @@ Setiap elemen array harus berupa objek JSON dengan struktur kunci berikut:
     let lastError = null;
 
     for (const curModel of modelCandidates) {
+      const abortCtrl = new AbortController();
+      const timeoutId = setTimeout(() => abortCtrl.abort(), 16000);
       try {
         const url = `https://generativelanguage.googleapis.com/v1beta/models/${curModel}:generateContent?key=${apiKey}`;
         const response = await fetch(url, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
+          signal: abortCtrl.signal,
           body: JSON.stringify({
             contents: [{
               parts: [{ text: promptText }]
@@ -4786,6 +4798,7 @@ Setiap elemen array harus berupa objek JSON dengan struktur kunci berikut:
             }
           })
         });
+        clearTimeout(timeoutId);
 
         if (!response.ok) {
           const errJson = await response.json().catch(() => ({}));
@@ -4802,8 +4815,11 @@ Setiap elemen array harus berupa objek JSON dengan struktur kunci berikut:
           break;
         }
       } catch (callErr) {
-        lastError = callErr;
-        console.warn(`[CBT AI] Request error pada ${curModel}:`, callErr.message);
+        clearTimeout(timeoutId);
+        const isTimeout = callErr.name === 'AbortError';
+        const msg = isTimeout ? 'Waktu habis (server AI lambat merespons)' : callErr.message;
+        lastError = new Error(msg);
+        console.warn(`[CBT AI] Model ${curModel} gagal: ${msg}. Mencoba model alternatif...`);
       }
     }
 
@@ -4850,7 +4866,18 @@ Setiap elemen array harus berupa objek JSON dengan struktur kunci berikut:
     });
   } catch (err) {
     console.error("AI Generation Error:", err);
-    Swal.fire('Gagal Membuat Soal', err.message || 'Terjadi kesalahan.', 'error');
+    let userMsg = err.message || 'Terjadi kesalahan.';
+    if (userMsg.includes('high demand') || userMsg.includes('503') || userMsg.includes('UNAVAILABLE')) {
+      userMsg = 'Server Google AI saat ini sedang mengalami lonjakan beban trafik global (High Demand). Silakan coba klik "Generate Soal Sekarang" sekali lagi, atau buat dalam jumlah lebih sedikit (misal 5 atau 10 butir terlebih dahulu).';
+    } else if (userMsg.includes('quota') || userMsg.includes('429')) {
+      userMsg = 'Batas kuota gratis Google AI tercapai sementara. Tunggu sekitar 1 menit lalu klik Generate kembali.';
+    }
+    Swal.fire({
+      icon: 'error',
+      title: 'Gagal Membuat Soal',
+      text: userMsg,
+      confirmButtonText: 'Tutup'
+    });
   } finally {
     btn.disabled = false;
     btn.innerHTML = origBtnHtml;
