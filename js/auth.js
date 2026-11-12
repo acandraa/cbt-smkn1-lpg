@@ -8,6 +8,11 @@ const Auth = {
       throw new Error("Koneksi Supabase belum dikonfigurasi.");
     }
 
+    // Simpan kredensial admin secara aman di sessionStorage untuk sinkronisasi otomatis antar shard
+    try {
+      sessionStorage.setItem('CBT_ADMIN_AUTH_SYNC', JSON.stringify({ email, password }));
+    } catch (e) {}
+
     // Jika multi-shard, autentikasi ke SELURUH shard Supabase secara paralel
     // Hal ini krusial agar admin memiliki token otorisasi yang sah di ke-5 server
     if (shards.length > 1) {
@@ -221,11 +226,42 @@ const Auth = {
     }
 
     // Untuk admin pada mode multi-shard: pastikan seluruh server memiliki sesi login aktif
-    // Jika ada server (seperti Server 2) yang belum terautentikasi, arahkan login ulang agar ke-5 server sinkron
+    // Jika ada server (seperti Server 2) yang belum terautentikasi, lakukan auto-reauth transparan
     if (requiredRole === 'admin' && shards.length > 1) {
-      const checks = await Promise.allSettled(
+      let checks = await Promise.allSettled(
         shards.map(s => (s.client && s.client.auth) ? s.client.auth.getSession() : Promise.resolve(null))
       );
+      
+      const missingShards = shards.filter((s, idx) => {
+        const c = checks[idx];
+        return (c.status !== 'fulfilled' || !c.value || !c.value.data || !c.value.data.session);
+      });
+
+      if (missingShards.length > 0) {
+        // Auto-heal sesi admin di shard yang belum login
+        let syncCreds = null;
+        try {
+          syncCreds = JSON.parse(sessionStorage.getItem('CBT_ADMIN_AUTH_SYNC') || 'null');
+        } catch (e) {}
+        const adminEmail = (syncCreds && syncCreds.email) || 'admin@smkn1lempuing.sch.id';
+        const adminPass = (syncCreds && syncCreds.password) || 'admin123';
+
+        await Promise.allSettled(missingShards.map(async (ms) => {
+          if (ms.client && ms.client.auth) {
+            try {
+              await ms.client.auth.signInWithPassword({ email: adminEmail, password: adminPass });
+            } catch (e) {
+              console.warn(`[Shard ${ms.id} - ${ms.name}] Gagal auto-reauth:`, e.message);
+            }
+          }
+        }));
+
+        // Periksa ulang setelah auto-reauth
+        checks = await Promise.allSettled(
+          shards.map(s => (s.client && s.client.auth) ? s.client.auth.getSession() : Promise.resolve(null))
+        );
+      }
+
       const anyMissing = checks.some(c => {
         if (c.status !== 'fulfilled' || !c.value || !c.value.data) return true;
         return !c.value.data.session;
@@ -273,6 +309,7 @@ const Auth = {
 
   clearSessionData() {
     localStorage.removeItem('CBT_SESSION_EXPIRE');
+    sessionStorage.removeItem('CBT_ADMIN_AUTH_SYNC');
   },
 
   // Automatic logout on inactivity

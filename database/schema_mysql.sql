@@ -85,6 +85,7 @@ CREATE TABLE soal (
   opsi_b TEXT NOT NULL,
   opsi_c TEXT DEFAULT NULL,
   opsi_d TEXT DEFAULT NULL,
+  opsi_e TEXT DEFAULT NULL,
   jawaban_benar VARCHAR(5) NOT NULL,
   bobot INT NOT NULL DEFAULT 1,
   gambar LONGTEXT DEFAULT NULL,

@@ -77,7 +77,8 @@ CREATE TABLE public.soal (
   opsi_b TEXT NOT NULL,
   opsi_c TEXT, -- optional
   opsi_d TEXT, -- optional
-  jawaban_benar VARCHAR(5) NOT NULL, -- A, B, C, D, or T, F (Benar/Salah)
+  opsi_e TEXT, -- optional (Standar Tingkat SLTA / SMK / SMA)
+  jawaban_benar VARCHAR(5) NOT NULL, -- A, B, C, D, E, or T, F (Benar/Salah)
   bobot INTEGER DEFAULT 1,
   gambar TEXT, -- optional base64 image data
   created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()

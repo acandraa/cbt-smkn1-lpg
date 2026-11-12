@@ -76,8 +76,8 @@ const ExcelHelpers = {
 
           const headers = rows[0].map(h => h ? h.toString().trim() : '');
           
-          // Required headers check
-          const required = ['Nomor', 'Pertanyaan', 'Opsi A', 'Opsi B', 'Opsi C', 'Opsi D', 'Jawaban Benar', 'Bobot'];
+          // Required headers check (Opsi A & B wajib; Opsi C, D, E opsional / fleksibel)
+          const required = ['Nomor', 'Pertanyaan', 'Opsi A', 'Opsi B', 'Jawaban Benar', 'Bobot'];
           const missing = required.filter(r => !headers.includes(r));
           
           if (missing.length > 0) {
@@ -85,7 +85,7 @@ const ExcelHelpers = {
           }
 
           const idx = {};
-          required.forEach(col => {
+          ['Nomor', 'Pertanyaan', 'Opsi A', 'Opsi B', 'Opsi C', 'Opsi D', 'Opsi E', 'Jawaban Benar', 'Bobot'].forEach(col => {
             idx[col] = headers.indexOf(col);
           });
 
@@ -102,8 +102,9 @@ const ExcelHelpers = {
               pertanyaan: row[idx['Pertanyaan']] ? row[idx['Pertanyaan']].toString().trim() : '',
               opsi_a: row[idx['Opsi A']] ? row[idx['Opsi A']].toString().trim() : '',
               opsi_b: row[idx['Opsi B']] ? row[idx['Opsi B']].toString().trim() : '',
-              opsi_c: row[idx['Opsi C']] ? row[idx['Opsi C']].toString().trim() : '',
-              opsi_d: row[idx['Opsi D']] ? row[idx['Opsi D']].toString().trim() : '',
+              opsi_c: (idx['Opsi C'] !== -1 && row[idx['Opsi C']]) ? row[idx['Opsi C']].toString().trim() : '',
+              opsi_d: (idx['Opsi D'] !== -1 && row[idx['Opsi D']]) ? row[idx['Opsi D']].toString().trim() : '',
+              opsi_e: (idx['Opsi E'] !== -1 && row[idx['Opsi E']]) ? row[idx['Opsi E']].toString().trim() : '',
               jawaban_benar: row[idx['Jawaban Benar']] ? row[idx['Jawaban Benar']].toString().trim().toUpperCase() : '',
               bobot: isNaN(bobot) ? 1 : bobot
             });

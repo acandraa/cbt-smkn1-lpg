@@ -1024,6 +1024,7 @@ function soalPayload(array $s): array
         'opsi_b'        => (string)($s['opsi_b'] ?? ''),
         'opsi_c'        => emptyToNull($s['opsi_c'] ?? null),
         'opsi_d'        => emptyToNull($s['opsi_d'] ?? null),
+        'opsi_e'        => emptyToNull($s['opsi_e'] ?? null),
         'jawaban_benar' => $jawaban,
         'bobot'         => isset($s['bobot']) && $s['bobot'] !== '' ? (int)$s['bobot'] : 1,
         'gambar'        => emptyToNull($s['gambar'] ?? null),

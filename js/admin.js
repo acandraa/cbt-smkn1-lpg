@@ -8,6 +8,8 @@ let paketFormModalInstance = null;
 let jurusanModalInstance = null;
 let kelasModalInstance = null;
 let cetakKartuModalInstance = null;
+let aiGeneratorModalInstance = null;
+let aiGeneratedQuestions = [];
 
 let currentAdminUser = null;
 let allPeserta = [];
@@ -41,6 +43,8 @@ document.addEventListener("DOMContentLoaded", async () => {
   jurusanModalInstance = new bootstrap.Modal(document.getElementById('jurusanModal'));
   kelasModalInstance = new bootstrap.Modal(document.getElementById('kelasModal'));
   cetakKartuModalInstance = new bootstrap.Modal(document.getElementById('cetakKartuModal'));
+  const aiModalEl = document.getElementById('aiGeneratorModal');
+  if (aiModalEl) aiGeneratorModalInstance = new bootstrap.Modal(aiModalEl);
 
   // Form Handlers
   document.getElementById('form-setup-supabase').addEventListener('submit', handleSupabaseSetup);
@@ -123,6 +127,22 @@ window.handleAdminShardSwitch = async function(shardId) {
   if (window.setActiveSupabaseShard) {
     const target = window.setActiveSupabaseShard(shardId);
     if (target) {
+      // Pastikan shard target memiliki sesi admin aktif agar tidak terkena RLS
+      if (target.client && target.client.auth && target.id !== 'all') {
+        try {
+          const { data } = await target.client.auth.getSession();
+          if (!data || !data.session) {
+            let syncCreds = null;
+            try { syncCreds = JSON.parse(sessionStorage.getItem('CBT_ADMIN_AUTH_SYNC') || 'null'); } catch (e) {}
+            const email = (syncCreds && syncCreds.email) || 'admin@smkn1lempuing.sch.id';
+            const pass = (syncCreds && syncCreds.password) || 'admin123';
+            await target.client.auth.signInWithPassword({ email, password: pass });
+          }
+        } catch (e) {
+          console.warn(`[Shard ${target.id}] Gagal auto-reauth saat switch:`, e.message);
+        }
+      }
+
       if (typeof Swal !== 'undefined') {
         Swal.fire({
           toast: true,
@@ -226,22 +246,24 @@ async function loadSettings() {
   try {
     const data = await DB.getSettings();
     if (data) {
+      examSettings = data;
       document.getElementById('settings-exam-duration').value = data.durasi_menit;
       const passingInput = document.getElementById('settings-exam-passing');
       if (passingInput) passingInput.value = data.passing_grade || 0;
       if (data.tampilkan_nilai !== undefined) {
         document.getElementById('settings-exam-show-score').checked = data.tampilkan_nilai;
       }
-      const activeToken = data.token_ujian !== undefined ? data.token_ujian : "CBT123";
-      document.getElementById('settings-exam-token').value = activeToken;
+      const tokenState = DB.getActiveTokenState ? DB.getActiveTokenState(data) : { token: data.token_ujian || 'CBT123', remainingMs: 180000 };
+      document.getElementById('settings-exam-token').value = tokenState.token;
       const dashTokenEl = document.getElementById('dash-active-token');
-      if (dashTokenEl) dashTokenEl.innerText = activeToken;
+      if (dashTokenEl) dashTokenEl.innerText = tokenState.token;
       if (data.token_aktif !== undefined) {
         document.getElementById('settings-exam-use-token').checked = data.token_aktif;
       }
       if (data.acak_soal !== undefined) {
         document.getElementById('settings-exam-randomize').checked = data.acak_soal;
       }
+      startTokenAutoRotateLoop();
     }
   } catch (err) {
     console.error("Gagal memuat pengaturan:", err);
@@ -306,8 +328,58 @@ function renderPhpConnectionCard() {
   });
 }
 
+let tokenAutoRotateTimer = null;
+let lastSyncedTokenValue = null;
+
+function formatTokenCountdown(ms) {
+  const totalSec = Math.max(0, Math.ceil(ms / 1000));
+  const m = String(Math.floor(totalSec / 60)).padStart(2, '0');
+  const s = String(totalSec % 60).padStart(2, '0');
+  return `${m}:${s}`;
+}
+
+function startTokenAutoRotateLoop() {
+  if (tokenAutoRotateTimer) clearInterval(tokenAutoRotateTimer);
+
+  const tick = async () => {
+    if (!DB.getActiveTokenState) return;
+    const state = DB.getActiveTokenState(examSettings);
+    const timeStr = formatTokenCountdown(state.remainingMs);
+
+    const dashTokenEl = document.getElementById('dash-active-token');
+    if (dashTokenEl && dashTokenEl.innerText !== state.token) {
+      dashTokenEl.innerText = state.token;
+    }
+    const setTokenEl = document.getElementById('settings-exam-token');
+    if (setTokenEl && setTokenEl.value !== state.token) {
+      setTokenEl.value = state.token;
+    }
+
+    const dashCdEl = document.getElementById('dash-token-countdown');
+    if (dashCdEl) dashCdEl.innerText = timeStr;
+    const setCdEl = document.getElementById('settings-token-countdown');
+    if (setCdEl) setCdEl.innerText = `⏱️ ${timeStr}`;
+
+    // Jika token slot 3 menit baru saja berganti, sinkronkan ke database di latar belakang
+    if (lastSyncedTokenValue !== state.token && !state.isCustomRecent) {
+      lastSyncedTokenValue = state.token;
+      try {
+        const duration = (examSettings && examSettings.durasi_menit) || 60;
+        const passing = (examSettings && examSettings.passing_grade) || 60;
+        const showScore = examSettings && examSettings.tampilkan_nilai !== undefined ? examSettings.tampilkan_nilai : true;
+        const useToken = examSettings && examSettings.token_aktif !== undefined ? examSettings.token_aktif : false;
+        const randomize = examSettings && examSettings.acak_soal !== undefined ? examSettings.acak_soal : true;
+        await DB.saveSettings(duration, passing, showScore, state.token, useToken, randomize);
+      } catch (e) {}
+    }
+  };
+
+  tick();
+  tokenAutoRotateTimer = setInterval(tick, 1000);
+}
+
 function generateNewToken() {
-  const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
+  const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
   let token = '';
   for (let i = 0; i < 6; i++) {
     token += chars.charAt(Math.floor(Math.random() * chars.length));
@@ -327,13 +399,24 @@ async function quickRotateTokenPembebas() {
     const randomize = document.getElementById('settings-exam-randomize').checked;
 
     await DB.saveSettings(duration, passing, showScore, newToken, useToken, randomize);
+    examSettings = {
+      ...(examSettings || {}),
+      durasi_menit: duration,
+      passing_grade: passing,
+      tampilkan_nilai: showScore,
+      token_ujian: newToken,
+      token_aktif: useToken,
+      acak_soal: randomize,
+      updated_at: new Date().toISOString()
+    };
+    lastSyncedTokenValue = newToken;
     const dashTokenEl = document.getElementById('dash-active-token');
     if (dashTokenEl) dashTokenEl.innerText = newToken;
     Swal.fire({
       toast: true,
       position: 'top-end',
       icon: 'success',
-      title: `Token Pembebas baru: ${newToken}`,
+      title: `Token Pembebas baru: ${newToken} (Aktif 3 menit)`,
       showConfirmButton: false,
       timer: 2000
     });
@@ -2797,6 +2880,11 @@ function renderSoalList(list) {
         <div class="col-md-6"><strong>C.</strong> ${s.opsi_c || '-'}</div>
         <div class="col-md-6"><strong>D.</strong> ${s.opsi_d || '-'}</div>
       `;
+      if (s.opsi_e) {
+        optionsHtml += `
+          <div class="col-md-6"><strong>E.</strong> ${s.opsi_e}</div>
+        `;
+      }
     }
     optionsHtml += `</div>`;
 
@@ -2870,6 +2958,8 @@ function openSoalForm() {
   document.getElementById('crud-soal-gambar-preview').src = "";
   document.getElementById('crud-soal-gambar-preview').classList.add('d-none');
   document.getElementById('crud-soal-gambar-base64').value = "";
+  const elOpsiE = document.getElementById('crud-soal-opsie');
+  if (elOpsiE) elOpsiE.value = "";
 
   const select = document.getElementById('crud-soal-jawaban');
   select.innerHTML = `
@@ -2878,6 +2968,7 @@ function openSoalForm() {
     <option value="B">Opsi B</option>
     <option value="C">Opsi C</option>
     <option value="D">Opsi D</option>
+    <option value="E">Opsi E</option>
   `;
 
   soalFormModalInstance.show();
@@ -2896,6 +2987,8 @@ function editSoal(id) {
   document.getElementById('crud-soal-opsib').value = s.opsi_b;
   document.getElementById('crud-soal-opsic').value = s.opsi_c || "";
   document.getElementById('crud-soal-opsid').value = s.opsi_d || "";
+  const elOpsiE = document.getElementById('crud-soal-opsie');
+  if (elOpsiE) elOpsiE.value = s.opsi_e || "";
   
   if (s.gambar) {
     document.getElementById('crud-soal-gambar-preview').src = s.gambar;
@@ -2917,10 +3010,11 @@ function editSoal(id) {
     <option value="B">Opsi B</option>
   `;
 
-  if (s.opsi_c || s.opsi_d) {
+  if (s.opsi_c || s.opsi_d || s.opsi_e) {
     select.innerHTML += `
       <option value="C">Opsi C</option>
       <option value="D">Opsi D</option>
+      <option value="E">Opsi E</option>
     `;
   }
   
@@ -2938,6 +3032,7 @@ async function handleSoalCrudSubmit(e) {
   const ob = document.getElementById('crud-soal-opsib').value.trim();
   const oc = document.getElementById('crud-soal-opsic').value.trim();
   const od = document.getElementById('crud-soal-opsid').value.trim();
+  const oe = (document.getElementById('crud-soal-opsie')?.value || '').trim();
   const ans = document.getElementById('crud-soal-jawaban').value;
   const gambar = document.getElementById('crud-soal-gambar-base64').value;
 
@@ -2950,6 +3045,7 @@ async function handleSoalCrudSubmit(e) {
     opsi_b: ob,
     opsi_c: oc || null,
     opsi_d: od || null,
+    opsi_e: oe || null,
     jawaban_benar: ans,
     gambar: gambar || null
   };
@@ -3005,6 +3101,7 @@ function exportSoalData() {
     opsi_b: 'Opsi B',
     opsi_c: 'Opsi C',
     opsi_d: 'Opsi D',
+    opsi_e: 'Opsi E',
     jawaban_benar: 'Jawaban Benar',
     bobot: 'Bobot'
   };
@@ -3378,6 +3475,7 @@ function renderImportPreviewSoal(data) {
         <th>Opsi B</th>
         <th>Opsi C</th>
         <th>Opsi D</th>
+        <th>Opsi E</th>
         <th>Jawaban</th>
         <th>Bobot</th>
       </tr>
@@ -3394,6 +3492,7 @@ function renderImportPreviewSoal(data) {
         <td>${r.opsi_b}</td>
         <td>${r.opsi_c || '-'}</td>
         <td>${r.opsi_d || '-'}</td>
+        <td>${r.opsi_e || '-'}</td>
         <td class="text-center font-heading fw-bold">${r.jawaban_benar}</td>
         <td class="text-center">${r.bobot}</td>
       </tr>
@@ -3401,7 +3500,7 @@ function renderImportPreviewSoal(data) {
   });
 
   if (data.length > 10) {
-    html += `<tr><td colspan="8" class="text-center text-muted">...dan ${data.length - 10} data lainnya...</td></tr>`;
+    html += `<tr><td colspan="9" class="text-center text-muted">...dan ${data.length - 10} data lainnya...</td></tr>`;
   }
 
   html += '</tbody>';
@@ -3579,6 +3678,335 @@ async function restoreDatabaseData(input) {
   reader.readAsText(file);
 }
 
+// -------------------------------------------------------------
+// AI QUESTION GENERATOR (GOOGLE GEMINI AI)
+// -------------------------------------------------------------
+
+function togglePasswordVisibility(fieldId) {
+  const input = document.getElementById(fieldId);
+  const eye = document.getElementById(`${fieldId}-eye`);
+  if (!input) return;
+  if (input.type === 'password') {
+    input.type = 'text';
+    if (eye) eye.classList.replace('bi-eye', 'bi-eye-slash');
+  } else {
+    input.type = 'password';
+    if (eye) eye.classList.replace('bi-eye-slash', 'bi-eye');
+  }
+}
+
+function openAiGeneratorModal() {
+  if (!activePaketId) {
+    Swal.fire('Pilih Paket Soal', 'Silakan pilih atau buat paket soal terlebih dahulu di panel sebelah kiri.', 'warning');
+    return;
+  }
+  const savedKey = localStorage.getItem('CBT_GEMINI_API_KEY') || '';
+  const keyInput = document.getElementById('ai-api-key');
+  if (keyInput) {
+    keyInput.value = savedKey;
+  }
+  const p = allPaket.find(item => item.id === activePaketId);
+  if (p && p.nama_paket) {
+    const topikInput = document.getElementById('ai-topik-input');
+    if (topikInput && !topikInput.value) {
+      topikInput.value = p.nama_paket;
+    }
+  }
+  if (!aiGeneratorModalInstance) {
+    const el = document.getElementById('aiGeneratorModal');
+    if (el) aiGeneratorModalInstance = new bootstrap.Modal(el);
+  }
+  if (aiGeneratorModalInstance) aiGeneratorModalInstance.show();
+}
+
+async function handleGenerateSoalAI() {
+  const apiKey = (document.getElementById('ai-api-key')?.value || '').trim();
+  const model = document.getElementById('ai-model-select')?.value || 'gemini-2.5-flash';
+  const topik = (document.getElementById('ai-topik-input')?.value || '').trim();
+  const kesulitan = document.getElementById('ai-kesulitan-select')?.value || 'Campuran';
+  const jumlah = parseInt(document.getElementById('ai-jumlah-select')?.value || '10');
+  const materi = (document.getElementById('ai-materi-textarea')?.value || '').trim();
+
+  if (!apiKey) {
+    Swal.fire('API Key Diperlukan', 'Silakan masukkan Google Gemini API Key Anda. Anda dapat memperolehnya secara gratis di Google AI Studio (aistudio.google.com).', 'warning');
+    return;
+  }
+  if (!topik) {
+    Swal.fire('Topik Kosong', 'Silakan masukkan topik materi ujian.', 'warning');
+    return;
+  }
+
+  // Simpan API key di localStorage agar tidak perlu mengetik ulang
+  localStorage.setItem('CBT_GEMINI_API_KEY', apiKey);
+
+  const btn = document.getElementById('btn-generate-ai');
+  const origBtnHtml = btn.innerHTML;
+  btn.disabled = true;
+  btn.innerHTML = `<span class="spinner-border spinner-border-sm me-2"></span>AI Sedang Menulis Soal...`;
+
+  const promptText = `Anda adalah seorang guru SMK profesional dan pembuat soal ujian pilihan ganda berstandar nasional tingkat SLTA (SMA/SMK).
+Tugas Anda adalah membuat tepat ${jumlah} butir soal pilihan ganda baru yang berkualitas tinggi, edukatif, dan relevan.
+
+Panduan Pembuatan Soal:
+1. Topik/Mata Pelajaran: "${topik}"
+2. Tingkat Pendidikan: SLTA / SMA / SMK
+3. Tingkat Kesulitan: ${kesulitan}
+${materi ? `4. Gunakan materi/referensi berikut sebagai acuan utama:\n"""\n${materi}\n"""\n` : ''}
+5. Setiap butir soal WAJIB memiliki 5 pilihan jawaban (Standar Tingkat SLTA sampai Opsi E):
+   - opsi_a: Pilihan jawaban A
+   - opsi_b: Pilihan jawaban B
+   - opsi_c: Pilihan jawaban C
+   - opsi_d: Pilihan jawaban D
+   - opsi_e: Pilihan jawaban E
+6. Pilihan jawaban harus masuk akal, logis, tidak ambigu, dan mendidik.
+7. Tentukan kunci jawaban_benar secara akurat (pilih salah satu huruf: "A", "B", "C", "D", atau "E").
+8. Bobot setiap butir soal bernilai 1.
+
+PENTING:
+Keluarkan output HANYA berupa JSON Array murni tanpa format markdown seperti \`\`\`json.
+Setiap elemen array harus berupa objek JSON dengan struktur kunci berikut:
+[
+  {
+    "pertanyaan": "Teks pertanyaan soal secara jelas dan lengkap...",
+    "opsi_a": "Jawaban opsi A",
+    "opsi_b": "Jawaban opsi B",
+    "opsi_c": "Jawaban opsi C",
+    "opsi_d": "Jawaban opsi D",
+    "opsi_e": "Jawaban opsi E",
+    "jawaban_benar": "A",
+    "bobot": 1
+  }
+]`;
+
+  try {
+    const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
+    const response = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        contents: [{
+          parts: [{ text: promptText }]
+        }],
+        generationConfig: {
+          temperature: 0.7,
+          responseMimeType: "application/json"
+        }
+      })
+    });
+
+    if (!response.ok) {
+      const errJson = await response.json().catch(() => ({}));
+      const errMsg = (errJson && errJson.error && errJson.error.message) || `HTTP error ${response.status}`;
+      throw new Error(`Gagal memanggil Gemini API: ${errMsg}`);
+    }
+
+    const resData = await response.json();
+    const candidateText = resData?.candidates?.[0]?.content?.parts?.[0]?.text;
+    if (!candidateText) {
+      throw new Error("Respon dari Gemini AI kosong. Silakan coba lagi.");
+    }
+
+    let parsedQuestions = null;
+    try {
+      let cleanJson = candidateText.trim();
+      if (cleanJson.startsWith('```json')) cleanJson = cleanJson.replace(/^```json\s*/, '').replace(/\s*```$/, '');
+      else if (cleanJson.startsWith('```')) cleanJson = cleanJson.replace(/^```\s*/, '').replace(/\s*```$/, '');
+      parsedQuestions = JSON.parse(cleanJson);
+    } catch (parseErr) {
+      console.error("Gagal parse response JSON AI:", candidateText);
+      throw new Error("Format JSON yang dikembalikan AI tidak valid. Silakan coba lagi.");
+    }
+
+    if (!Array.isArray(parsedQuestions) || parsedQuestions.length === 0) {
+      throw new Error("AI tidak menghasilkan butir soal yang valid.");
+    }
+
+    aiGeneratedQuestions = parsedQuestions.map((q, idx) => ({
+      selected: true,
+      nomor: idx + 1,
+      pertanyaan: q.pertanyaan || '',
+      opsi_a: q.opsi_a || '',
+      opsi_b: q.opsi_b || '',
+      opsi_c: q.opsi_c || '',
+      opsi_d: q.opsi_d || '',
+      opsi_e: q.opsi_e || '',
+      jawaban_benar: (q.jawaban_benar || 'A').toUpperCase().trim(),
+      bobot: parseInt(q.bobot) || 1
+    }));
+
+    renderAiSoalPreview();
+
+    Swal.fire({
+      icon: 'success',
+      title: 'Berhasil Generate Soal!',
+      text: `${aiGeneratedQuestions.length} butir soal SLTA (5 Opsi: A-E) telah berhasil dibuat oleh AI. Silakan tinjau sebelum disimpan.`,
+      timer: 2000,
+      showConfirmButton: false
+    });
+  } catch (err) {
+    console.error("AI Generation Error:", err);
+    Swal.fire('Gagal Membuat Soal', err.message || 'Terjadi kesalahan.', 'error');
+  } finally {
+    btn.disabled = false;
+    btn.innerHTML = origBtnHtml;
+  }
+}
+
+function renderAiSoalPreview() {
+  const container = document.getElementById('ai-preview-container');
+  const cardsList = document.getElementById('ai-soal-cards-list');
+  const countBadge = document.getElementById('ai-preview-count');
+  const saveBtn = document.getElementById('btn-save-ai-soal');
+
+  if (!container || !cardsList) return;
+
+  if (aiGeneratedQuestions.length === 0) {
+    container.classList.add('d-none');
+    if (saveBtn) saveBtn.disabled = true;
+    return;
+  }
+
+  container.classList.remove('d-none');
+  const selectedCount = aiGeneratedQuestions.filter(q => q.selected).length;
+  if (countBadge) countBadge.innerText = `${selectedCount} / ${aiGeneratedQuestions.length}`;
+  if (saveBtn) {
+    saveBtn.disabled = selectedCount === 0;
+    saveBtn.innerHTML = `<i class="bi bi-cloud-arrow-up-fill me-2"></i>Simpan ${selectedCount} Soal ke Bank Soal`;
+  }
+
+  cardsList.innerHTML = '';
+  aiGeneratedQuestions.forEach((q, idx) => {
+    const isChecked = q.selected ? 'checked' : '';
+    cardsList.innerHTML += `
+      <div class="card border rounded-3 p-3 ${q.selected ? 'bg-white shadow-sm' : 'bg-light opacity-75'}">
+        <div class="d-flex justify-content-between align-items-start gap-2 mb-2">
+          <div class="form-check">
+            <input class="form-check-input" type="checkbox" id="ai-check-${idx}" ${isChecked} onchange="toggleAiQuestionSelected(${idx}, this.checked)">
+            <label class="form-check-label fw-bold" for="ai-check-${idx}">Soal #${idx + 1}</label>
+          </div>
+          <div>
+            <span class="badge bg-success">Kunci: ${escapeHtml(q.jawaban_benar)}</span>
+            <button class="btn btn-outline-danger btn-sm py-0 px-2 ms-2" onclick="removeAiQuestion(${idx})" title="Hapus soal ini">
+              <i class="bi bi-trash"></i>
+            </button>
+          </div>
+        </div>
+        <p class="mb-2 fw-semibold text-dark" style="white-space: pre-wrap;">${escapeHtml(q.pertanyaan)}</p>
+        <div class="row g-2 small">
+          <div class="col-md-6">
+            <div class="p-2 border rounded ${q.jawaban_benar === 'A' ? 'border-success bg-success-subtle fw-bold text-success' : 'bg-light'}">
+              <strong>A.</strong> ${escapeHtml(q.opsi_a)}
+            </div>
+          </div>
+          <div class="col-md-6">
+            <div class="p-2 border rounded ${q.jawaban_benar === 'B' ? 'border-success bg-success-subtle fw-bold text-success' : 'bg-light'}">
+              <strong>B.</strong> ${escapeHtml(q.opsi_b)}
+            </div>
+          </div>
+          <div class="col-md-6">
+            <div class="p-2 border rounded ${q.jawaban_benar === 'C' ? 'border-success bg-success-subtle fw-bold text-success' : 'bg-light'}">
+              <strong>C.</strong> ${escapeHtml(q.opsi_c)}
+            </div>
+          </div>
+          <div class="col-md-6">
+            <div class="p-2 border rounded ${q.jawaban_benar === 'D' ? 'border-success bg-success-subtle fw-bold text-success' : 'bg-light'}">
+              <strong>D.</strong> ${escapeHtml(q.opsi_d)}
+            </div>
+          </div>
+          ${q.opsi_e ? `
+          <div class="col-md-6">
+            <div class="p-2 border rounded ${q.jawaban_benar === 'E' ? 'border-success bg-success-subtle fw-bold text-success' : 'bg-light'}">
+              <strong>E.</strong> ${escapeHtml(q.opsi_e)}
+            </div>
+          </div>
+          ` : ''}
+        </div>
+      </div>
+    `;
+  });
+}
+
+function toggleAiQuestionSelected(idx, isSelected) {
+  if (aiGeneratedQuestions[idx]) {
+    aiGeneratedQuestions[idx].selected = Boolean(isSelected);
+    renderAiSoalPreview();
+  }
+}
+
+function toggleSelectAllAiQuestions(selectAll) {
+  aiGeneratedQuestions.forEach(q => { q.selected = Boolean(selectAll); });
+  renderAiSoalPreview();
+}
+
+function removeAiQuestion(idx) {
+  aiGeneratedQuestions.splice(idx, 1);
+  renderAiSoalPreview();
+}
+
+async function saveAiGeneratedSoalToBank() {
+  if (!activePaketId) {
+    Swal.fire('Pilih Paket', 'Paket soal aktif tidak ditemukan.', 'warning');
+    return;
+  }
+  const selectedQuestions = aiGeneratedQuestions.filter(q => q.selected);
+  if (selectedQuestions.length === 0) {
+    Swal.fire('Pilih Soal', 'Pilih minimal 1 butir soal untuk disimpan.', 'warning');
+    return;
+  }
+
+  const saveBtn = document.getElementById('btn-save-ai-soal');
+  saveBtn.disabled = true;
+
+  Swal.fire({
+    title: 'Menyimpan ke Bank Soal...',
+    text: `Menyimpan ${selectedQuestions.length} butir soal ke semua server database...`,
+    allowOutsideClick: false,
+    didOpen: () => { Swal.showLoading(); }
+  });
+
+  try {
+    const currentSoalInPaket = allSoal || [];
+    let startNomor = currentSoalInPaket.length > 0
+      ? Math.max(...currentSoalInPaket.map(s => parseInt(s.nomor) || 0)) + 1
+      : 1;
+
+    const payloadSoal = selectedQuestions.map((q, i) => ({
+      paket_soal_id: activePaketId,
+      nomor: startNomor + i,
+      pertanyaan: q.pertanyaan,
+      opsi_a: q.opsi_a,
+      opsi_b: q.opsi_b,
+      opsi_c: q.opsi_c,
+      opsi_d: q.opsi_d,
+      opsi_e: q.opsi_e || null,
+      jawaban_benar: q.jawaban_benar,
+      bobot: q.bobot || 1
+    }));
+
+    await DB.bulkInsertSoal(payloadSoal);
+
+    if (aiGeneratorModalInstance) {
+      aiGeneratorModalInstance.hide();
+    }
+    aiGeneratedQuestions = [];
+
+    Swal.fire({
+      icon: 'success',
+      title: 'Soal Berhasil Disimpan!',
+      text: `${payloadSoal.length} butir soal dari AI telah tersimpan ke dalam bank soal dan disinkronkan ke seluruh server.`,
+      timer: 2000
+    });
+
+    await loadSoal();
+    await loadPaket();
+  } catch (err) {
+    console.error("Gagal simpan soal AI:", err);
+    Swal.fire('Gagal Menyimpan', err.message || 'Terjadi kesalahan saat menyimpan soal.', 'error');
+  } finally {
+    saveBtn.disabled = false;
+  }
+}
+
 // Bind to window
 window.switchTab = switchTab;
 window.loadDashboardStats = loadDashboardStats;
@@ -3629,3 +4057,11 @@ window.filterSoalList = () => {};
 window.filterHasilList = filterHasilList;
 window.generateNewToken = generateNewToken;
 window.quickRotateTokenPembebas = quickRotateTokenPembebas;
+window.openAiGeneratorModal = openAiGeneratorModal;
+window.handleGenerateSoalAI = handleGenerateSoalAI;
+window.renderAiSoalPreview = renderAiSoalPreview;
+window.toggleAiQuestionSelected = toggleAiQuestionSelected;
+window.toggleSelectAllAiQuestions = toggleSelectAllAiQuestions;
+window.removeAiQuestion = removeAiQuestion;
+window.saveAiGeneratedSoalToBank = saveAiGeneratedSoalToBank;
+window.togglePasswordVisibility = togglePasswordVisibility;

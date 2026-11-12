@@ -29,9 +29,9 @@ const ExcelTemplates = {
     XLSX.writeFile(wb, "Template_Peserta_CBT.xlsx");
   },
 
-  // Download template for importing Soal
+  // Download template for importing Soal (Standar SLTA: 5 Opsi A, B, C, D, E)
   downloadSoalTemplate() {
-    const headers = ['Nomor', 'Pertanyaan', 'Opsi A', 'Opsi B', 'Opsi C', 'Opsi D', 'Jawaban Benar', 'Bobot'];
+    const headers = ['Nomor', 'Pertanyaan', 'Opsi A', 'Opsi B', 'Opsi C', 'Opsi D', 'Opsi E', 'Jawaban Benar', 'Bobot'];
     const rows = [
       headers,
       [
@@ -41,6 +41,7 @@ const ExcelTemplates = {
         'Drs. Mohammad Hatta', 
         'Soeharto', 
         'B.J. Habibie', 
+        'Abdurrahman Wahid',
         'A', 
         2
       ],
@@ -51,6 +52,7 @@ const ExcelTemplates = {
         'Palembang', 
         'Medan', 
         'Surabaya', 
+        'Lampung',
         'B', 
         2
       ],
@@ -61,6 +63,7 @@ const ExcelTemplates = {
         'Salah', 
         '', 
         '', 
+        '',
         'A', 
         1
       ],
@@ -71,6 +74,7 @@ const ExcelTemplates = {
         'Salah', 
         '', 
         '', 
+        '',
         'B', 
         1
       ]
@@ -87,6 +91,7 @@ const ExcelTemplates = {
       { wch: 20 }, // Opsi B
       { wch: 20 }, // Opsi C
       { wch: 20 }, // Opsi D
+      { wch: 20 }, // Opsi E
       { wch: 15 }, // Jawaban Benar
       { wch: 10 }  // Bobot
     ];

@@ -343,8 +343,8 @@ async function mulaiUjianCBT() {
     });
 
     if (!inputToken) return;
-    if (inputToken.toUpperCase() !== settings.token_ujian.toUpperCase()) {
-      Swal.fire('Akses Ditolak', 'Token yang Anda masukkan salah atau sudah kadaluarsa.', 'error');
+    if (!DB.isValidExamToken(inputToken, settings)) {
+      Swal.fire('Akses Ditolak', 'Token yang Anda masukkan salah atau sudah kadaluarsa (berganti setiap 3 menit).', 'error');
       return;
     }
   } else {
@@ -551,6 +551,7 @@ function renderQuestion() {
   if (!isBs) {
     if (s.opsi_c) optionList.push({ key: 'C', label: s.opsi_c });
     if (s.opsi_d) optionList.push({ key: 'D', label: s.opsi_d });
+    if (s.opsi_e) optionList.push({ key: 'E', label: s.opsi_e });
   }
 
   optionList.forEach(opt => {

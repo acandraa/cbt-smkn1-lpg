@@ -131,11 +131,12 @@
               <p class="text-muted small mb-0 mt-1">Pantau kehadiran, progres pengerjaan ujian siswa per kelas & jurusan secara real-time</p>
             </div>
             <div class="d-flex align-items-center flex-wrap gap-2 mt-2 mt-md-0">
-              <div class="d-inline-flex align-items-center bg-warning-subtle border border-warning rounded-pill px-3 py-1 me-1" title="Token Pembebas untuk membuka kunci peserta yang terkena 3x pelanggaran">
+              <div class="d-inline-flex align-items-center bg-warning-subtle border border-warning rounded-pill px-3 py-1 me-1" title="Token Pembebas otomatis berganti acak setiap 3 menit">
                 <i class="bi bi-key-fill text-warning-emphasis me-1"></i>
                 <span class="small text-dark me-1">Token Pembebas:</span>
-                <strong class="font-monospace text-danger fs-6 me-2" id="dash-active-token">CBT123</strong>
-                <button type="button" class="btn btn-sm btn-warning py-0 px-2 rounded-pill fw-semibold" style="font-size: 0.72rem;" onclick="quickRotateTokenPembebas()" title="Acak & Simpan Token Pembebas Baru">
+                <strong class="font-monospace text-danger fs-6 me-2" id="dash-active-token">------</strong>
+                <span class="badge bg-dark text-warning font-monospace me-2" id="dash-token-countdown" title="Hitung mundur acak otomatis 3 menit">03:00</span>
+                <button type="button" class="btn btn-sm btn-warning py-0 px-2 rounded-pill fw-semibold" style="font-size: 0.72rem;" onclick="quickRotateTokenPembebas()" title="Acak Token Sekarang">
                   <i class="bi bi-arrow-repeat"></i> Acak
                 </button>
               </div>
@@ -502,6 +503,9 @@
                 <div class="d-flex justify-content-between align-items-center mb-3">
                   <h6 class="fw-bold mb-0">Daftar Pertanyaan</h6>
                   <div class="btn-group">
+                    <button class="btn btn-sm text-white shadow-sm" style="background: linear-gradient(135deg, #4f46e5 0%, #7c3aed 100%);" onclick="openAiGeneratorModal()">
+                      <i class="bi bi-robot me-1"></i> Buat Soal dengan AI
+                    </button>
                     <button class="btn btn-success btn-sm" onclick="openImportModal('soal')">
                       <i class="bi bi-file-earmark-excel-fill"></i> Import Excel
                     </button>
@@ -754,14 +758,17 @@
                   
                   <div class="mb-3 d-flex align-items-center gap-2">
                     <div class="flex-grow-1">
-                      <label for="settings-exam-token" class="form-label fw-semibold mb-0">Token Ujian &amp; Token Pembebas (3x Pelanggaran)</label>
+                      <div class="d-flex justify-content-between align-items-center">
+                        <label for="settings-exam-token" class="form-label fw-semibold mb-0">Token Ujian &amp; Token Pembebas (Otomatis Acak 3 Menit)</label>
+                        <span class="badge bg-warning-subtle text-dark border border-warning font-monospace" id="settings-token-countdown">⏱️ 03:00</span>
+                      </div>
                       <div class="input-group mt-2">
                         <input type="text" class="form-control fw-bold fs-5 text-center text-primary" id="settings-exam-token" readonly>
-                        <button type="button" class="btn btn-outline-secondary" onclick="generateNewToken()" title="Buat Token Baru">
+                        <button type="button" class="btn btn-outline-secondary" onclick="quickRotateTokenPembebas()" title="Acak Token Baru Sekarang">
                           <i class="bi bi-arrow-repeat"></i> Acak
                         </button>
                       </div>
-                      <div class="form-text">Digunakan oleh pengawas untuk membuka kunci siswa yang terkena <strong>3x pelanggaran</strong> (serta memulai ujian jika wajib token aktif).</div>
+                      <div class="form-text">Token ini <strong>otomatis berganti acak setiap 3 menit</strong> dan digunakan untuk membuka kunci siswa setiap kelipatan 3x pelanggaran.</div>
                     </div>
                   </div>
 
@@ -818,6 +825,141 @@
   </div>
 
   <!-- MODALS -->
+
+  <!-- Modal: AI Question Generator (Google Gemini) -->
+  <div class="modal fade" id="aiGeneratorModal" tabindex="-1">
+    <div class="modal-dialog modal-xl modal-dialog-scrollable">
+      <div class="modal-content glass-card border-0">
+        <div class="modal-header text-white" style="background: linear-gradient(135deg, #4f46e5 0%, #7c3aed 100%);">
+          <div class="d-flex align-items-center gap-2">
+            <div class="avatar-circle" style="background: rgba(255,255,255,0.2); color: #fff; width: 38px; height: 38px; font-size: 1.15rem;">
+              <i class="bi bi-robot"></i>
+            </div>
+            <div>
+              <h5 class="modal-title fw-bold mb-0">Generator Soal Otomatis dengan AI</h5>
+              <small class="text-white-50">Didukung oleh Google Gemini AI API</small>
+            </div>
+          </div>
+          <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+        </div>
+        <div class="modal-body p-4">
+          <!-- Step 1: Configuration Form -->
+          <div class="card border-0 shadow-sm rounded-4 p-3 mb-4 bg-light">
+            <h6 class="fw-bold mb-3 text-dark"><i class="bi bi-sliders me-2 text-primary"></i>Parameter Pembuatan Soal</h6>
+            
+            <div class="row g-3">
+              <!-- Gemini API Key -->
+              <div class="col-md-7">
+                <label for="ai-api-key" class="form-label fw-semibold">
+                  Google Gemini API Key <span class="text-danger">*</span>
+                </label>
+                <div class="input-group">
+                  <span class="input-group-text bg-white"><i class="bi bi-key-fill text-muted"></i></span>
+                  <input type="password" class="form-control" id="ai-api-key" placeholder="Masukkan API Key Gemini (AIzaSy...)">
+                  <button class="btn btn-outline-secondary" type="button" onclick="togglePasswordVisibility('ai-api-key')">
+                    <i class="bi bi-eye" id="ai-api-key-eye"></i>
+                  </button>
+                </div>
+                <div class="d-flex justify-content-between align-items-center mt-1">
+                  <small class="text-muted">Kunci tersimpan aman di browser Anda.</small>
+                  <a href="https://aistudio.google.com/app/apikey" target="_blank" class="small text-primary text-decoration-none fw-semibold">
+                    <i class="bi bi-box-arrow-up-right me-1"></i>Dapatkan API Key Gratis di Google AI Studio
+                  </a>
+                </div>
+              </div>
+
+              <!-- AI Model Choice -->
+              <div class="col-md-5">
+                <label for="ai-model-select" class="form-label fw-semibold">Model AI</label>
+                <select class="form-select" id="ai-model-select">
+                  <option value="gemini-2.5-flash" selected>Gemini 2.5 Flash (Rekomendasi Cepat &amp; Akurat)</option>
+                  <option value="gemini-3.8-flash">Gemini 3.8 Flash (Generasi Terbaru Super Cepat)</option>
+                  <option value="gemini-2.5-pro">Gemini 2.5 Pro (Penalaran Kompleks &amp; HOTS)</option>
+                  <option value="gemini-flash-latest">Gemini Flash Latest</option>
+                </select>
+                <div class="form-text small">Model Flash sangat cepat dan efisien untuk soal pilihan ganda SLTA (5 Opsi: A, B, C, D, E).</div>
+              </div>
+
+              <!-- Topik / Mata Pelajaran -->
+              <div class="col-md-6">
+                <label for="ai-topik-input" class="form-label fw-semibold">
+                  Topik / Mata Pelajaran &amp; Materi <span class="text-danger">*</span>
+                </label>
+                <input type="text" class="form-control" id="ai-topik-input" placeholder="Contoh: Jaringan Dasar: Topologi, Subnetting IPv4 &amp; Routing">
+              </div>
+
+              <!-- Tingkat Kesulitan -->
+              <div class="col-md-3">
+                <label for="ai-kesulitan-select" class="form-label fw-semibold">Tingkat Kesulitan</label>
+                <select class="form-select" id="ai-kesulitan-select">
+                  <option value="Campuran (Mudah, Sedang, Sulit)" selected>Campuran</option>
+                  <option value="Mudah (C1-C2 Pemahaman Dasar)">Mudah</option>
+                  <option value="Sedang (C3 Penerapan/Aplikasi)">Sedang</option>
+                  <option value="Sulit / HOTS (C4-C6 Analisis &amp; Studi Kasus)">Sulit / HOTS</option>
+                </select>
+              </div>
+
+              <!-- Jumlah Soal -->
+              <div class="col-md-3">
+                <label for="ai-jumlah-select" class="form-label fw-semibold">Jumlah Soal</label>
+                <select class="form-select" id="ai-jumlah-select">
+                  <option value="5">5 Butir Soal</option>
+                  <option value="10" selected>10 Butir Soal</option>
+                  <option value="15">15 Butir Soal</option>
+                  <option value="20">20 Butir Soal</option>
+                  <option value="25">25 Butir Soal</option>
+                </select>
+              </div>
+
+              <!-- Materi / Silabus / Teks Referensi -->
+              <div class="col-12">
+                <label for="ai-materi-textarea" class="form-label fw-semibold">
+                  Materi Bacaan / Silabus / Kisi-kisi <span class="text-muted fw-normal">(Opsional)</span>
+                </label>
+                <textarea class="form-control" id="ai-materi-textarea" rows="3" placeholder="Tempelkan ringkasan materi, teks bacaan, atau kisi-kisi kurikulum di sini agar butir soal yang dibuat AI sangat akurat..."></textarea>
+              </div>
+
+              <!-- Tombol Eksekusi Generator -->
+              <div class="col-12 text-end pt-2">
+                <button type="button" class="btn text-white px-4 py-2 fw-semibold shadow-sm" id="btn-generate-ai" style="background: linear-gradient(135deg, #4f46e5 0%, #7c3aed 100%);" onclick="handleGenerateSoalAI()">
+                  <i class="bi bi-stars me-2"></i>Generate Soal Sekarang
+                </button>
+              </div>
+            </div>
+          </div>
+
+          <!-- Step 2: Preview Area -->
+          <div id="ai-preview-container" class="d-none">
+            <div class="d-flex justify-content-between align-items-center mb-3 flex-wrap gap-2">
+              <div>
+                <h6 class="fw-bold mb-0 text-dark">
+                  <i class="bi bi-card-checklist me-2 text-success"></i>Pratinjau Soal Hasil Generate
+                  (<span id="ai-preview-count" class="text-primary fw-bold">0</span> Soal)
+                </h6>
+                <small class="text-muted">Periksa soal di bawah ini. Anda dapat mencentang atau menghapus butir yang tidak diinginkan.</small>
+              </div>
+              <div class="d-flex gap-2">
+                <button class="btn btn-outline-secondary btn-sm" onclick="toggleSelectAllAiQuestions(true)">Pilih Semua</button>
+                <button class="btn btn-outline-secondary btn-sm" onclick="toggleSelectAllAiQuestions(false)">Batal Pilih</button>
+              </div>
+            </div>
+
+            <!-- List Soal Cards -->
+            <div id="ai-soal-cards-list" class="d-flex flex-column gap-3 mb-2" style="max-height: 420px; overflow-y: auto; padding-right: 5px;">
+              <!-- Dynamic preview items -->
+            </div>
+          </div>
+
+        </div>
+        <div class="modal-footer border-top d-flex justify-content-between align-items-center">
+          <button type="button" class="btn btn-secondary btn-sm" data-bs-dismiss="modal">Tutup</button>
+          <button type="button" class="btn btn-success btn-sm px-4 fw-semibold shadow-sm" id="btn-save-ai-soal" onclick="saveAiGeneratedSoalToBank()" disabled>
+            <i class="bi bi-cloud-arrow-up-fill me-2"></i>Simpan ke Bank Soal
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
 
   <!-- Modal: Import Excel -->
   <div class="modal fade" id="importModal" tabindex="-1">
@@ -988,6 +1130,12 @@
                 <input type="text" class="form-control" id="crud-soal-opsid" placeholder="Jawaban D">
               </div>
             </div>
+            <div class="row">
+              <div class="col-md-6 mb-3">
+                <label for="crud-soal-opsie" class="form-label fw-semibold">Opsi E (Standar Tingkat SLTA / SMK / SMA)</label>
+                <input type="text" class="form-control" id="crud-soal-opsie" placeholder="Jawaban E">
+              </div>
+            </div>
             
             <div class="mb-3">
               <label for="crud-soal-jawaban" class="form-label fw-semibold">Jawaban yang Benar</label>
@@ -997,6 +1145,7 @@
                 <option value="B">Opsi B</option>
                 <option value="C">Opsi C</option>
                 <option value="D">Opsi D</option>
+                <option value="E">Opsi E</option>
               </select>
             </div>
           </div>
@@ -1246,13 +1395,13 @@
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   
   <!-- CBT Modules -->
-  <script src="js/config.js?v=23"></script>
-  <script src="js/supabase-config.js?v=23"></script>
-  <script src="js/db-adapter.js?v=23"></script>
-  <script src="js/auth.js?v=23"></script>
-  <script src="js/excel-helpers.js?v=23"></script>
-  <script src="js/templates.js?v=23"></script>
-  <script src="js/admin.js?v=23"></script>
+  <script src="js/config.js?v=26"></script>
+  <script src="js/supabase-config.js?v=26"></script>
+  <script src="js/db-adapter.js?v=26"></script>
+  <script src="js/auth.js?v=26"></script>
+  <script src="js/excel-helpers.js?v=26"></script>
+  <script src="js/templates.js?v=26"></script>
+  <script src="js/admin.js?v=26"></script>
   <script>
     // Dark mode logic
     const themeToggleBtn = document.getElementById('theme-toggle-admin');

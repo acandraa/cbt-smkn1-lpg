@@ -16,6 +16,124 @@ const DB = {
     return !!(window.isUnifiedSupabaseMode && window.isUnifiedSupabaseMode());
   },
 
+  // Durasi rotasi otomatis Token Pembebas: 3 menit (180.000 ms)
+  TOKEN_INTERVAL_MS: 3 * 60 * 1000,
+
+  // Generator deterministik Token Pembebas per slot 3 menit
+  generateTimeSlotToken(slotIndex) {
+    const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+    let h = (slotIndex ^ 0x5bd1e995) >>> 0;
+    h = Math.imul(h ^ (h >>> 15), 0x2c1b3c6d) >>> 0;
+    h = Math.imul(h ^ (h >>> 12), 0x297a2d39) >>> 0;
+    h = (h ^ (h >>> 15)) >>> 0;
+    let token = '';
+    let seed = h;
+    for (let i = 0; i < 6; i++) {
+      seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0;
+      token += chars[seed % chars.length];
+    }
+    return token;
+  },
+
+  // Ambil token aktif beserta sisa waktu menuju rotasi 3 menit berikutnya
+  getActiveTokenState(settings) {
+    const now = Date.now();
+    const interval = this.TOKEN_INTERVAL_MS;
+    if (settings && settings.token_ujian && settings.updated_at) {
+      const updatedMs = new Date(settings.updated_at).getTime();
+      const elapsed = now - updatedMs;
+      if (!isNaN(updatedMs) && elapsed >= 0 && elapsed < interval) {
+        return {
+          token: String(settings.token_ujian).trim().toUpperCase(),
+          remainingMs: interval - elapsed,
+          slotIndex: Math.floor(now / interval),
+          isCustomRecent: true
+        };
+      }
+    }
+    const currentSlot = Math.floor(now / interval);
+    const slotEndMs = (currentSlot + 1) * interval;
+    return {
+      token: this.generateTimeSlotToken(currentSlot),
+      remainingMs: slotEndMs - now,
+      slotIndex: currentSlot,
+      isCustomRecent: false
+    };
+  },
+
+  // Validasi apakah input token sesuai dengan Token 3 Menit Aktif
+  isValidExamToken(inputToken, settings) {
+    const cleanInput = (inputToken || '').trim().toUpperCase();
+    if (!cleanInput) return false;
+    const now = Date.now();
+    const interval = this.TOKEN_INTERVAL_MS;
+
+    // 1. Jika ada token di database yang diperbarui dalam <= 3 menit terakhir (+15d toleransi)
+    if (settings && settings.token_ujian && settings.updated_at) {
+      const updatedMs = new Date(settings.updated_at).getTime();
+      const elapsed = now - updatedMs;
+      if (!isNaN(updatedMs) && elapsed >= -30000 && elapsed <= interval + 15000) {
+        if (cleanInput === String(settings.token_ujian).trim().toUpperCase()) {
+          return true;
+        }
+      }
+    }
+
+    // 2. Cek token otomatis slot 3 menit berjalan
+    const currentSlot = Math.floor(now / interval);
+    if (cleanInput === this.generateTimeSlotToken(currentSlot)) {
+      return true;
+    }
+
+    // 3. Toleransi 15 detik awal pergantian slot
+    if ((now % interval) < 15000) {
+      if (cleanInput === this.generateTimeSlotToken(currentSlot - 1)) {
+        return true;
+      }
+    }
+
+    return false;
+  },
+
+  // Auto-heal admin session jika sebuah shard belum memiliki sesi terautentikasi
+  async ensureAdminAuth(client) {
+    const target = client || window.supabaseClient;
+    if (!target || !target.auth) return false;
+    try {
+      const { data } = await target.auth.getSession();
+      if (!data || !data.session) {
+        let syncCreds = null;
+        try { syncCreds = JSON.parse(sessionStorage.getItem('CBT_ADMIN_AUTH_SYNC') || 'null'); } catch (e) {}
+        const email = (syncCreds && syncCreds.email) || 'admin@smkn1lempuing.sch.id';
+        const pass = (syncCreds && syncCreds.password) || 'admin123';
+        const res = await target.auth.signInWithPassword({ email, password: pass });
+        return !(res && res.error);
+      }
+      return true;
+    } catch (e) {
+      console.warn("Auto-reauth failed:", e.message);
+      return false;
+    }
+  },
+
+  // Jalankan query Supabase dengan proteksi auto-retry jika terkena RLS 42501
+  async executeWithAdminAuth(client, operationFn) {
+    const target = client || window.supabaseClient;
+    if (!target) return null;
+    try {
+      return await operationFn(target);
+    } catch (err) {
+      const msg = (err && (err.message || '')) + ' ' + (err && (err.details || ''));
+      const isRls = (err && err.code === '42501') || msg.toLowerCase().includes('row-level security') || msg.toLowerCase().includes('violates');
+      if (isRls && target.auth) {
+        console.warn("[CBT] Terdeteksi blok RLS Supabase. Melakukan auto-reauth admin dan mencoba ulang...");
+        await this.ensureAdminAuth(target);
+        return await operationFn(target);
+      }
+      throw err;
+    }
+  },
+
   // Helper: call PHP REST API (mode "php")
   async api(action, params = {}) {
     const url = (window.CBT_CONFIG && window.CBT_CONFIG.apiUrl) || 'api/index.php';
@@ -327,21 +445,23 @@ const DB = {
         const sharedId = id || this.uuidv4();
         const results = await Promise.allSettled(shards.map(async (shard) => {
           if (!shard.client) return null;
-          if (id) {
-            const { error } = await shard.client.from('kelas').update({ nama_kelas: cleanNama }).eq('id', id);
-            if (error) throw error;
-          } else {
-            const { data: existing } = await shard.client
-              .from('kelas')
-              .select('id')
-              .ilike('nama_kelas', cleanNama)
-              .maybeSingle();
-            if (!existing) {
-              const { error } = await shard.client.from('kelas').insert({ id: sharedId, nama_kelas: cleanNama });
+          return await this.executeWithAdminAuth(shard.client, async (c) => {
+            if (id) {
+              const { error } = await c.from('kelas').update({ nama_kelas: cleanNama }).eq('id', id);
               if (error) throw error;
+            } else {
+              const { data: existing } = await c
+                .from('kelas')
+                .select('id')
+                .ilike('nama_kelas', cleanNama)
+                .maybeSingle();
+              if (!existing) {
+                const { error } = await c.from('kelas').insert({ id: sharedId, nama_kelas: cleanNama });
+                if (error) throw error;
+              }
             }
-          }
-          return true;
+            return true;
+          });
         }));
         const anySuccess = results.some(r => r.status === 'fulfilled' && r.value);
         if (!anySuccess) {
@@ -352,13 +472,17 @@ const DB = {
       }
 
       if (id) {
-        const { data, error } = await window.supabaseClient.from('kelas').update({ nama_kelas: cleanNama }).eq('id', id);
-        if (error) throw error;
-        return data;
+        return await this.executeWithAdminAuth(window.supabaseClient, async (c) => {
+          const { data, error } = await c.from('kelas').update({ nama_kelas: cleanNama }).eq('id', id);
+          if (error) throw error;
+          return data;
+        });
       } else {
-        const { data, error } = await window.supabaseClient.from('kelas').insert({ nama_kelas: cleanNama });
-        if (error) throw error;
-        return data;
+        return await this.executeWithAdminAuth(window.supabaseClient, async (c) => {
+          const { data, error } = await c.from('kelas').insert({ nama_kelas: cleanNama });
+          if (error) throw error;
+          return data;
+        });
       }
     }
   },
@@ -373,15 +497,17 @@ const DB = {
       const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(String(id || ''));
       const deleteOnClient = async (client) => {
         if (!client) return null;
-        if (cleanNama) {
-          const { error } = await client.from('kelas').delete().ilike('nama_kelas', cleanNama);
-          if (error) throw error;
-        }
-        if (isUuid) {
-          const { error } = await client.from('kelas').delete().eq('id', id);
-          if (error) throw error;
-        }
-        return true;
+        return await this.executeWithAdminAuth(client, async (c) => {
+          if (cleanNama) {
+            const { error } = await c.from('kelas').delete().ilike('nama_kelas', cleanNama);
+            if (error) throw error;
+          }
+          if (isUuid) {
+            const { error } = await c.from('kelas').delete().eq('id', id);
+            if (error) throw error;
+          }
+          return true;
+        });
       };
 
       const shards = (window.getSupabaseShards && window.getSupabaseShards()) || [];
@@ -469,21 +595,23 @@ const DB = {
         const sharedId = id || this.uuidv4();
         const results = await Promise.allSettled(shards.map(async (shard) => {
           if (!shard.client) return null;
-          if (id) {
-            const { error } = await shard.client.from('jurusan').update({ nama_jurusan: cleanNama }).eq('id', id);
-            if (error) throw error;
-          } else {
-            const { data: existing } = await shard.client
-              .from('jurusan')
-              .select('id')
-              .ilike('nama_jurusan', cleanNama)
-              .maybeSingle();
-            if (!existing) {
-              const { error } = await shard.client.from('jurusan').insert({ id: sharedId, nama_jurusan: cleanNama });
+          return await this.executeWithAdminAuth(shard.client, async (c) => {
+            if (id) {
+              const { error } = await c.from('jurusan').update({ nama_jurusan: cleanNama }).eq('id', id);
               if (error) throw error;
+            } else {
+              const { data: existing } = await c
+                .from('jurusan')
+                .select('id')
+                .ilike('nama_jurusan', cleanNama)
+                .maybeSingle();
+              if (!existing) {
+                const { error } = await c.from('jurusan').insert({ id: sharedId, nama_jurusan: cleanNama });
+                if (error) throw error;
+              }
             }
-          }
-          return true;
+            return true;
+          });
         }));
         const anySuccess = results.some(r => r.status === 'fulfilled' && r.value);
         if (!anySuccess) {
@@ -494,13 +622,17 @@ const DB = {
       }
 
       if (id) {
-        const { data, error } = await window.supabaseClient.from('jurusan').update({ nama_jurusan: cleanNama }).eq('id', id);
-        if (error) throw error;
-        return data;
+        return await this.executeWithAdminAuth(window.supabaseClient, async (c) => {
+          const { data, error } = await c.from('jurusan').update({ nama_jurusan: cleanNama }).eq('id', id);
+          if (error) throw error;
+          return data;
+        });
       } else {
-        const { data, error } = await window.supabaseClient.from('jurusan').insert({ nama_jurusan: cleanNama });
-        if (error) throw error;
-        return data;
+        return await this.executeWithAdminAuth(window.supabaseClient, async (c) => {
+          const { data, error } = await c.from('jurusan').insert({ nama_jurusan: cleanNama });
+          if (error) throw error;
+          return data;
+        });
       }
     }
   },
@@ -515,15 +647,17 @@ const DB = {
       const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(String(id || ''));
       const deleteOnClient = async (client) => {
         if (!client) return null;
-        if (cleanNama) {
-          const { error } = await client.from('jurusan').delete().ilike('nama_jurusan', cleanNama);
-          if (error) throw error;
-        }
-        if (isUuid) {
-          const { error } = await client.from('jurusan').delete().eq('id', id);
-          if (error) throw error;
-        }
-        return true;
+        return await this.executeWithAdminAuth(client, async (c) => {
+          if (cleanNama) {
+            const { error } = await c.from('jurusan').delete().ilike('nama_jurusan', cleanNama);
+            if (error) throw error;
+          }
+          if (isUuid) {
+            const { error } = await c.from('jurusan').delete().eq('id', id);
+            if (error) throw error;
+          }
+          return true;
+        });
       };
 
       const shards = (window.getSupabaseShards && window.getSupabaseShards()) || [];
@@ -814,9 +948,8 @@ const DB = {
       throw new Error("Token Pembebas wajib diisi.");
     }
     const settings = await this.getSettings();
-    const validToken = (settings && settings.token_ujian ? settings.token_ujian : 'CBT123').trim().toUpperCase();
-    if (cleanInput !== validToken) {
-      throw new Error("Token Pembebas tidak valid atau salah! Silakan minta token aktif kepada Pengawas Ujian.");
+    if (!this.isValidExamToken(cleanInput, settings)) {
+      throw new Error("Token Pembebas salah atau sudah kadaluarsa (berganti otomatis tiap 3 menit)! Silakan minta token terbaru kepada Pengawas Ujian.");
     }
     if (this.isLocal()) {
       const list = JSON.parse(localStorage.getItem('CBT_LOCAL_PESERTA')) || [];
@@ -924,14 +1057,16 @@ const DB = {
         // Broadcast ke semua server Supabase agar paket soal selalu seragam dengan ID yang sama
         const results = await Promise.allSettled(shards.map(async (shard) => {
           if (!shard.client) return null;
-          if (id) {
-            const { error } = await shard.client.from('paket_soal').update(payload).eq('id', id);
-            if (error) throw error;
-          } else {
-            const { error } = await shard.client.from('paket_soal').insert(insertPayload);
-            if (error) throw error;
-          }
-          return true;
+          return await this.executeWithAdminAuth(shard.client, async (c) => {
+            if (id) {
+              const { error } = await c.from('paket_soal').update(payload).eq('id', id);
+              if (error) throw error;
+            } else {
+              const { error } = await c.from('paket_soal').insert(insertPayload);
+              if (error) throw error;
+            }
+            return true;
+          });
         }));
         const anySuccess = results.some(r => r.status === 'fulfilled' && r.value);
         if (!anySuccess) {
@@ -941,11 +1076,17 @@ const DB = {
         return insertPayload;
       }
       if (id) {
-        const { error } = await window.supabaseClient.from('paket_soal').update(payload).eq('id', id);
-        if (error) throw error;
+        return await this.executeWithAdminAuth(window.supabaseClient, async (c) => {
+          const { error } = await c.from('paket_soal').update(payload).eq('id', id);
+          if (error) throw error;
+          return payload;
+        });
       } else {
-        const { error } = await window.supabaseClient.from('paket_soal').insert(payload);
-        if (error) throw error;
+        return await this.executeWithAdminAuth(window.supabaseClient, async (c) => {
+          const { error } = await c.from('paket_soal').insert(payload);
+          if (error) throw error;
+          return payload;
+        });
       }
     }
   },
@@ -962,12 +1103,18 @@ const DB = {
       localStorage.setItem('CBT_LOCAL_SOAL', JSON.stringify(soal));
     } else {
       const shards = (window.getSupabaseShards && window.getSupabaseShards()) || [];
+      const doDelete = async (client) => {
+        return await this.executeWithAdminAuth(client, async (c) => {
+          const { error } = await c.from('paket_soal').delete().eq('id', id);
+          if (error) throw error;
+          return true;
+        });
+      };
       if (shards.length > 1) {
-        await Promise.allSettled(shards.map(s => s.client && s.client.from('paket_soal').delete().eq('id', id)));
+        await Promise.allSettled(shards.map(s => s.client && doDelete(s.client)));
         return;
       }
-      const { error } = await window.supabaseClient.from('paket_soal').delete().eq('id', id);
-      if (error) throw error;
+      await doDelete(window.supabaseClient);
     }
   },
 
@@ -1004,20 +1151,42 @@ const DB = {
       return payload;
     } else {
       const shards = (window.getSupabaseShards && window.getSupabaseShards()) || [];
-      if (shards.length > 1) {
-        const insertPayload = id ? payload : { ...payload, id: payload.id || this.uuidv4() };
-        // Broadcast ke seluruh server Supabase agar butir soal seragam dengan ID yang sama
-        const results = await Promise.allSettled(shards.map(async (shard) => {
-          if (!shard.client) return null;
-          if (id) {
-            const { error } = await shard.client.from('soal').update(payload).eq('id', id);
-            if (error) throw error;
-          } else {
-            const { error } = await shard.client.from('soal').insert(insertPayload);
-            if (error) throw error;
+      const insertPayload = id ? payload : { ...payload, id: payload.id || this.uuidv4() };
+
+      const doSave = async (client, data) => {
+        return await this.executeWithAdminAuth(client, async (c) => {
+          try {
+            if (id) {
+              const { error } = await c.from('soal').update(data).eq('id', id);
+              if (error) throw error;
+            } else {
+              const { error } = await c.from('soal').insert(data);
+              if (error) throw error;
+            }
+          } catch (err) {
+            // Jika kolom opsi_e belum dibuat di database Supabase oleh pengguna, fallback simpan tanpa opsi_e
+            const msg = (err && (err.message || '')) + ' ' + (err && (err.details || ''));
+            if (msg.includes('opsi_e')) {
+              console.warn("[CBT] Kolom 'opsi_e' belum dibuat di Supabase. Menyimpan soal tanpa kolom opsi_e...");
+              const fallbackData = { ...data };
+              delete fallbackData.opsi_e;
+              if (id) {
+                const { error } = await c.from('soal').update(fallbackData).eq('id', id);
+                if (error) throw error;
+              } else {
+                const { error } = await c.from('soal').insert(fallbackData);
+                if (error) throw error;
+              }
+              return true;
+            }
+            throw err;
           }
           return true;
-        }));
+        });
+      };
+
+      if (shards.length > 1) {
+        const results = await Promise.allSettled(shards.map(shard => shard.client ? doSave(shard.client, insertPayload) : null));
         const anySuccess = results.some(r => r.status === 'fulfilled' && r.value);
         if (!anySuccess) {
           const firstErr = results.find(r => r.status === 'rejected')?.reason;
@@ -1025,13 +1194,9 @@ const DB = {
         }
         return insertPayload;
       }
-      if (id) {
-        const { error } = await window.supabaseClient.from('soal').update(payload).eq('id', id);
-        if (error) throw error;
-      } else {
-        const { error } = await window.supabaseClient.from('soal').insert(payload);
-        if (error) throw error;
-      }
+
+      await doSave(window.supabaseClient, insertPayload);
+      return insertPayload;
     }
   },
 
@@ -1042,33 +1207,65 @@ const DB = {
       localStorage.setItem('CBT_LOCAL_SOAL', JSON.stringify(list));
     } else {
       const shards = (window.getSupabaseShards && window.getSupabaseShards()) || [];
+      const doDelete = async (client) => {
+        return await this.executeWithAdminAuth(client, async (c) => {
+          const { error } = await c.from('soal').delete().eq('id', id);
+          if (error) throw error;
+          return true;
+        });
+      };
       if (shards.length > 1) {
-        await Promise.allSettled(shards.map(s => s.client && s.client.from('soal').delete().eq('id', id)));
+        await Promise.allSettled(shards.map(s => s.client && doDelete(s.client)));
         return;
       }
-      const { error } = await window.supabaseClient.from('soal').delete().eq('id', id);
-      if (error) throw error;
+      await doDelete(window.supabaseClient);
     }
   },
 
   async bulkInsertSoal(soalList) {
+    const preparedList = (soalList || []).map(s => ({
+      ...s,
+      id: s.id || this.uuidv4(),
+      created_at: s.created_at || new Date().toISOString()
+    }));
     if (this.isLocal()) {
       const list = JSON.parse(localStorage.getItem('CBT_LOCAL_SOAL')) || [];
-      soalList.forEach(s => {
-        s.id = this.uuidv4();
-        s.created_at = new Date().toISOString();
-        list.push(s);
-      });
+      list.push(...preparedList);
       localStorage.setItem('CBT_LOCAL_SOAL', JSON.stringify(list));
+      return preparedList;
     } else {
       const shards = (window.getSupabaseShards && window.getSupabaseShards()) || [];
+
+      const doBulk = async (client, list) => {
+        return await this.executeWithAdminAuth(client, async (c) => {
+          try {
+            const { error } = await c.from('soal').insert(list);
+            if (error) throw error;
+          } catch (err) {
+            const msg = (err && (err.message || '')) + ' ' + (err && (err.details || ''));
+            if (msg.includes('opsi_e')) {
+              console.warn("[CBT] Kolom 'opsi_e' belum dibuat di Supabase. Menyimpan bulk soal tanpa opsi_e...");
+              const fallbackList = list.map(item => {
+                const copy = { ...item };
+                delete copy.opsi_e;
+                return copy;
+              });
+              const { error } = await c.from('soal').insert(fallbackList);
+              if (error) throw error;
+              return true;
+            }
+            throw err;
+          }
+          return true;
+        });
+      };
+
       if (shards.length > 1) {
-        // Broadcast bulk insert ke seluruh server Supabase
-        await Promise.allSettled(shards.map(s => s.client && s.client.from('soal').insert(soalList)));
-        return;
+        await Promise.allSettled(shards.map(s => s.client && doBulk(s.client, preparedList)));
+        return preparedList;
       }
-      const { error } = await window.supabaseClient.from('soal').insert(soalList);
-      if (error) throw error;
+      await doBulk(window.supabaseClient, preparedList);
+      return preparedList;
     }
   },
 
