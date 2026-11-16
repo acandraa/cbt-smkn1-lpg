@@ -2007,6 +2007,30 @@ const DB = {
     }
   },
 
+  async deleteJawabanSoalIds(pesertaId, soalIds) {
+    if (!soalIds || !soalIds.length) return { ok: true, deleted: 0 };
+    if (this.isLocal()) {
+      let list = JSON.parse(localStorage.getItem('CBT_LOCAL_JAWABAN')) || [];
+      const idSet = new Set(soalIds.map(String));
+      list = list.filter(a => !(a.peserta_id === pesertaId && idSet.has(String(a.soal_id))));
+      localStorage.setItem('CBT_LOCAL_JAWABAN', JSON.stringify(list));
+      return { ok: true, deleted: soalIds.length };
+    }
+    if (window.supabaseClient) {
+      try {
+        await window.supabaseClient
+          .from('jawaban_peserta')
+          .delete()
+          .eq('peserta_id', pesertaId)
+          .in('soal_id', soalIds);
+      } catch (err) {
+        console.warn("Gagal hapus jawaban_peserta di Supabase:", err);
+      }
+      return { ok: true, deleted: soalIds.length };
+    }
+    return { ok: true, deleted: soalIds.length };
+  },
+
   // -------------------------------------------------------------
   // LOGIN / AUTH SIMULATION (LOCAL OR CLOUD)
   // -------------------------------------------------------------
@@ -2347,6 +2371,13 @@ const DB_PHP = {
     return DB.api('syncJawabanBatch', {
       peserta_id: pesertaId,
       answers: answersArray
+    });
+  },
+
+  deleteJawabanSoalIds(pesertaId, soalIds) {
+    return DB.api('deleteJawabanSoalIds', {
+      peserta_id: pesertaId,
+      soal_ids: soalIds
     });
   },
 

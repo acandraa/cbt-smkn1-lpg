@@ -677,7 +677,8 @@ async function mulaiUjianCBT() {
           userAnswers.forEach(ans => {
             savedAnswers[ans.soal_id] = {
               jawaban: ans.jawaban,
-              ragu_ragu: Boolean(ans.ragu_ragu)
+              ragu_ragu: Boolean(ans.ragu_ragu),
+              answered_at: ans.created_at ? new Date(ans.created_at).getTime() : Date.now()
             };
           });
           saveAnswersToLocalStorage();
@@ -891,6 +892,7 @@ function selectOption(optKey) {
   
   savedAnswers[s.id].jawaban = optKey;
   savedAnswers[s.id].ragu_ragu = ragu;
+  savedAnswers[s.id].answered_at = Date.now();
 
   // 1. Simpan seketika di localStorage (0ms, nol beban server, anti-hilang)
   saveAnswersToLocalStorage();
@@ -913,6 +915,9 @@ function toggleRaguRagu(checkbox) {
   }
 
   savedAnswers[s.id].ragu_ragu = checkbox.checked;
+  if (!savedAnswers[s.id].answered_at) {
+    savedAnswers[s.id].answered_at = Date.now();
+  }
 
   saveAnswersToLocalStorage();
   renderQuestionNavGrid();
@@ -1158,6 +1163,16 @@ let securityWatchdogInterval = null;
 // Helper: Deteksi apakah browser sedang berada dalam mode Layar Belah (Split Screen) atau Jendela Mengambang (Floating Window)
 function isSplitScreenOrMultiWindow() {
   if (!window.screen) return false;
+
+  const ua = navigator.userAgent || '';
+  const isIPhone = /iPhone|iPod/i.test(ua);
+  // iPhone TIDAK MEMILIKI fitur Split-Screen bawaan Apple iOS (fitur Split View hanya ada di iPadOS).
+  // Bilah URL Safari di bagian bawah iPhone membuat hRatio sekitar 0.76 - 0.79 secara alami,
+  // sehingga deteksi rasio split-screen tidak berlaku untuk iPhone (keamanan iPhone ditangani penuh via blur, visibility, & Guided Access).
+  if (isIPhone) {
+    return false;
+  }
+
   const sW = window.screen.width || 0;
   const sH = window.screen.height || 0;
   if (!sW || !sH) return false;
@@ -1169,16 +1184,15 @@ function isSplitScreenOrMultiWindow() {
   if (sH >= sW) {
     const hRatio = wH / sH;
     const wRatio = wW / sW;
-    // Pada satu layar penuh (fullscreen), tinggi viewport minimal 85% layar.
-    // Jika tinggi < 80% atau lebar < 82%, ponsel pasti berada dalam mode Layar Belah atau Jendela Melayang!
-    if (hRatio < 0.80 || wRatio < 0.82) {
+    // Pada Android / iPad / PC: jika tinggi < 75% atau lebar < 80%, pasti layar belah atau floating window!
+    if (hRatio < 0.75 || wRatio < 0.80) {
       return true;
     }
   } else {
     // 2. Orientasi Layar Landscape (Mendatar)
     const wRatio = wW / sW;
     const hRatio = wH / sH;
-    if (wRatio < 0.80 || hRatio < 0.80) {
+    if (wRatio < 0.75 || hRatio < 0.75) {
       return true;
     }
   }
@@ -1306,6 +1320,72 @@ function handleViewportResizeSecurity() {
   }
 }
 
+/**
+ * Hukuman Pelanggaran: Reset 3 butir jawaban terakhir yang telah dikerjakan peserta.
+ * Dieksekusi otomatis ketika Token Pembebas dari Pengawas berhasil dimasukkan setelah ujian terkunci.
+ * @param {number} count Jumlah butir jawaban yang direset (default: 3)
+ * @returns {Promise<Array<{nomor: number, soalId: string}>>} Daftar soal yang direset
+ */
+async function resetPunishmentAnswers(count = 3) {
+  if (!allQuestions || allQuestions.length === 0 || !savedAnswers) {
+    return [];
+  }
+
+  // 1. Kumpulkan seluruh butir soal yang SUDAH dijawab (jawaban tidak null/kosong)
+  const answeredList = [];
+  allQuestions.forEach((q, idx) => {
+    const ans = savedAnswers[q.id];
+    if (ans && ans.jawaban !== null && ans.jawaban !== undefined && ans.jawaban !== '') {
+      answeredList.push({
+        soalId: q.id,
+        nomor: idx + 1,
+        answeredAt: ans.answered_at || ((idx + 1) * 1000)
+      });
+    }
+  });
+
+  if (answeredList.length === 0) {
+    return [];
+  }
+
+  // 2. Urutkan dari yang paling baru dikerjakan (timestamp tertinggi)
+  answeredList.sort((a, b) => b.answeredAt - a.answeredAt);
+
+  // 3. Ambil maksimal 'count' soal (default 3 butir)
+  const toReset = answeredList.slice(0, count);
+  const resetIds = toReset.map(item => item.soalId);
+
+  // 4. Hapus dari savedAnswers di memori
+  resetIds.forEach(id => {
+    delete savedAnswers[id];
+  });
+
+  // 5. Simpan ulang ke localStorage seketika
+  saveAnswersToLocalStorage();
+
+  // 6. Hapus dari database server (MySQL / Supabase / Mock)
+  if (studentProfile && studentProfile.id) {
+    try {
+      if (typeof DB.deleteJawabanSoalIds === 'function') {
+        await DB.deleteJawabanSoalIds(studentProfile.id, resetIds);
+      }
+    } catch (err) {
+      console.warn("Gagal menghapus jawaban hukuman di server:", err);
+    }
+  }
+
+  // 7. Render ulang navigasi grid soal
+  renderQuestionNavGrid();
+
+  // 8. Jika soal yang saat ini sedang aktif di layar termasuk yang direset, render ulang tampilan soal
+  const currentSoal = allQuestions[currentIndex];
+  if (currentSoal && resetIds.includes(currentSoal.id)) {
+    renderQuestion();
+  }
+
+  return toReset;
+}
+
 function showTokenPembebasModal(onUnlockedCallback) {
   if (isTokenPembebasModalOpen) return;
   isTokenPembebasModalOpen = true;
@@ -1354,18 +1434,54 @@ function showTokenPembebasModal(onUnlockedCallback) {
         return false;
       }
     }
-  }).then((result) => {
+  }).then(async (result) => {
     isTokenPembebasModalOpen = false;
     if (result.isConfirmed) {
       if (studentProfile) {
         studentProfile.is_locked = false;
       }
+
+      // Eksekusi hukuman: Reset 3 butir jawaban terakhir yang telah dijawab siswa
+      const resetItems = await resetPunishmentAnswers(3);
+      const resetNomors = resetItems.map(item => item.nomor).sort((a, b) => a - b);
+
+      let punishmentHtml = '';
+      if (resetNomors.length > 0) {
+        punishmentHtml = `
+          <div class="alert alert-danger text-start mt-3 mb-0 p-3 border-danger shadow-sm rounded-3">
+            <div class="d-flex align-items-center mb-1">
+              <i class="bi bi-exclamation-octagon-fill text-danger me-2 fs-5"></i>
+              <strong class="text-danger">Sanksi Pengurangan Jawaban:</strong>
+            </div>
+            <p class="small mb-2">Sebagai hukuman atas akumulasi <strong>${violationCount}x pelanggaran keamanan</strong>, sistem telah <strong>mereset ${resetNomors.length} butir jawaban terakhir Anda</strong>:</p>
+            <div class="badge bg-danger text-wrap text-start fs-6 py-2 px-3 w-100 mb-2">
+              <i class="bi bi-arrow-counterclockwise me-1"></i> Jawaban Direset: <strong>Soal Nomor ${resetNomors.join(', ')}</strong>
+            </div>
+            <p class="small text-muted mb-0"><i class="bi bi-info-circle me-1"></i>Jawaban pada butir nomor tersebut telah dikosongkan. Silakan periksa kembali dan kerjakan dengan tertib!</p>
+          </div>
+        `;
+      } else {
+        punishmentHtml = `
+          <div class="alert alert-warning text-start mt-3 mb-0 p-2">
+            <small><i class="bi bi-info-circle me-1"></i>Catatan: Anda belum mengisi jawaban soal, sehingga tidak ada butir jawaban yang direset sebagai hukuman.</small>
+          </div>
+        `;
+      }
+
       Swal.fire({
-        icon: 'success',
-        title: 'Kunci Ujian Dibuka!',
-        text: `Token Pembebas valid. Catatan pelanggaran tetap tersimpan (${violationCount}x). Silakan lanjutkan ujian dengan tertib.`,
-        timer: 1800,
-        showConfirmButton: false
+        icon: 'warning',
+        title: 'Kunci Ujian Berhasil Dibuka!',
+        html: `
+          <div class="text-center">
+            <p class="mb-1 text-success fw-bold"><i class="bi bi-check-circle-fill me-1"></i> Token Pembebas Valid!</p>
+            <p class="text-muted small mb-0">Ujian telah dibuka kembali oleh Pengawas. (Total pelanggaran tercatat: <strong>${violationCount}x</strong>)</p>
+            ${punishmentHtml}
+          </div>
+        `,
+        confirmButtonText: '<i class="bi bi-pencil-square me-2"></i> Mengerti & Lanjutkan Ujian',
+        confirmButtonColor: '#0d6efd',
+        allowOutsideClick: false,
+        allowEscapeKey: false
       }).then(() => {
         if (typeof onUnlockedCallback === 'function') {
           onUnlockedCallback();

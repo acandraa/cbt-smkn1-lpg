@@ -1030,6 +1030,26 @@ try {
             respond(fetchAll('SELECT * FROM jawaban_peserta WHERE peserta_id = ?', [$pid]));
         }
 
+        case 'deleteJawabanSoalIds': {
+            $pid = resolvePesertaId($req['peserta_id'] ?? null);
+            $soalIds = $req['soal_ids'] ?? [];
+            if (!is_array($soalIds) || empty($soalIds)) {
+                respond(['ok' => true, 'deleted' => 0]);
+            }
+            $cleanIds = [];
+            foreach ($soalIds as $sid) {
+                $str = trim((string)$sid);
+                if ($str !== '') $cleanIds[] = $str;
+            }
+            if (empty($cleanIds)) {
+                respond(['ok' => true, 'deleted' => 0]);
+            }
+            $placeholders = implode(',', array_fill(0, count($cleanIds), '?'));
+            $params = array_merge([$pid], $cleanIds);
+            exec_sql("DELETE FROM jawaban_peserta WHERE peserta_id = ? AND soal_id IN ($placeholders)", $params);
+            respond(['ok' => true, 'deleted' => count($cleanIds)]);
+        }
+
         case 'syncJawaban': {
             $pid = resolvePesertaId($req['peserta_id'] ?? null);
             $soalId = (string)($req['soal_id'] ?? '');
