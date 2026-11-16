@@ -1898,6 +1898,101 @@ const DB = {
     }
   },
 
+  async bukaSesiMapelBaru() {
+    if (this.isLocal()) {
+      let list = JSON.parse(localStorage.getItem('CBT_LOCAL_PESERTA')) || [];
+      list.forEach(p => {
+        p.status_ujian = 'Belum Ujian';
+        p.pelanggaran = 0;
+        p.is_locked = false;
+      });
+      localStorage.setItem('CBT_LOCAL_PESERTA', JSON.stringify(list));
+      localStorage.setItem('CBT_LOCAL_JAWABAN', JSON.stringify([]));
+      // CATATAN PENTING: CBT_LOCAL_HASIL TETAP UTUH & AMAN
+      return { ok: true };
+    }
+
+    if (this.isPhp()) {
+      return DB.api('bukaSesiMapelBaru');
+    }
+
+    // Mode Supabase (Multi-Shard atau Single Shard)
+    const shards = (window.getSupabaseShards && window.getSupabaseShards()) || [];
+    const targetShards = shards.length > 0 ? shards : [{ client: window.supabaseClient }];
+    for (const shard of targetShards) {
+      const client = shard.client || window.supabaseClient;
+      if (!client) continue;
+      // 1. Bersihkan draft jawaban sementara
+      try {
+        await client.from('jawaban_peserta').delete().neq('id', '00000000-0000-0000-0000-000000000000');
+      } catch (err) {
+        console.warn("Gagal hapus jawaban_peserta di shard Supabase:", err);
+      }
+      // 2. Kembalikan status seluruh peserta ke 'Belum Ujian' & buka kuncinya (0 pelanggaran)
+      // PENTING: Tabel hasil_ujian TIDAK DIHAPUS, nilai mapel sebelumnya tetap aman!
+      try {
+        await client.from('peserta').update({
+          status_ujian: 'Belum Ujian',
+          pelanggaran: 0,
+          is_locked: false
+        }).neq('id', '00000000-0000-0000-0000-000000000000');
+      } catch (err) {
+        console.warn("Gagal update status peserta di shard Supabase:", err);
+      }
+    }
+    return { ok: true };
+  },
+
+  async bersihkanHasilSimulasi() {
+    if (this.isLocal()) {
+      let list = JSON.parse(localStorage.getItem('CBT_LOCAL_PESERTA')) || [];
+      list.forEach(p => {
+        p.status_ujian = 'Belum Ujian';
+        p.pelanggaran = 0;
+        p.is_locked = false;
+      });
+      localStorage.setItem('CBT_LOCAL_PESERTA', JSON.stringify(list));
+      localStorage.setItem('CBT_LOCAL_JAWABAN', JSON.stringify([]));
+      localStorage.setItem('CBT_LOCAL_HASIL', JSON.stringify([]));
+      return { ok: true };
+    }
+
+    if (this.isPhp()) {
+      return DB.api('bersihkanHasilSimulasi');
+    }
+
+    // Mode Supabase (Multi-Shard atau Single Shard)
+    const shards = (window.getSupabaseShards && window.getSupabaseShards()) || [];
+    const targetShards = shards.length > 0 ? shards : [{ client: window.supabaseClient }];
+    for (const shard of targetShards) {
+      const client = shard.client || window.supabaseClient;
+      if (!client) continue;
+      // 1. Kosongkan seluruh rekaman hasil_ujian simulasi
+      try {
+        await client.from('hasil_ujian').delete().neq('id', '00000000-0000-0000-0000-000000000000');
+      } catch (err) {
+        console.warn("Gagal kosongkan hasil_ujian di Supabase shard:", err);
+      }
+      // 2. Kosongkan draft jawaban peserta
+      try {
+        await client.from('jawaban_peserta').delete().neq('id', '00000000-0000-0000-0000-000000000000');
+      } catch (err) {
+        console.warn("Gagal kosongkan jawaban_peserta di Supabase shard:", err);
+      }
+      // 3. Kembalikan status seluruh peserta ke 'Belum Ujian', bersihkan pelanggaran ke 0, dan buka kuncinya
+      try {
+        await client.from('peserta').update({
+          status_ujian: 'Belum Ujian',
+          pelanggaran: 0,
+          is_locked: false
+        }).neq('id', '00000000-0000-0000-0000-000000000000');
+      } catch (err) {
+        console.warn("Gagal update peserta di Supabase shard:", err);
+      }
+    }
+    return { ok: true };
+  },
+
   // -------------------------------------------------------------
   // STUDENT ANSWERS (JAWABAN PESERTA)
   // -------------------------------------------------------------
@@ -2354,6 +2449,10 @@ const DB_PHP = {
   },
 
   resetPesertaSesi(pesertaId) { return DB.api('resetPesertaSesi', { peserta_id: pesertaId }); },
+
+  bukaSesiMapelBaru() { return DB.api('bukaSesiMapelBaru'); },
+
+  bersihkanHasilSimulasi() { return DB.api('bersihkanHasilSimulasi'); },
 
   getJawabanList(pesertaId) { return DB.api('getJawabanList', { peserta_id: pesertaId }); },
 

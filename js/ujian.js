@@ -410,7 +410,18 @@ async function loadExamSetupAndVerify() {
       }
       renderAgamaSelector(candidateAgamaPakets);
     } else if (!activePaket && candidateActivePakets.length > 0) {
-      activePaket = candidateActivePakets[0];
+      // Prioritaskan paket yang BELUM dikerjakan siswa jika ada beberapa paket aktif (misal Mapel 1 selesai, otomatis beralih ke Mapel 2)
+      let firstUnfinished = null;
+      for (const p of candidateActivePakets) {
+        try {
+          const hasDone = await DB.checkExistingHasil(studentProfile.id, p.id);
+          if (!hasDone) {
+            firstUnfinished = p;
+            break;
+          }
+        } catch (e) {}
+      }
+      activePaket = firstUnfinished || candidateActivePakets[0];
       if (candidateActivePakets.length > 1) {
         renderPaketSelector(candidateActivePakets);
       }
@@ -1279,27 +1290,12 @@ function handleWindowBlurDetected() {
   //    Menutup celah: Gemini Assistant overlay yang dipanggil lewat tahan tombol Power / tombol Home tengah
   showSecurityBlackout('Terdeteksi Asisten AI / Jendela Mengambang / Aplikasi Lain');
 
-  // 2. Berikan toleransi singkat (1.0 detik) untuk memastikan ini bukan sentuhan tepi kilat
-  if (blurGraceTimer) clearTimeout(blurGraceTimer);
-  blurGraceTimer = setTimeout(() => {
-    blurGraceTimer = null;
-    if (!isExamActive || isTokenPembebasModalOpen) return;
-
-    // Cek apakah fokus jendela memang terputus (Gemini/sidebar/floating window sedang aktif)
-    const hasFocus = typeof document.hasFocus === 'function' ? document.hasFocus() : true;
-    if (!hasFocus || document.visibilityState === 'hidden' || isSplitScreenOrMultiWindow()) {
-      handleViolationRecorded('Terdeteksi aplikasi lain atau Asisten AI (Gemini / Google / Floating Window) aktif di atas lembar ujian.');
-    }
-  }, 1000);
+  // 2. Langsung catat pelanggaran seketika tanpa ampun (0 detik, tanpa toleransi)
+  handleViolationRecorded('Terdeteksi layar kehilangan fokus (Asisten AI, Jendela Mengambang, Notifikasi, atau Aplikasi Lain).');
 }
 
 function handleWindowFocusGained() {
   if (!isExamActive) return;
-  // Jika fokus kembali sebelum jeda 1.0 detik berakhir, batalkan pencatatan pelanggaran
-  if (blurGraceTimer) {
-    clearTimeout(blurGraceTimer);
-    blurGraceTimer = null;
-  }
   // PENTING: Jangan buka penyamar jika layar ponsel masih dalam kondisi split-screen!
   if (isSplitScreenOrMultiWindow()) {
     showSecurityBlackout('Mode Layar Belah Masih Aktif!', true);
@@ -1618,13 +1614,9 @@ function handleFullscreenChange() {
 
   const isFs = checkIsFullscreen();
 
-  // Jika siswa kembali ke layar penuh saat peringatan aktif, batalkan countdown dan tutup alert
+  // Jika siswa kembali ke layar penuh
   if (isFs) {
     if (isFullscreenWarningActive) {
-      if (fullscreenWarningInterval) {
-        clearInterval(fullscreenWarningInterval);
-        fullscreenWarningInterval = null;
-      }
       isFullscreenWarningActive = false;
       Swal.close();
       hideSecurityBlackout();
@@ -1632,65 +1624,12 @@ function handleFullscreenChange() {
     return;
   }
 
-  // Jika keluar dari layar penuh saat ujian aktif dan belum ada peringatan berjalan
-  if (!isFs && !isFullscreenWarningActive) {
+  // Jika keluar dari layar penuh saat ujian aktif:
+  // LANGSUNG PELANGGARAN TANPA AMPUN (0 DETIK, TANPA TOLERANSI HITUNGAN 10 DETIK)
+  if (!isFs && !isFullscreenWarningActive && !Swal.isVisible()) {
     showSecurityBlackout('Keluar dari Mode Layar Penuh');
-    triggerFullscreenExitCountdown();
+    handleViolationRecorded('Terdeteksi keluar dari mode Layar Penuh (Fullscreen). Ujian wajib dikerjakan dalam mode satu layar penuh!');
   }
-}
-
-function triggerFullscreenExitCountdown() {
-  if (isTokenPembebasModalOpen) return;
-  isFullscreenWarningActive = true;
-  let secondsLeft = 10;
-
-  Swal.fire({
-    icon: 'warning',
-    title: 'Peringatan: Keluar Layar Penuh!',
-    html: `
-      <p class="mb-2">Anda terdeteksi keluar dari mode layar penuh (<em>Fullscreen</em>).</p>
-      <div class="p-3 my-3 rounded bg-light border border-warning text-center">
-        <div class="small text-muted mb-1">Batas waktu untuk kembali ke layar penuh:</div>
-        <div class="display-6 fw-bold text-danger font-monospace" id="fs-countdown-display">10 detik</div>
-      </div>
-      <p class="small text-muted mb-0">Segera klik tombol di bawah sebelum waktu habis, atau aktivitas ini akan dicatat sebagai <strong>1 kali pelanggaran</strong> (Maksimal ${MAX_PELANGGARAN}x pelanggaran).</p>
-    `,
-    confirmButtonText: '<i class="bi bi-arrows-fullscreen me-2"></i>Kembali ke Layar Penuh',
-    confirmButtonColor: '#0d6efd',
-    allowOutsideClick: false,
-    allowEscapeKey: false,
-    didOpen: () => {
-      const displayEl = document.getElementById('fs-countdown-display');
-      if (fullscreenWarningInterval) clearInterval(fullscreenWarningInterval);
-
-      fullscreenWarningInterval = setInterval(() => {
-        secondsLeft--;
-        if (displayEl) {
-          displayEl.innerText = `${secondsLeft} detik`;
-        }
-
-        if (secondsLeft <= 0) {
-          clearInterval(fullscreenWarningInterval);
-          fullscreenWarningInterval = null;
-          isFullscreenWarningActive = false;
-
-          // Waktu 10 detik habis -> Catat pelanggaran (dan kunci jika sudah 3x)
-          handleViolationRecorded('Anda tidak kembali ke mode layar penuh tepat waktu.');
-        }
-      }, 1000);
-    }
-  }).then((result) => {
-    if (result.isConfirmed) {
-      if (fullscreenWarningInterval) {
-        clearInterval(fullscreenWarningInterval);
-        fullscreenWarningInterval = null;
-      }
-      isFullscreenWarningActive = false;
-      hideSecurityBlackout();
-      requestFullscreen();
-      window.focus();
-    }
-  });
 }
 
 function initAntiCheat() {

@@ -1024,6 +1024,48 @@ try {
             respond(['ok' => true]);
         }
 
+        case 'bukaSesiMapelBaru': {
+            requireAdmin();
+            $pdo = db();
+            $pdo->beginTransaction();
+            try {
+                // 1. Bersihkan draft jawaban sementara agar ruang penyimpanan bersih & siap menerima jawaban mapel baru
+                exec_sql('DELETE FROM jawaban_peserta');
+                // 2. Kembalikan status kehadiran seluruh peserta ke 'Belum Ujian', bersihkan pelanggaran ke 0, dan buka semua kunci
+                // PENTING: Tabel hasil_ujian TIDAK DIHAPUS (seluruh nilai mapel sebelumnya tetap 100% aman tersimpan)
+                exec_sql("UPDATE peserta SET status_ujian = 'Belum Ujian', pelanggaran = 0, is_locked = 0");
+                $pdo->commit();
+                respond(['ok' => true]);
+            } catch (Throwable $e) {
+                if ($pdo->inTransaction()) {
+                    $pdo->rollBack();
+                }
+                throw $e;
+            }
+        }
+
+        case 'bersihkanHasilSimulasi': {
+            requireAdmin();
+            $pdo = db();
+            $pdo->beginTransaction();
+            try {
+                // 1. Kosongkan seluruh rekaman hasil ujian simulasi
+                exec_sql('DELETE FROM hasil_ujian');
+                // 2. Kosongkan seluruh draft jawaban peserta
+                exec_sql('DELETE FROM jawaban_peserta');
+                // 3. Kembalikan status kehadiran seluruh peserta ke 'Belum Ujian', bersihkan pelanggaran ke 0, dan buka semua kunci
+                // PENTING: Data Peserta (akun login) dan Bank Soal TETAP 100% AMAN (TIDAK DIHAPUS)
+                exec_sql("UPDATE peserta SET status_ujian = 'Belum Ujian', pelanggaran = 0, is_locked = 0");
+                $pdo->commit();
+                respond(['ok' => true]);
+            } catch (Throwable $e) {
+                if ($pdo->inTransaction()) {
+                    $pdo->rollBack();
+                }
+                throw $e;
+            }
+        }
+
         // ---------------- JAWABAN ----------------
         case 'getJawabanList': {
             $pid = resolvePesertaId($req['peserta_id'] ?? null);

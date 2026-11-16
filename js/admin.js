@@ -1177,6 +1177,75 @@ async function handleProctorResetSesi(pesertaId, nama) {
   }
 }
 
+async function bukaSesiMapelBaruModal() {
+  const totalCount = (allPeserta || []).length;
+  const result = await Swal.fire({
+    title: 'Buka Sesi Mapel Berikutnya?',
+    html: `
+      <div class="text-start">
+        <p class="mb-2">Gunakan fitur ini ketika seluruh siswa telah menyelesaikan <strong>Mata Pelajaran Sebelumnya</strong> dan siap melanjutkan ke <strong>Mata Pelajaran Berikutnya</strong>.</p>
+        
+        <div class="alert alert-success py-2 px-3 mb-3 border-success shadow-sm">
+          <div class="d-flex align-items-center mb-1">
+            <i class="bi bi-shield-check me-2 fs-5 text-success"></i>
+            <strong class="text-success">Nilai Mapel Sebelumnya Tetap 100% AMAN!</strong>
+          </div>
+          <small class="text-muted d-block">Seluruh skor siswa di menu <em>Hasil Ujian</em> tetap tersimpan utuh dan tidak akan dihapus atau ditimpa.</small>
+        </div>
+
+        <div class="bg-light p-3 rounded-3 border mb-3 small">
+          <div class="fw-bold text-dark mb-1"><i class="bi bi-arrow-repeat me-1 text-primary"></i> Penyesuaian yang Akan Dijalankan:</div>
+          <ul class="mb-0 ps-3 text-secondary">
+            <li>Status kehadiran <strong>${totalCount} siswa</strong> dikembalikan ke <strong>"Belum Ujian"</strong>.</li>
+            <li>Akumulasi catatan pelanggaran seluruh siswa direset kembali ke <strong>0</strong>.</li>
+            <li>Seluruh siswa yang sebelumnya terkunci akan <strong>dibuka kuncinya</strong> sehingga dapat langsung login di mapel baru.</li>
+            <li>Dashboard Live Monitoring akan kembali bersih menampilkan progres Mapel Baru.</li>
+          </ul>
+        </div>
+        <p class="small text-danger fw-semibold mb-0"><i class="bi bi-exclamation-triangle-fill me-1"></i>Pastikan seluruh siswa memang telah mengumpulkan jawaban mapel sebelumnya!</p>
+      </div>
+    `,
+    icon: 'question',
+    showCancelButton: true,
+    confirmButtonColor: '#ffc107',
+    confirmButtonText: '<span class="text-dark fw-bold"><i class="bi bi-play-circle-fill me-1 text-danger"></i> Ya, Buka Sesi Mapel Baru</span>',
+    cancelButtonColor: '#6c757d',
+    cancelButtonText: 'Batal',
+    reverseButtons: true
+  });
+
+  if (result.isConfirmed) {
+    Swal.fire({
+      title: 'Mempersiapkan Sesi Mapel Baru...',
+      html: 'Mereset status kehadiran & membuka kunci seluruh peserta...',
+      allowOutsideClick: false,
+      didOpen: () => { Swal.showLoading(); }
+    });
+
+    try {
+      await DB.bukaSesiMapelBaru();
+      await loadDashboardStats(true);
+      await loadPeserta();
+
+      Swal.fire({
+        icon: 'success',
+        title: 'Sesi Mapel Baru Siap!',
+        html: `
+          <div class="text-center">
+            <p class="mb-2">Status kehadiran seluruh siswa telah diatur kembali ke <strong>"Belum Ujian"</strong> dan catatan pelanggaran telah dibersihkan.</p>
+            <p class="small text-muted mb-0">Siswa kini dapat login kembali untuk mengerjakan mata pelajaran berikutnya dengan tertib.</p>
+          </div>
+        `,
+        confirmButtonColor: '#0d6efd',
+        confirmButtonText: '<i class="bi bi-check2-circle me-1"></i> Selesai'
+      });
+    } catch (err) {
+      console.error("Gagal buka sesi mapel baru:", err);
+      Swal.fire('Gagal Membuka Sesi', err.message || 'Terjadi kesalahan saat membuka sesi mapel baru.', 'error');
+    }
+  }
+}
+
 function renderCharts(distributionData, lulus, tidakLulus) {
   const canvas1 = document.getElementById('scoreDistributionChart');
   if (canvas1) {
@@ -4331,6 +4400,114 @@ function exportHasilUjian() {
   ExcelHelpers.exportJSONToExcel(exportList, map, fileName, "Rekap Nilai");
 }
 
+async function bersihkanHasilSimulasiModal() {
+  if (isGuruMode()) {
+    Swal.fire('Akses Ditolak', 'Hanya Administrator Utama yang berwenang mengosongkan seluruh rekap hasil ujian.', 'warning');
+    return;
+  }
+
+  const countHasil = (allHasil || []).length;
+  if (countHasil === 0) {
+    Swal.fire({
+      icon: 'info',
+      title: 'Tabel Nilai Sudah Bersih',
+      text: 'Tidak ada data hasil ujian yang tersimpan saat ini. Sistem sudah dalam kondisi kosong/fresh.'
+    });
+    return;
+  }
+
+  const result = await Swal.fire({
+    title: 'Bersihkan Seluruh Hasil Simulasi?',
+    html: `
+      <div class="text-start">
+        <p class="mb-2">Tindakan ini bertujuan untuk <strong>mengosongkan seluruh data jejak simulasi</strong> agar sistem siap 100% FRESH sebelum hari-H ujian utama dimulai.</p>
+        
+        <div class="alert alert-danger py-2 px-3 mb-3 border-danger shadow-sm">
+          <div class="d-flex align-items-center mb-1">
+            <i class="bi bi-exclamation-triangle-fill me-2 fs-5 text-danger"></i>
+            <strong class="text-danger">Peringatan Penghapusan:</strong>
+          </div>
+          <small class="text-dark d-block">
+            Sebanyak <strong>${countHasil} data nilai hasil simulasi</strong> dan seluruh rekaman jawaban sementara akan <strong>DIHAPUS PERMANEN</strong> dari server.
+          </small>
+        </div>
+
+        <div class="bg-success-subtle p-3 rounded-3 border border-success mb-3 small">
+          <div class="fw-bold text-success mb-1"><i class="bi bi-shield-check me-1"></i> Data yang DIJAMIN AMAN (TIDAK AKAN HILANG):</div>
+          <ul class="mb-0 ps-3 text-secondary">
+            <li><strong>Data Peserta (${(allPeserta || []).length} siswa)</strong>: Akun, password, dan kartu ujian tetap utuh.</li>
+            <li><strong>Bank Soal & Paket Soal</strong>: Seluruh butir soal, opsi jawaban, gambar, dan kunci tetap aman.</li>
+            <li><strong>Data Master</strong>: Rombel kelas, jurusan, akun guru, dan pengaturan sistem tetap aman.</li>
+          </ul>
+        </div>
+
+        <div class="bg-light p-2 rounded border mb-2 small text-muted">
+          <i class="bi bi-info-circle me-1 text-primary"></i> <em>Tips: Pastikan Anda telah menekan tombol <strong>Download Nilai (Excel)</strong> terlebih dahulu jika sekolah membutuhkan dokumen arsip nilai simulasi.</em>
+        </div>
+
+        <p class="small text-danger fw-bold text-center mt-3 mb-1">Ketik kata <span class="badge bg-danger">KOSONGKAN</span> di bawah untuk konfirmasi:</p>
+      </div>
+    `,
+    icon: 'warning',
+    input: 'text',
+    inputPlaceholder: 'Ketik KOSONGKAN...',
+    inputAttributes: {
+      autocapitalize: 'characters',
+      autocomplete: 'off',
+      style: 'text-align: center; font-weight: bold; font-size: 1.1rem; letter-spacing: 2px; text-transform: uppercase;'
+    },
+    showCancelButton: true,
+    confirmButtonColor: '#dc3545',
+    confirmButtonText: '<i class="bi bi-trash3-fill me-1"></i> Ya, Kosongkan Nilai Simulasi',
+    cancelButtonColor: '#6c757d',
+    cancelButtonText: 'Batal',
+    reverseButtons: true,
+    preConfirm: (inputVal) => {
+      if (!inputVal || inputVal.trim().toUpperCase() !== 'KOSONGKAN') {
+        Swal.showValidationMessage('Ketik kata KOSONGKAN dengan tepat untuk melanjutkan!');
+        return false;
+      }
+      return true;
+    }
+  });
+
+  if (result.isConfirmed) {
+    Swal.fire({
+      title: 'Membersihkan Hasil Simulasi...',
+      html: 'Menghapus nilai simulasi, jawaban lama, & mereset kehadiran siswa...',
+      allowOutsideClick: false,
+      didOpen: () => { Swal.showLoading(); }
+    });
+
+    try {
+      await DB.bersihkanHasilSimulasi();
+      allHasil = [];
+      await loadHasil();
+      await loadDashboardStats(true);
+      await loadPeserta();
+
+      Swal.fire({
+        icon: 'success',
+        title: 'Sistem 100% Fresh & Bersih!',
+        html: `
+          <div class="text-center">
+            <p class="mb-2 text-success fw-bold"><i class="bi bi-check-circle-fill me-1"></i> Seluruh Hasil Simulasi Berhasil Dikosongkan!</p>
+            <p class="small text-muted mb-2">Tabel Hasil Ujian kini telah bersih (0 data nilai). Status seluruh peserta telah dikembalikan ke <strong>"Belum Ujian"</strong> dengan 0 pelanggaran.</p>
+            <div class="alert alert-light border small text-dark p-2 mb-0">
+              <i class="bi bi-stars text-warning me-1"></i> Sistem CBT SMKN 1 Lempuing kini dalam kondisi <strong>siap total</strong> untuk pelaksanaan hari-H ujian utama.
+            </div>
+          </div>
+        `,
+        confirmButtonColor: '#0d6efd',
+        confirmButtonText: 'Selesai'
+      });
+    } catch (err) {
+      console.error("Gagal bersihkan hasil simulasi:", err);
+      Swal.fire('Gagal Membersihkan', err.message || 'Terjadi kesalahan saat mengosongkan hasil simulasi.', 'error');
+    }
+  }
+}
+
 // -------------------------------------------------------------
 // EXCEL IMPORT WORKFLOWS
 // -------------------------------------------------------------
@@ -5082,6 +5259,7 @@ window.filterMonitoringTable = filterMonitoringTable;
 window.onMonitorFilterJurusanChange = onMonitorFilterJurusanChange;
 window.resetMonitoringFullFilter = resetMonitoringFullFilter;
 window.handleProctorResetSesi = handleProctorResetSesi;
+window.bukaSesiMapelBaruModal = bukaSesiMapelBaruModal;
 window.openCetakKartuModal = openCetakKartuModal;
 window.onCetakPasswordModeChange = onCetakPasswordModeChange;
 window.onCetakFilterJurusanChange = onCetakFilterJurusanChange;
@@ -5091,6 +5269,7 @@ window.prosesCetakKartu = prosesCetakKartu;
 window.cetakKartuSiswa = cetakKartuSiswa;
 window.filterSoalList = () => {};
 window.filterHasilList = filterHasilList;
+window.bersihkanHasilSimulasiModal = bersihkanHasilSimulasiModal;
 window.generateNewToken = generateNewToken;
 window.quickRotateTokenPembebas = quickRotateTokenPembebas;
 window.openAiGeneratorModal = openAiGeneratorModal;

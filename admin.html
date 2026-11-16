@@ -155,6 +155,9 @@
               <button class="btn btn-outline-primary btn-sm rounded-pill px-3" onclick="loadDashboardStats(true)" id="btn-refresh-dashboard">
                 <i class="bi bi-arrow-clockwise me-1" id="icon-refresh-dashboard"></i> Refresh Data
               </button>
+              <button class="btn btn-warning btn-sm rounded-pill px-3 fw-bold text-dark shadow-sm border border-warning" onclick="bukaSesiMapelBaruModal()" id="btn-buka-sesi-mapel" title="Buka sesi mapel berikutnya & bersihkan pelanggaran siswa tanpa menghapus nilai">
+                <i class="bi bi-skip-forward-circle-fill me-1 text-danger"></i> Buka Sesi Mapel Berikutnya
+              </button>
             </div>
           </div>
 
@@ -359,7 +362,10 @@
           <div class="d-flex justify-content-between flex-wrap flex-md-nowrap align-items-center pt-3 pb-2 mb-4 border-bottom">
             <h1 class="h2 text-dark">Data Peserta Seleksi</h1>
             <div class="btn-toolbar mb-2 mb-md-0 gap-2">
-              <button class="btn btn-warning btn-sm rounded-pill px-3 text-dark fw-semibold" onclick="openCetakKartuModal()">
+              <button class="btn btn-warning btn-sm rounded-pill px-3 text-dark fw-bold shadow-sm" onclick="bukaSesiMapelBaruModal()" title="Buka sesi mapel berikutnya & reset kehadiran tanpa hapus nilai">
+                <i class="bi bi-skip-forward-circle-fill me-1 text-danger"></i> Buka Sesi Mapel Baru
+              </button>
+              <button class="btn btn-outline-warning btn-sm rounded-pill px-3 text-dark fw-semibold" onclick="openCetakKartuModal()">
                 <i class="bi bi-printer-fill me-1"></i> Cetak Kartu Ujian
               </button>
               <button class="btn btn-outline-primary btn-sm rounded-pill px-3" onclick="ExcelTemplates.downloadPesertaTemplate()">
@@ -741,6 +747,9 @@
           <div class="d-flex justify-content-between flex-wrap flex-md-nowrap align-items-center pt-3 pb-2 mb-3 border-bottom">
             <h1 class="h2 text-dark mb-0" id="heading-sec-nilai">Hasil Nilai Ujian Seleksi</h1>
             <div class="btn-toolbar mb-2 mb-md-0 gap-2">
+              <button class="btn btn-outline-danger btn-sm rounded-pill px-3 fw-semibold shadow-sm" onclick="bersihkanHasilSimulasiModal()" id="btn-bersihkan-simulasi" title="Kosongkan seluruh nilai simulasi & bersihkan status peserta untuk persiapan hari-H">
+                <i class="bi bi-trash3-fill me-1"></i> Bersihkan Hasil Simulasi
+              </button>
               <button class="btn btn-success btn-sm rounded-pill px-3 fw-semibold shadow-sm" onclick="exportHasilUjian()">
                 <i class="bi bi-file-earmark-excel-fill me-1"></i> Download Nilai (Excel)
               </button>
@@ -1652,13 +1661,13 @@
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   
   <!-- CBT Modules -->
-  <script src="js/config.js?v=32"></script>
-  <script src="js/supabase-config.js?v=32"></script>
-  <script src="js/db-adapter.js?v=32"></script>
-  <script src="js/auth.js?v=32"></script>
-  <script src="js/excel-helpers.js?v=32"></script>
-  <script src="js/templates.js?v=32"></script>
-  <script src="js/admin.js?v=32"></script>
+  <script src="js/config.js?v=44"></script>
+  <script src="js/supabase-config.js?v=44"></script>
+  <script src="js/db-adapter.js?v=44"></script>
+  <script src="js/auth.js?v=44"></script>
+  <script src="js/excel-helpers.js?v=44"></script>
+  <script src="js/templates.js?v=44"></script>
+  <script src="js/admin.js?v=44"></script>
   <script>
     // Dark mode logic
     const themeToggleBtn = document.getElementById('theme-toggle-admin');
