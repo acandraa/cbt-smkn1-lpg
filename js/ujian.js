@@ -1150,6 +1150,162 @@ let fullscreenWarningInterval = null;
 let isFullscreenWarningActive = false;
 let isTokenPembebasModalOpen = false;
 
+// Pelindung Anti-Intip & Deteksi Kehilangan Fokus (Sidebar / Floating App / Split-Screen)
+let lastViolationTimestamp = 0;
+let blurGraceTimer = null;
+let securityWatchdogInterval = null;
+
+// Helper: Deteksi apakah browser sedang berada dalam mode Layar Belah (Split Screen) atau Jendela Mengambang (Floating Window)
+function isSplitScreenOrMultiWindow() {
+  if (!window.screen) return false;
+  const sW = window.screen.width || 0;
+  const sH = window.screen.height || 0;
+  if (!sW || !sH) return false;
+
+  const wW = window.innerWidth || document.documentElement.clientWidth || 0;
+  const wH = window.innerHeight || document.documentElement.clientHeight || 0;
+
+  // 1. Orientasi Layar Portrait (Berdiri)
+  if (sH >= sW) {
+    const hRatio = wH / sH;
+    const wRatio = wW / sW;
+    // Pada satu layar penuh (fullscreen), tinggi viewport minimal 85% layar.
+    // Jika tinggi < 80% atau lebar < 82%, ponsel pasti berada dalam mode Layar Belah atau Jendela Melayang!
+    if (hRatio < 0.80 || wRatio < 0.82) {
+      return true;
+    }
+  } else {
+    // 2. Orientasi Layar Landscape (Mendatar)
+    const wRatio = wW / sW;
+    const hRatio = wH / sH;
+    if (wRatio < 0.80 || hRatio < 0.80) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
+function showSecurityBlackout(customReason = '', isSplitMode = false) {
+  const shield = document.getElementById('security-blackout-shield');
+  const isSplit = isSplitMode || isSplitScreenOrMultiWindow();
+
+  if (shield) {
+    shield.classList.remove('d-none');
+    const badge = document.getElementById('security-blackout-badge');
+    const title = document.getElementById('security-blackout-title');
+    const desc = document.getElementById('security-blackout-desc');
+    const splitAlert = document.getElementById('security-splitscreen-instruction');
+
+    if (isSplit) {
+      if (title) title.innerText = 'Layar Belah (Split Screen) Terdeteksi!';
+      if (badge) badge.innerHTML = `<i class="bi bi-layout-split me-1"></i> Mode Layar Belah Dilarang!`;
+      if (desc) desc.innerText = 'Portal ujian mendeteksi layar ponsel Anda sedang dibagi dengan aplikasi lain (seperti Gemini, Google, atau Catatan).';
+      if (splitAlert) splitAlert.classList.remove('d-none');
+    } else {
+      if (title) title.innerText = 'Layar Ujian Disamarkan!';
+      if (badge && customReason) {
+        badge.innerHTML = `<i class="bi bi-exclamation-triangle-fill me-1"></i> ${escapeHtml(customReason)}`;
+      }
+      if (splitAlert) splitAlert.classList.add('d-none');
+    }
+  }
+  const viewExam = document.getElementById('view-exam');
+  if (viewExam) {
+    viewExam.style.filter = 'blur(30px) grayscale(100%)';
+    viewExam.style.pointerEvents = 'none';
+  }
+}
+
+function hideSecurityBlackout() {
+  const shield = document.getElementById('security-blackout-shield');
+  if (shield) shield.classList.add('d-none');
+  const viewExam = document.getElementById('view-exam');
+  if (viewExam) {
+    viewExam.style.filter = '';
+    viewExam.style.pointerEvents = '';
+  }
+}
+
+function verifyAndDismissSecurityBlackout() {
+  if (!isExamActive) {
+    hideSecurityBlackout();
+    return;
+  }
+
+  // Cek apakah masih dalam mode split screen / multi-window
+  if (isSplitScreenOrMultiWindow()) {
+    showSecurityBlackout('Layar Belah Masih Aktif! Tutup aplikasi lain terlebih dahulu.', true);
+    handleViolationRecorded('Mencoba melanjutkan ujian dalam mode Layar Belah (Split Screen). Tutup aplikasi lain terlebih dahulu!');
+    return;
+  }
+
+  // Jika sudah satu layar penuh, buka penyamar dan masuk fullscreen
+  hideSecurityBlackout();
+  requestFullscreen();
+  window.focus();
+
+  // Verifikasi ulang setelah 400ms
+  setTimeout(() => {
+    if (!isExamActive || isTokenPembebasModalOpen) return;
+    if (isSplitScreenOrMultiWindow()) {
+      showSecurityBlackout('Layar Belah Masih Terdeteksi!', true);
+    }
+  }, 400);
+}
+
+function dismissSecurityBlackout() {
+  verifyAndDismissSecurityBlackout();
+}
+
+function handleWindowBlurDetected() {
+  if (!isExamActive || isTokenPembebasModalOpen) return;
+
+  // 1. Langsung samarkan tampilan soal seketika (Anti-Intip 0 detik)
+  //    Menutup celah: Gemini Assistant overlay yang dipanggil lewat tahan tombol Power / tombol Home tengah
+  showSecurityBlackout('Terdeteksi Asisten AI / Jendela Mengambang / Aplikasi Lain');
+
+  // 2. Berikan toleransi singkat (1.0 detik) untuk memastikan ini bukan sentuhan tepi kilat
+  if (blurGraceTimer) clearTimeout(blurGraceTimer);
+  blurGraceTimer = setTimeout(() => {
+    blurGraceTimer = null;
+    if (!isExamActive || isTokenPembebasModalOpen) return;
+
+    // Cek apakah fokus jendela memang terputus (Gemini/sidebar/floating window sedang aktif)
+    const hasFocus = typeof document.hasFocus === 'function' ? document.hasFocus() : true;
+    if (!hasFocus || document.visibilityState === 'hidden' || isSplitScreenOrMultiWindow()) {
+      handleViolationRecorded('Terdeteksi aplikasi lain atau Asisten AI (Gemini / Google / Floating Window) aktif di atas lembar ujian.');
+    }
+  }, 1000);
+}
+
+function handleWindowFocusGained() {
+  if (!isExamActive) return;
+  // Jika fokus kembali sebelum jeda 1.0 detik berakhir, batalkan pencatatan pelanggaran
+  if (blurGraceTimer) {
+    clearTimeout(blurGraceTimer);
+    blurGraceTimer = null;
+  }
+  // PENTING: Jangan buka penyamar jika layar ponsel masih dalam kondisi split-screen!
+  if (isSplitScreenOrMultiWindow()) {
+    showSecurityBlackout('Mode Layar Belah Masih Aktif!', true);
+    return;
+  }
+  // Jika tidak ada modal peringatan Swal yang sedang terbuka, normalkan kembali tampilan
+  if (!Swal.isVisible() && !isTokenPembebasModalOpen && !isFullscreenWarningActive) {
+    hideSecurityBlackout();
+  }
+}
+
+function handleViewportResizeSecurity() {
+  if (!isExamActive || isTokenPembebasModalOpen) return;
+  // Deteksi mode Layar Belah (Split Screen) di ponsel Android
+  if (isSplitScreenOrMultiWindow()) {
+    showSecurityBlackout('Terdeteksi Mode Layar Belah (Split Screen)', true);
+    handleViolationRecorded('Terdeteksi mode Layar Belah (Split Screen). Ujian wajib dikerjakan dalam satu layar penuh.');
+  }
+}
+
 function showTokenPembebasModal(onUnlockedCallback) {
   if (isTokenPembebasModalOpen) return;
   isTokenPembebasModalOpen = true;
@@ -1226,6 +1382,16 @@ function showTokenPembebasModal(onUnlockedCallback) {
 function handleViolationRecorded(reasonText) {
   if (isTokenPembebasModalOpen) return;
 
+  // Cegah duplikasi pencatatan pelanggaran beruntun dalam jeda 2.5 detik
+  const now = Date.now();
+  if (now - lastViolationTimestamp < 2500) {
+    return;
+  }
+  lastViolationTimestamp = now;
+
+  // Pastikan penyamar layar aktif selama dialog peringatan berlangsung
+  showSecurityBlackout(reasonText, isSplitScreenOrMultiWindow());
+
   violationCount++;
   if (studentProfile) {
     studentProfile.pelanggaran = violationCount;
@@ -1237,7 +1403,13 @@ function handleViolationRecorded(reasonText) {
   if (violationCount > 0 && violationCount % MAX_PELANGGARAN === 0) {
     if (studentProfile) studentProfile.is_locked = true;
     showTokenPembebasModal(() => {
-      requestFullscreen();
+      if (isSplitScreenOrMultiWindow()) {
+        showSecurityBlackout('Tutup layar belah untuk melanjutkan ujian.', true);
+      } else {
+        hideSecurityBlackout();
+        requestFullscreen();
+        window.focus();
+      }
     });
     return;
   }
@@ -1248,7 +1420,7 @@ function handleViolationRecorded(reasonText) {
     icon: 'warning',
     title: `Pelanggaran Ke-${violationCount} Tercatat!`,
     html: `
-      <p>${reasonText}</p>
+      <p class="fw-semibold text-danger mb-2">${escapeHtml(reasonText)}</p>
       <div class="alert alert-warning mb-2 py-2 fw-semibold">
         <i class="bi bi-exclamation-triangle-fill me-1"></i> Total Pelanggaran: <strong>${violationCount} kali</strong> (Sisa toleransi sebelum terkunci: ${sisa}x lagi)
       </div>
@@ -1261,7 +1433,14 @@ function handleViolationRecorded(reasonText) {
     allowEscapeKey: false
   }).then(() => {
     isFullscreenWarningActive = false;
-    requestFullscreen();
+    // PENTING: Jika siswa masih dalam mode split-screen, jangan buka penyamar! Tetapkan penyamar terkunci!
+    if (isSplitScreenOrMultiWindow()) {
+      showSecurityBlackout('Tutup Layar Belah Terlebih Dahulu!', true);
+    } else {
+      hideSecurityBlackout();
+      requestFullscreen();
+      window.focus();
+    }
   });
 }
 
@@ -1332,12 +1511,14 @@ function handleFullscreenChange() {
       }
       isFullscreenWarningActive = false;
       Swal.close();
+      hideSecurityBlackout();
     }
     return;
   }
 
   // Jika keluar dari layar penuh saat ujian aktif dan belum ada peringatan berjalan
   if (!isFs && !isFullscreenWarningActive) {
+    showSecurityBlackout('Keluar dari Mode Layar Penuh');
     triggerFullscreenExitCountdown();
   }
 }
@@ -1389,7 +1570,9 @@ function triggerFullscreenExitCountdown() {
         fullscreenWarningInterval = null;
       }
       isFullscreenWarningActive = false;
+      hideSecurityBlackout();
       requestFullscreen();
+      window.focus();
     }
   });
 }
@@ -1407,11 +1590,12 @@ function initAntiCheat() {
     });
   });
 
-  // Cegah shortcut F12, Ctrl+Shift+I, Ctrl+U, dll
+  // Cegah shortcut F12, Ctrl+Shift+I, Ctrl+U, PrintScreen, dll
   document.addEventListener('keydown', e => {
     if (isExamActive) {
       if (
         e.key === 'F12' || 
+        e.key === 'PrintScreen' ||
         (e.ctrlKey && e.shiftKey && (e.key === 'I' || e.key === 'J' || e.key === 'C')) || 
         (e.ctrlKey && (e.key === 'U' || e.key === 'P' || e.key === 'S'))
       ) {
@@ -1425,7 +1609,7 @@ function initAntiCheat() {
     document.addEventListener(evt, handleFullscreenChange);
   });
 
-  // Deteksi pindah tab
+  // Deteksi pindah tab atau aplikasi diminimize
   document.addEventListener('visibilitychange', () => {
     if (isExamActive && document.visibilityState === 'hidden' && !isTokenPembebasModalOpen) {
       // Jika countdown keluar fullscreen sedang berjalan, bersihkan agar tidak dobel penalti
@@ -1434,16 +1618,54 @@ function initAntiCheat() {
         fullscreenWarningInterval = null;
       }
       isFullscreenWarningActive = false;
-
+      showSecurityBlackout('Berpindah Tab atau Aplikasi');
       handleViolationRecorded('Anda terdeteksi berpindah tab atau aplikasi. Aktivitas ini dicatat oleh sistem keamanan.');
     }
   });
+
+  // 1. Deteksi kehilangan fokus jendela (Jendela Mengambang / Floating App, Sidebar Pintar, Notifikasi)
+  window.addEventListener('blur', handleWindowBlurDetected);
+  window.addEventListener('focus', handleWindowFocusGained);
+
+  // 2. Deteksi perubahan viewport (Mode Split Screen / Layar Belah)
+  window.addEventListener('resize', handleViewportResizeSecurity);
+
+  // 3. Watchdog pengawas independen (cek berkala setiap 1000ms saat ujian aktif)
+  if (securityWatchdogInterval) clearInterval(securityWatchdogInterval);
+  securityWatchdogInterval = setInterval(() => {
+    if (!isExamActive || isTokenPembebasModalOpen) return;
+
+    // Prioritas Utama: Cek apakah berada dalam mode Layar Belah (Split Screen) atau Floating Window
+    if (isSplitScreenOrMultiWindow()) {
+      showSecurityBlackout('Terdeteksi Mode Layar Belah (Split Screen)', true);
+      if (!Swal.isVisible() && !isFullscreenWarningActive) {
+        handleViolationRecorded('Terdeteksi mode Layar Belah (Split Screen). Ujian wajib dikerjakan dalam satu layar penuh.');
+      }
+      return;
+    }
+
+    if (Swal.isVisible() || isFullscreenWarningActive) return;
+
+    // Cek fokus dokumen (menutup celah: Gemini Assistant overlay yang dipanggil lewat tombol Power / Home)
+    if (typeof document.hasFocus === 'function' && !document.hasFocus()) {
+      handleWindowBlurDetected();
+      return;
+    }
+
+    // Cek status fullscreen
+    if (isFullscreenSupported() && !checkIsFullscreen()) {
+      handleFullscreenChange();
+    }
+  }, 1000);
 }
 
 // Inisialisasi listener keamanan
 document.addEventListener("DOMContentLoaded", () => {
   initAntiCheat();
 });
+
+window.verifyAndDismissSecurityBlackout = verifyAndDismissSecurityBlackout;
+window.dismissSecurityBlackout = verifyAndDismissSecurityBlackout;
 
 function escapeHtml(str) {
   if (str === null || str === undefined) return '';

@@ -340,6 +340,29 @@
     </div>
   </div>
 
+  <!-- Overlay Keamanan: Penyamar Layar Anti-Intip saat Fokus Terputus (Split Screen / Gemini / Sidebar / Floating App) -->
+  <div id="security-blackout-shield" class="d-none" style="position: fixed; top: 0; left: 0; width: 100vw; height: 100vh; background: rgba(15, 23, 42, 0.97); backdrop-filter: blur(30px); -webkit-backdrop-filter: blur(30px); z-index: 999999; display: flex; flex-direction: column; align-items: center; justify-content: center; color: white; padding: 24px; text-align: center;">
+    <div style="max-width: 460px;">
+      <div class="mb-3">
+        <i class="bi bi-shield-slash-fill text-danger" style="font-size: 3.5rem;"></i>
+      </div>
+      <h4 class="fw-bold text-danger mb-2" id="security-blackout-title">Layar Ujian Disamarkan!</h4>
+      <div class="badge bg-warning text-dark px-3 py-2 mb-3 fw-semibold text-wrap" style="font-size: 0.85rem;" id="security-blackout-badge">
+        <i class="bi bi-exclamation-triangle-fill me-1"></i> Terdeteksi Sidebar / Asisten AI / Layar Belah
+      </div>
+      <p class="text-white-50 small mb-3" id="security-blackout-desc" style="line-height: 1.5;">
+        Demi menjaga kejujuran ujian, lembar soal otomatis dikunci dan disamarkan saat Anda membuka asisten AI (Gemini), panel samping, jendela mengambang, atau mode layar belah.
+      </p>
+      <div id="security-splitscreen-instruction" class="alert alert-danger py-2 px-3 small text-start d-none mb-3" style="background: rgba(220, 53, 69, 0.2); border-color: #dc3545; color: #ffc9c9;">
+        <strong>Perhatian: Mode Layar Belah Masih Aktif!</strong><br>
+        Tarik garis pembatas layar sampai aplikasi lain (Gemini / Google) tertutup penuh, sehingga portal ujian mengisi seluruh layar ponsel Anda.
+      </div>
+      <button type="button" class="btn btn-primary px-4 py-2 fw-semibold rounded-pill shadow-lg" id="btn-security-verify" onclick="verifyAndDismissSecurityBlackout()">
+        <i class="bi bi-arrows-fullscreen me-2"></i>Verifikasi & Masuk Layar Penuh
+      </button>
+    </div>
+  </div>
+
   <!-- SCRIPTS -->
   <!-- SweetAlert2 -->
   <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
@@ -351,11 +374,11 @@
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 
   <!-- CBT Modules -->
-  <script src="js/config.js?v=32"></script>
-  <script src="js/supabase-config.js?v=32"></script>
-  <script src="js/db-adapter.js?v=32"></script>
-  <script src="js/auth.js?v=32"></script>
-  <script src="js/ujian.js?v=32"></script>
+  <script src="js/config.js?v=38"></script>
+  <script src="js/supabase-config.js?v=38"></script>
+  <script src="js/db-adapter.js?v=38"></script>
+  <script src="js/auth.js?v=38"></script>
+  <script src="js/ujian.js?v=38"></script>
 
   <script>
     // Dark mode logic
