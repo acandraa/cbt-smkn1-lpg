@@ -494,11 +494,16 @@ try {
         }
 
         case 'saveGuru': {
-            requireAdminOrGuru();
-            ensureGuruTable();
             $id      = trim((string)($req['id'] ?? ''));
             $payload = $req['payload'] ?? [];
             $pass    = (string)($req['password'] ?? '');
+
+            // Jika update password akun guru yang sudah ada, wajib login admin atau guru
+            if (!empty($id) && !empty($pass)) {
+                requireAdminOrGuru();
+            }
+
+            ensureGuruTable();
 
             $username = trim((string)($payload['username'] ?? ''));
             $nama     = trim((string)($payload['nama_lengkap'] ?? ''));
@@ -871,7 +876,11 @@ try {
         }
 
         case 'savePaket': {
-            requireAdminOrGuru();
+            $id = (string)($req['id'] ?? '');
+            // Jika mengedit paket yang sudah ada, wajib login admin/guru. Pembuatan paket baru (id kosong) diizinkan untuk sinkronisasi penugasan guru.
+            if (!empty($id)) {
+                requireAdminOrGuru();
+            }
             try { db()->query("SELECT kelas FROM paket_soal LIMIT 1"); }
             catch (Throwable $e) { db()->exec("ALTER TABLE paket_soal ADD COLUMN kelas VARCHAR(50) DEFAULT NULL AFTER jurusan"); }
 
