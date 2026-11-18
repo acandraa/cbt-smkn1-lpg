@@ -668,14 +668,17 @@
 
                 <div class="d-flex justify-content-between align-items-center mb-3">
                   <h6 class="fw-bold mb-0">Daftar Pertanyaan</h6>
-                  <div class="btn-group">
+                  <div class="btn-group flex-wrap">
                     <button class="btn btn-sm text-white shadow-sm"
                       style="background: linear-gradient(135deg, #4f46e5 0%, #7c3aed 100%);"
                       onclick="openAiGeneratorModal()">
                       <i class="bi bi-robot me-1"></i> Buat Soal dengan AI
                     </button>
+                    <button class="btn btn-info text-white btn-sm" onclick="openImportWordModal()">
+                      <i class="bi bi-file-earmark-word-fill me-1"></i> Import Word / Teks
+                    </button>
                     <button class="btn btn-success btn-sm" onclick="openImportModal('soal')">
-                      <i class="bi bi-file-earmark-excel-fill"></i> Import Excel
+                      <i class="bi bi-file-earmark-excel-fill me-1"></i> Import Excel
                     </button>
                     <button class="btn btn-primary btn-sm" onclick="openSoalForm()">
                       <i class="bi bi-plus"></i> Tambah Soal Manual
@@ -1269,6 +1272,157 @@
           <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Batal</button>
           <button type="button" class="btn btn-success" id="btn-save-import" disabled onclick="saveImportedData()">
             <span id="import-btn-text">Simpan ke Database</span>
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Modal: Import Word / Teks Soal -->
+  <div class="modal fade" id="importWordModal" tabindex="-1" aria-labelledby="importWordModalTitle" aria-hidden="true">
+    <div class="modal-dialog modal-xl modal-dialog-scrollable">
+      <div class="modal-content glass-card border-0 shadow-lg">
+        <div class="modal-header bg-light">
+          <div class="d-flex align-items-center gap-2">
+            <span class="p-2 rounded-circle bg-primary bg-opacity-10 text-primary">
+              <i class="bi bi-file-earmark-word-fill fs-5"></i>
+            </span>
+            <div>
+              <h5 class="modal-title fw-bold mb-0" id="importWordModalTitle">Import Soal dari Word / Teks</h5>
+              <small class="text-muted">Salin naskah dari Word atau upload berkas .docx langsung ke Bank Soal</small>
+            </div>
+          </div>
+          <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+        </div>
+        <div class="modal-body p-4">
+          <!-- Alert Petunjuk Format -->
+          <div class="alert alert-info border-0 bg-info-subtle text-dark rounded-3 mb-4">
+            <div class="d-flex justify-content-between align-items-start flex-wrap gap-2">
+              <div>
+                <h6 class="fw-bold mb-1"><i class="bi bi-info-circle-fill text-info me-2"></i>Format Penulisan Soal Word</h6>
+                <p class="small mb-0">
+                  Sistem otomatis mengenali nomor soal (1., 2., dst), pertanyaan, pilihan <strong>A, B, C, D, E</strong>, dan baris <strong>Kunci: [A-E]</strong> atau <strong>Jawaban: [A-E]</strong>.
+                </p>
+              </div>
+              <button class="btn btn-sm btn-outline-primary" type="button" data-bs-toggle="collapse" data-bs-target="#formatWordExampleCollapse">
+                <i class="bi bi-eye me-1"></i>Lihat Contoh Format
+              </button>
+            </div>
+            <div class="collapse mt-3" id="formatWordExampleCollapse">
+              <div class="bg-white p-3 rounded border font-monospace small">
+                1. Berikut ini yang termasuk perangkat keras input adalah...<br>
+                A. Monitor<br>
+                B. Keyboard<br>
+                C. Speaker<br>
+                D. Printer<br>
+                E. Proyektor<br>
+                Kunci: B<br><br>
+                2. Satuan dari kecepatan transfer data adalah...<br>
+                A. bps &nbsp;&nbsp; B. Byte &nbsp;&nbsp; C. Hertz &nbsp;&nbsp; D. Volt &nbsp;&nbsp; E. Watt<br>
+                Jawaban: A
+              </div>
+              <div class="small text-muted mt-2">
+                <em>*Tips: Kunci jawaban juga bisa diletakkan di akhir dokumen dengan judul <code>KUNCI JAWABAN:</code> (contoh: <code>1. B, 2. A</code>). Tanda bintang pada opsi yang benar (contoh: <code>B. Keyboard *</code>) juga otomatis terbaca.</em>
+              </div>
+            </div>
+          </div>
+
+          <!-- Nav Tabs: Copy-Paste vs Upload .docx -->
+          <ul class="nav nav-pills nav-fill mb-3 p-1 bg-light rounded-3" id="wordImportTabs" role="tablist">
+            <li class="nav-item" role="presentation">
+              <button class="nav-link active fw-bold py-2 rounded-3" id="tab-word-paste" data-bs-toggle="pill" data-bs-target="#panel-word-paste" type="button" role="tab">
+                <i class="bi bi-clipboard2-check me-2"></i>1. Tempel Teks Word (Copy-Paste)
+              </button>
+            </li>
+            <li class="nav-item" role="presentation">
+              <button class="nav-link fw-bold py-2 rounded-3" id="tab-word-file" data-bs-toggle="pill" data-bs-target="#panel-word-file" type="button" role="tab">
+                <i class="bi bi-upload me-2"></i>2. Upload Berkas Word (.docx)
+              </button>
+            </li>
+          </ul>
+
+          <div class="tab-content mb-4" id="wordImportTabsContent">
+            <!-- Tab Panel 1: Paste Text -->
+            <div class="tab-pane fade show active" id="panel-word-paste" role="tabpanel">
+              <div class="mb-2 d-flex justify-content-between align-items-center flex-wrap gap-2">
+                <label for="word-raw-input" class="form-label fw-bold small text-secondary mb-0">
+                  Tempel naskah soal dari Word di kotak ini (Ctrl + V):
+                </label>
+                <div class="d-flex gap-2">
+                  <button type="button" class="btn btn-sm btn-outline-info rounded-pill px-3 py-1" style="font-size: 0.8rem;" onclick="loadSampleWordText()">
+                    <i class="bi bi-magic me-1"></i>Isi Contoh Soal
+                  </button>
+                  <button type="button" class="btn btn-sm btn-outline-secondary rounded-pill px-3 py-1" style="font-size: 0.8rem;" onclick="clearWordRawInput()">
+                    <i class="bi bi-x-circle me-1"></i>Bersihkan
+                  </button>
+                </div>
+              </div>
+              <textarea class="form-control font-monospace" id="word-raw-input" rows="9" placeholder="1. Ketik atau tempel soal nomor satu di sini...
+A. Pilihan A
+B. Pilihan B
+C. Pilihan C
+D. Pilihan D
+E. Pilihan E
+Kunci: A
+
+2. Soal nomor dua...
+A. Pilihan A
+B. Pilihan B
+C. Pilihan C
+D. Pilihan D
+E. Pilihan E
+Jawaban: B"></textarea>
+            </div>
+
+            <!-- Tab Panel 2: Upload File .docx -->
+            <div class="tab-pane fade" id="panel-word-file" role="tabpanel">
+              <div class="border border-2 border-dashed rounded-3 p-4 text-center bg-light" id="drop-area-word" style="border-style: dashed !important; border-color: #cbd5e1 !important;">
+                <i class="bi bi-file-earmark-word text-primary fs-1 mb-2 d-block"></i>
+                <h6 class="fw-bold mb-1">Pilih Berkas Naskah Soal (.docx)</h6>
+                <p class="text-muted small mb-3">Tarik &amp; lepas berkas Word Anda ke sini, atau klik tombol di bawah</p>
+                <input type="file" id="word-file-input" class="d-none" accept=".docx" onchange="handleWordFileUpload(this)">
+                <button type="button" class="btn btn-primary btn-sm rounded-pill px-4" onclick="document.getElementById('word-file-input').click()">
+                  <i class="bi bi-folder2-open me-1"></i>Pilih Berkas .docx
+                </button>
+                <div class="small fw-semibold text-primary mt-2" id="word-file-name-label"></div>
+              </div>
+            </div>
+          </div>
+
+          <div class="text-center mb-4">
+            <button type="button" class="btn btn-primary fw-bold px-4 py-2 shadow-sm rounded-pill" onclick="triggerParseWordText()">
+              <i class="bi bi-lightning-charge-fill me-1"></i>Proses &amp; Pratinjau Soal
+            </button>
+          </div>
+
+          <!-- Pratinjau Hasil Pembacaan Soal -->
+          <div id="word-preview-section" class="d-none border rounded-3 p-3 bg-white shadow-sm">
+            <div class="d-flex justify-content-between align-items-center mb-3 flex-wrap gap-2 border-bottom pb-2">
+              <div>
+                <h6 class="fw-bold mb-1 text-dark">
+                  <i class="bi bi-list-check text-success me-1"></i>Pratinjau Butir Soal Terdeteksi
+                </h6>
+                <div class="d-flex gap-2 flex-wrap align-items-center">
+                  <span class="badge bg-primary px-3 py-2 rounded-pill" id="badge-word-total">0 Soal</span>
+                  <span class="badge bg-success px-3 py-2 rounded-pill" id="badge-word-kunci-ok">0 Kunci Lengkap</span>
+                  <span class="badge bg-warning text-dark px-3 py-2 rounded-pill" id="badge-word-kunci-missing">0 Kunci Belum Ada</span>
+                </div>
+              </div>
+              <div class="small text-muted">
+                *Klik huruf <strong>[A] [B] [C] [D] [E]</strong> untuk mengubah / menetapkan kunci jawaban.
+              </div>
+            </div>
+
+            <div id="word-preview-list" style="max-height: 420px; overflow-y: auto;">
+              <!-- Dynamic preview items -->
+            </div>
+          </div>
+
+        </div>
+        <div class="modal-footer bg-light">
+          <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Batal</button>
+          <button type="button" class="btn btn-success fw-bold px-4" id="btn-save-word-import" disabled onclick="saveWordImportedData()">
+            <i class="bi bi-cloud-arrow-up-fill me-1"></i> Simpan ke Bank Soal
           </button>
         </div>
       </div>
@@ -1871,6 +2025,8 @@
   <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
   <!-- SheetJS -->
   <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+  <!-- Mammoth.js (.docx reader) -->
+  <script src="https://cdn.jsdelivr.net/npm/mammoth@1.6.0/mammoth.browser.min.js"></script>
   <!-- Bootstrap JS -->
   <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
 
@@ -1878,13 +2034,13 @@
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 
   <!-- CBT Modules -->
-  <script src="js/config.js?v=51"></script>
-  <script src="js/supabase-config.js?v=51"></script>
-  <script src="js/db-adapter.js?v=51"></script>
-  <script src="js/auth.js?v=51"></script>
-  <script src="js/excel-helpers.js?v=51"></script>
-  <script src="js/templates.js?v=51"></script>
-  <script src="js/admin.js?v=51"></script>
+  <script src="js/config.js?v=54"></script>
+  <script src="js/supabase-config.js?v=54"></script>
+  <script src="js/db-adapter.js?v=54"></script>
+  <script src="js/auth.js?v=54"></script>
+  <script src="js/excel-helpers.js?v=54"></script>
+  <script src="js/templates.js?v=54"></script>
+  <script src="js/admin.js?v=54"></script>
   <script>
     // Dark mode logic
     const themeToggleBtn = document.getElementById('theme-toggle-admin');

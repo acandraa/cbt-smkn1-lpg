@@ -11,6 +11,8 @@ let cetakKartuModalInstance = null;
 let aiGeneratorModalInstance = null;
 let guruFormModalInstance = null;
 let penugasanGuruModalInstance = null;
+let importWordModalInstance = null;
+let wordImportedDataCache = [];
 let aiGeneratedQuestions = [];
 
 let currentAdminUser = null;
@@ -53,6 +55,9 @@ document.addEventListener("DOMContentLoaded", async () => {
   if (guruModalEl) guruFormModalInstance = new bootstrap.Modal(guruModalEl);
   const penugasanGuruEl = document.getElementById('modal-penugasan-guru');
   if (penugasanGuruEl) penugasanGuruModalInstance = new bootstrap.Modal(penugasanGuruEl);
+  const wordModalEl = document.getElementById('importWordModal');
+  if (wordModalEl) importWordModalInstance = new bootstrap.Modal(wordModalEl);
+  initWordDropZone();
 
   // Form Handlers
   document.getElementById('form-setup-supabase').addEventListener('submit', handleSupabaseSetup);
@@ -5565,6 +5570,589 @@ async function saveImportedData() {
 }
 
 // -------------------------------------------------------------
+// WORD / TEXT IMPORT WORKFLOWS (.docx & Copy-Paste)
+// -------------------------------------------------------------
+
+function openImportWordModal() {
+  if (!activePaketId) {
+    Swal.fire({
+      icon: 'warning',
+      title: 'Pilih Paket Soal',
+      text: 'Silakan pilih atau buat paket soal terlebih dahulu di panel sebelah kiri sebelum mengimpor soal.',
+      confirmButtonColor: '#1e3c72'
+    });
+    return;
+  }
+
+  const p = (allPaket || []).find(item => String(item.id) === String(activePaketId));
+  const pName = p ? (p.nama_paket || 'Paket Soal') : 'Paket Soal';
+
+  const titleEl = document.getElementById('importWordModalTitle');
+  if (titleEl) {
+    titleEl.innerHTML = `<i class="bi bi-file-earmark-word-fill me-2 text-primary"></i>Import Soal Word: <strong>${escapeHtml(pName)}</strong>`;
+  }
+
+  // Reset inputs & preview
+  wordImportedDataCache = [];
+  const rawInput = document.getElementById('word-raw-input');
+  if (rawInput) rawInput.value = '';
+  const fileInput = document.getElementById('word-file-input');
+  if (fileInput) fileInput.value = '';
+  const fileLabel = document.getElementById('word-file-name-label');
+  if (fileLabel) fileLabel.innerText = '';
+
+  const previewSec = document.getElementById('word-preview-section');
+  if (previewSec) previewSec.classList.add('d-none');
+
+  const btnSave = document.getElementById('btn-save-word-import');
+  if (btnSave) {
+    btnSave.disabled = true;
+    btnSave.innerHTML = `<i class="bi bi-cloud-arrow-up-fill me-1"></i> Simpan ke Bank Soal`;
+  }
+
+  // Switch to tab 1 (Paste) by default
+  const tabPasteBtn = document.getElementById('tab-word-paste');
+  if (tabPasteBtn && typeof bootstrap !== 'undefined' && bootstrap.Tab) {
+    const tabTrigger = new bootstrap.Tab(tabPasteBtn);
+    tabTrigger.show();
+  }
+
+  if (importWordModalInstance) {
+    importWordModalInstance.show();
+  }
+}
+
+function initWordDropZone() {
+  const dropArea = document.getElementById('drop-area-word');
+  if (!dropArea) return;
+
+  ['dragenter', 'dragover'].forEach(eventName => {
+    dropArea.addEventListener(eventName, (e) => {
+      e.preventDefault();
+      dropArea.classList.add('bg-primary-subtle', 'border-primary');
+    }, false);
+  });
+
+  ['dragleave', 'drop'].forEach(eventName => {
+    dropArea.addEventListener(eventName, (e) => {
+      e.preventDefault();
+      dropArea.classList.remove('bg-primary-subtle', 'border-primary');
+    }, false);
+  });
+
+  dropArea.addEventListener('drop', (e) => {
+    e.preventDefault();
+    const dt = e.dataTransfer;
+    const files = dt ? dt.files : null;
+    if (files && files.length > 0) {
+      handleWordFile(files[0]);
+    }
+  });
+}
+
+function handleWordFileUpload(input) {
+  if (!input || !input.files || input.files.length === 0) return;
+  handleWordFile(input.files[0]);
+}
+
+function handleWordFile(file) {
+  if (!file) return;
+  if (!file.name.toLowerCase().endsWith('.docx')) {
+    Swal.fire({
+      icon: 'warning',
+      title: 'Format Berkas Salah',
+      text: 'Harap unggah berkas berekstensi .docx (Microsoft Word). Jika berkas bertipe .doc lama, silakan buka di Word dan simpan sebagai .docx, atau salin (copy-paste) teksnya langsung.'
+    });
+    return;
+  }
+
+  const fileLabel = document.getElementById('word-file-name-label');
+  if (fileLabel) {
+    fileLabel.innerHTML = `<i class="bi bi-file-earmark-check-fill text-success me-1"></i>${escapeHtml(file.name)} (${(file.size / 1024).toFixed(1)} KB)`;
+  }
+
+  if (typeof mammoth === 'undefined') {
+    Swal.fire('Library Belum Siap', 'Pustaka pembaca berkas Word sedang dimuat. Harap periksa koneksi internet Anda atau gunakan fitur Tempel Teks Word (Copy-Paste).', 'error');
+    return;
+  }
+
+  Swal.fire({
+    title: 'Membaca Berkas Word...',
+    html: `Mengekstrak teks dari <strong>${escapeHtml(file.name)}</strong>...`,
+    allowOutsideClick: false,
+    didOpen: () => { Swal.showLoading(); }
+  });
+
+  const reader = new FileReader();
+  reader.onload = function(e) {
+    const arrayBuffer = e.target.result;
+    mammoth.extractRawText({ arrayBuffer: arrayBuffer })
+      .then(function(result) {
+        Swal.close();
+        const extractedText = (result.value || '').trim();
+        if (!extractedText) {
+          Swal.fire('Berkas Kosong', 'Tidak ditemukan teks pada berkas Word yang diunggah.', 'warning');
+          return;
+        }
+
+        const rawInput = document.getElementById('word-raw-input');
+        if (rawInput) rawInput.value = extractedText;
+
+        // Beralih ke tab 1 (Paste) agar guru bisa melihat teks yang diekstrak
+        const tabPasteBtn = document.getElementById('tab-word-paste');
+        if (tabPasteBtn && typeof bootstrap !== 'undefined' && bootstrap.Tab) {
+          const tabTrigger = new bootstrap.Tab(tabPasteBtn);
+          tabTrigger.show();
+        }
+
+        // Jalankan parsing otomatis
+        triggerParseWordText();
+      })
+      .catch(function(err) {
+        console.error(err);
+        Swal.fire('Gagal Membaca File', 'Terjadi kesalahan saat mengekstrak teks: ' + (err.message || err), 'error');
+      });
+  };
+  reader.onerror = function() {
+    Swal.fire('Gagal Membaca File', 'Gagal membaca berkas dari perangkat Anda.', 'error');
+  };
+  reader.readAsArrayBuffer(file);
+}
+
+function loadSampleWordText() {
+  const sample = `SOAL PENILAIAN AKHIR SEMESTER (PAS)
+MATA PELAJARAN: TEKNOLOGI INFORMASI & KOMUNIKASI
+SMK NEGERI 1 LEMPUING
+
+1. Berikut ini yang termasuk dalam kelompok perangkat keras masukan (input device) pada komputer adalah...
+A. Monitor
+B. Keyboard
+C. Speaker
+D. Proyektor
+E. Plotter
+Kunci: B
+
+2. Manakah topologi jaringan di bawah ini yang menggunakan perangkat sentral berupa switch atau hub?
+A. Bus
+B. Star
+C. Ring
+D. Mesh
+E. Tree
+Jawaban: B
+
+3. Satuan dari kecepatan transfer data pada jaringan komputer dinyatakan dalam...
+A. bps (bit per second)
+B. Byte
+C. Hertz
+D. Volt
+E. Watt
+Jawab: A
+
+4. Perhatikan potongan kode berikut:
+x = 10
+y = 20
+print(x + y)
+Output yang dihasilkan dari baris kode program di atas adalah...
+A. 1020
+B. 30
+C. 10
+D. 20
+E. Error
+Kunci: B
+
+5. Di bawah ini yang merupakan contoh media transmisi jaringan nirkabel (wireless) adalah...
+A. Kabel UTP
+B. Kabel Coaxial
+C. Gelombang Radio / Wi-Fi
+D. Kabel Fiber Optik
+E. Kabel STP
+Jawaban: C`;
+
+  const input = document.getElementById('word-raw-input');
+  if (input) input.value = sample;
+  triggerParseWordText();
+}
+
+function clearWordRawInput() {
+  const input = document.getElementById('word-raw-input');
+  if (input) input.value = '';
+  wordImportedDataCache = [];
+  const previewSec = document.getElementById('word-preview-section');
+  if (previewSec) previewSec.classList.add('d-none');
+  const btnSave = document.getElementById('btn-save-word-import');
+  if (btnSave) {
+    btnSave.disabled = true;
+    btnSave.innerHTML = `<i class="bi bi-cloud-arrow-up-fill me-1"></i> Simpan ke Bank Soal`;
+  }
+}
+
+function parseWordQuestions(rawText) {
+  if (!rawText || !rawText.trim()) return [];
+
+  // 1. Normalisasi baris
+  let cleanText = rawText
+    .replace(/\r\n/g, '\n')
+    .replace(/\r/g, '\n');
+
+  // Pisahkan blok kunci jawaban di akhir dokumen jika ada
+  // Cth: 'KUNCI JAWABAN:', 'DAFTAR KUNCI:', 'KUNCI SOAL:'
+  const separatedKeys = {};
+  const kunciBlockMatch = cleanText.match(/\n\s*(?:kunci\s*jawaban|daftar\s*kunci|kunci\s*soal|kunci\s*pilihan\s*ganda)[\s\:\-]*\n([\s\S]*)$/i);
+  if (kunciBlockMatch) {
+    const keySection = kunciBlockMatch[1];
+    // Ambil pola '1. A' atau '1=A' atau '1:A' atau '1.A' atau '1 - A'
+    const keyPairs = keySection.matchAll(/(?:no\.?\s*)?(\d+)[\.\s\:\=\)\-]+([A-Ea-e])/gi);
+    for (const kp of keyPairs) {
+      separatedKeys[parseInt(kp[1])] = kp[2].toUpperCase();
+    }
+    // Potong teks agar bagian kunci terpisah tidak dianggap soal
+    cleanText = cleanText.substring(0, kunciBlockMatch.index);
+  }
+
+  const rawLines = cleanText.split('\n');
+  const lines = [];
+  
+  // Pra-proses: pisahkan opsi yang ditulis horizontal dalam satu baris (cth: A. text   B. text)
+  for (let l of rawLines) {
+    const trimmed = l.trim();
+    if (!trimmed) continue;
+
+    // Cek apakah ada multi-opsi horizontal, misal: A. apel  B. jeruk  C. mangga atau (A) apel (B) jeruk
+    const multiOptMatch = trimmed.match(/^(\(?[A-Ea-e][\.\)])\s+(.+?)(?=\s+\(?[B-Eb-e][\.\)]\s+)/);
+    if (multiOptMatch && /\s+\(?[B-Eb-e][\.\)]\s+/.test(trimmed)) {
+      const parts = trimmed.split(/(?=\s+\(?[A-Ea-e][\.\)]\s+)/);
+      parts.forEach(p => { if (p.trim()) lines.push(p.trim()); });
+    } else {
+      lines.push(trimmed);
+    }
+  }
+
+  const questions = [];
+  let curQ = null;
+
+  const qRegex = /^(?:no\.?\s*|soal\s*)?(\d+)[\.\)\:\-\]]\s*(.*)/i;
+  const optRegex = /^\(?([A-Ea-e])[\.\)\:\-]\s*(.*)/;
+  const keyRegex = /^(?:kunci(?:\s*jawaban)?|jawaban|jawab|answer|kunci)[\s\:\-]+([A-Ea-e])/i;
+
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+
+    // Cek baris kunci jawaban
+    const keyMatch = line.match(keyRegex);
+    if (keyMatch && curQ) {
+      curQ.jawaban_benar = keyMatch[1].toUpperCase();
+      continue;
+    }
+
+    // Cek apakah baris ini adalah opsi jawaban (A, B, C, D, E)
+    const optMatch = line.match(optRegex);
+    // Cek apakah baris ini adalah nomor soal baru
+    const qMatch = line.match(qRegex);
+
+    if (optMatch && curQ && curQ.pertanyaan) {
+      const letter = optMatch[1].toLowerCase();
+      let optText = optMatch[2] ? optMatch[2].trim() : '';
+
+      // Cek apakah ada tanda bintang jawaban benar (cth: '*B. Jakarta' atau 'B. Jakarta *')
+      if (optText.startsWith('*') || optText.endsWith('*')) {
+        curQ.jawaban_benar = letter.toUpperCase();
+        optText = optText.replace(/\*/g, '').trim();
+      }
+
+      curQ['opsi_' + letter] = optText;
+      continue;
+    }
+
+    if (qMatch && !optMatch) {
+      // Simpan soal sebelumnya jika valid
+      if (curQ && curQ.pertanyaan && (curQ.opsi_a || curQ.opsi_b)) {
+        questions.push(curQ);
+      }
+
+      const qNum = parseInt(qMatch[1]);
+      curQ = {
+        nomor: qNum || (questions.length + 1),
+        pertanyaan: qMatch[2] ? qMatch[2].trim() : '',
+        opsi_a: '',
+        opsi_b: '',
+        opsi_c: '',
+        opsi_d: '',
+        opsi_e: '',
+        jawaban_benar: separatedKeys[qNum] || '',
+        bobot: 1
+      };
+
+      // Cek apakah ada kunci di dalam baris nomor (cth: '1. (Kunci: B) Pertanyaan...')
+      const inlineKey = curQ.pertanyaan.match(/\((?:kunci|jawaban)[\s\:\-]+([A-Ea-e])\)/i);
+      if (inlineKey) {
+        curQ.jawaban_benar = inlineKey[1].toUpperCase();
+        curQ.pertanyaan = curQ.pertanyaan.replace(inlineKey[0], '').trim();
+      }
+
+      continue;
+    }
+
+    // Jika bukan soal baru dan bukan opsi baru:
+    if (curQ) {
+      // Jika belum ada opsi A, berarti masih teks pertanyaan
+      if (!curQ.opsi_a) {
+        curQ.pertanyaan += (curQ.pertanyaan ? '\n' : '') + line;
+      } else {
+        // Jika sudah ada opsi, cari opsi terakhir yang terisi dan tambahkan baris lanjutannya
+        const letters = ['e', 'd', 'c', 'b', 'a'];
+        for (const l of letters) {
+          if (curQ['opsi_' + l]) {
+            curQ['opsi_' + l] += ' ' + line;
+            break;
+          }
+        }
+      }
+    }
+  }
+
+  // Masukkan soal terakhir
+  if (curQ && curQ.pertanyaan && (curQ.opsi_a || curQ.opsi_b)) {
+    questions.push(curQ);
+  }
+
+  return questions;
+}
+
+function triggerParseWordText() {
+  const input = document.getElementById('word-raw-input');
+  const text = (input ? input.value : '').trim();
+
+  if (!text) {
+    Swal.fire('Teks Masih Kosong', 'Silakan tempel (paste) naskah soal dari Word atau unggah berkas .docx terlebih dahulu.', 'warning');
+    return;
+  }
+
+  const parsed = parseWordQuestions(text);
+  if (parsed.length === 0) {
+    Swal.fire({
+      icon: 'warning',
+      title: 'Tidak Ada Soal Terdeteksi',
+      html: `Sistem belum dapat mengenali butir soal pada teks yang dimasukkan.<br><br>
+        Pastikan setiap soal menggunakan nomor (contoh: <code>1. </code> atau <code>1) </code>) 
+        dan pilihan opsi berhuruf (contoh: <code>A. </code>, <code>B. </code>, dst).<br>
+        Klik tombol <strong>"Lihat Contoh Format"</strong> di atas untuk panduan.`,
+      confirmButtonColor: '#1e3c72'
+    });
+    return;
+  }
+
+  wordImportedDataCache = parsed;
+  renderWordPreview();
+
+  const previewSec = document.getElementById('word-preview-section');
+  if (previewSec) {
+    previewSec.classList.remove('d-none');
+    previewSec.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+  }
+
+  const btnSave = document.getElementById('btn-save-word-import');
+  if (btnSave) {
+    btnSave.disabled = false;
+    btnSave.innerHTML = `<i class="bi bi-cloud-arrow-up-fill me-1"></i> Simpan ${wordImportedDataCache.length} Soal ke Bank Soal`;
+  }
+}
+
+function renderWordPreview() {
+  const container = document.getElementById('word-preview-list');
+  if (!container) return;
+
+  let totalSoal = wordImportedDataCache.length;
+  let kunciOk = 0;
+  let kunciMissing = 0;
+
+  wordImportedDataCache.forEach(q => {
+    if (q.jawaban_benar && ['A', 'B', 'C', 'D', 'E'].includes(q.jawaban_benar.toUpperCase())) {
+      kunciOk++;
+    } else {
+      kunciMissing++;
+    }
+  });
+
+  // Update badges
+  const badgeTotal = document.getElementById('badge-word-total');
+  if (badgeTotal) badgeTotal.innerText = `${totalSoal} Soal Terdeteksi`;
+  const badgeOk = document.getElementById('badge-word-kunci-ok');
+  if (badgeOk) badgeOk.innerText = `${kunciOk} Kunci Lengkap`;
+  const badgeMissing = document.getElementById('badge-word-kunci-missing');
+  if (badgeMissing) {
+    badgeMissing.innerText = `${kunciMissing} Belum Ada Kunci`;
+    if (kunciMissing > 0) {
+      badgeMissing.className = 'badge bg-warning text-dark px-3 py-2 rounded-pill fw-bold';
+    } else {
+      badgeMissing.className = 'badge bg-light text-muted px-3 py-2 rounded-pill';
+    }
+  }
+
+  const html = wordImportedDataCache.map((q, idx) => {
+    const activeKey = (q.jawaban_benar || '').toUpperCase();
+    const letters = ['A', 'B', 'C', 'D', 'E'];
+
+    const keyButtons = letters.map(letter => {
+      const isSelected = (activeKey === letter);
+      const btnClass = isSelected ? 'btn-success fw-bold text-white' : 'btn-outline-secondary';
+      return `
+        <button type="button" class="btn btn-sm ${btnClass} px-2 py-0" style="font-size: 0.78rem;" onclick="setWordQuestionKey(${idx}, '${letter}')">
+          ${letter}
+        </button>
+      `;
+    }).join('');
+
+    const optionsHtml = letters.map(letter => {
+      const text = q['opsi_' + letter.toLowerCase()];
+      if (!text) return '';
+      const isCorrect = (activeKey === letter);
+      const optClass = isCorrect ? 'border-success bg-success-subtle text-success fw-bold' : 'border bg-light text-dark';
+      return `
+        <div class="p-1 px-2 rounded mb-1 small d-flex align-items-center gap-2 ${optClass}" style="font-size: 0.82rem;">
+          <span class="badge ${isCorrect ? 'bg-success text-white' : 'bg-secondary text-white'}" style="font-size: 0.72rem;">${letter}</span>
+          <span>${escapeHtml(text)}</span>
+        </div>
+      `;
+    }).join('');
+
+    return `
+      <div class="card mb-3 border ${activeKey ? 'border-success-subtle' : 'border-warning'} shadow-sm">
+        <div class="card-header bg-light py-2 px-3 d-flex justify-content-between align-items-center flex-wrap gap-2">
+          <div class="d-flex align-items-center gap-2">
+            <span class="badge bg-primary rounded-pill">#${q.nomor || (idx + 1)}</span>
+            <span class="small fw-bold text-secondary">Kunci Jawaban:</span>
+            <div class="btn-group btn-group-sm" role="group">
+              ${keyButtons}
+            </div>
+            ${!activeKey ? '<span class="badge bg-warning text-dark" style="font-size: 0.7rem;"><i class="bi bi-exclamation-triangle-fill me-1"></i>Pilih Kunci</span>' : ''}
+          </div>
+          <div class="d-flex align-items-center gap-2">
+            <div class="input-group input-group-sm" style="width: 105px;">
+              <span class="input-group-text px-1" style="font-size: 0.72rem;">Bobot</span>
+              <input type="number" class="form-control form-control-sm text-center px-1" value="${q.bobot || 1}" min="1" max="100" onchange="wordImportedDataCache[${idx}].bobot = parseInt(this.value) || 1">
+            </div>
+            <button type="button" class="btn btn-sm btn-outline-danger py-0 px-2" onclick="deleteWordQuestion(${idx})" title="Hapus butir soal ini">
+              <i class="bi bi-trash"></i>
+            </button>
+          </div>
+        </div>
+        <div class="card-body p-3">
+          <div class="fw-semibold text-dark mb-2" style="white-space: pre-line; font-size: 0.9rem;">${escapeHtml(q.pertanyaan)}</div>
+          <div class="ps-1">
+            ${optionsHtml}
+          </div>
+        </div>
+      </div>
+    `;
+  }).join('');
+
+  container.innerHTML = html;
+}
+
+function setWordQuestionKey(index, key) {
+  if (wordImportedDataCache[index]) {
+    wordImportedDataCache[index].jawaban_benar = key.toUpperCase();
+    renderWordPreview();
+  }
+}
+
+function deleteWordQuestion(index) {
+  if (wordImportedDataCache[index]) {
+    wordImportedDataCache.splice(index, 1);
+    // Renumber
+    wordImportedDataCache.forEach((q, i) => { q.nomor = i + 1; });
+    renderWordPreview();
+
+    const btnSave = document.getElementById('btn-save-word-import');
+    if (btnSave) {
+      if (wordImportedDataCache.length > 0) {
+        btnSave.disabled = false;
+        btnSave.innerHTML = `<i class="bi bi-cloud-arrow-up-fill me-1"></i> Simpan ${wordImportedDataCache.length} Soal ke Bank Soal`;
+      } else {
+        btnSave.disabled = true;
+        btnSave.innerHTML = `<i class="bi bi-cloud-arrow-up-fill me-1"></i> Simpan ke Bank Soal`;
+        const previewSec = document.getElementById('word-preview-section');
+        if (previewSec) previewSec.classList.add('d-none');
+      }
+    }
+  }
+}
+
+async function saveWordImportedData() {
+  if (!activePaketId) {
+    Swal.fire('Pilih Paket', 'Silakan pilih paket soal terlebih dahulu sebelum menyimpan.', 'warning');
+    return;
+  }
+
+  if (!wordImportedDataCache || wordImportedDataCache.length === 0) {
+    Swal.fire('Tidak Ada Soal', 'Belum ada data butir soal yang diproses.', 'warning');
+    return;
+  }
+
+  // Cek apakah ada soal yang belum memiliki kunci
+  const missingKeysCount = wordImportedDataCache.filter(q => !q.jawaban_benar || !['A','B','C','D','E'].includes(q.jawaban_benar.toUpperCase())).length;
+  if (missingKeysCount > 0) {
+    const confirmAsk = await Swal.fire({
+      icon: 'warning',
+      title: 'Ada Kunci Belum Diisi',
+      html: `Terdapat <strong>${missingKeysCount} soal</strong> yang belum memiliki kunci jawaban.<br><br>Apakah Anda ingin tetap menyimpan? Soal tanpa kunci akan otomatis disetel ke opsi <strong>A</strong>.`,
+      showCancelButton: true,
+      confirmButtonText: 'Ya, Simpan Semua',
+      cancelButtonText: 'Periksa Kembali',
+      confirmButtonColor: '#198754',
+      cancelButtonColor: '#6c757d'
+    });
+    if (!confirmAsk.isConfirmed) return;
+  }
+
+  const btn = document.getElementById('btn-save-word-import');
+  btn.disabled = true;
+
+  Swal.fire({
+    title: 'Menyimpan Soal...',
+    html: `Menyimpan <strong>${wordImportedDataCache.length}</strong> butir soal ke Bank Soal...`,
+    allowOutsideClick: false,
+    didOpen: () => { Swal.showLoading(); }
+  });
+
+  try {
+    const payloadSoal = wordImportedDataCache.map((s, idx) => ({
+      paket_soal_id: activePaketId,
+      nomor: s.nomor || (idx + 1),
+      pertanyaan: s.pertanyaan,
+      opsi_a: s.opsi_a || '',
+      opsi_b: s.opsi_b || '',
+      opsi_c: s.opsi_c || '',
+      opsi_d: s.opsi_d || '',
+      opsi_e: s.opsi_e || '',
+      jawaban_benar: (s.jawaban_benar && ['A','B','C','D','E'].includes(s.jawaban_benar.toUpperCase())) ? s.jawaban_benar.toUpperCase() : 'A',
+      bobot: s.bobot || 1
+    }));
+
+    await DB.bulkInsertSoal(payloadSoal);
+
+    if (importWordModalInstance) {
+      importWordModalInstance.hide();
+    }
+
+    Swal.fire({
+      icon: 'success',
+      title: 'Import Word Berhasil!',
+      text: `${payloadSoal.length} Butir soal berhasil disimpan ke Bank Soal.`,
+      confirmButtonColor: '#1e3c72'
+    });
+
+    await loadSoal();
+    await loadDashboardStats();
+  } catch (err) {
+    console.error('Gagal menyimpan soal import Word:', err);
+    Swal.fire('Gagal Menyimpan', err.message || 'Terjadi kesalahan saat menyimpan soal ke database.', 'error');
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+// -------------------------------------------------------------
 // BACKUP & RESTORE UTILITIES
 // -------------------------------------------------------------
 
@@ -6118,3 +6706,11 @@ window.goToPesertaPage = goToPesertaPage;
 window.changeHasilPageSize = changeHasilPageSize;
 window.goToHasilPage = goToHasilPage;
 window.togglePasswordVisibility = togglePasswordVisibility;
+window.openImportWordModal = openImportWordModal;
+window.handleWordFileUpload = handleWordFileUpload;
+window.loadSampleWordText = loadSampleWordText;
+window.clearWordRawInput = clearWordRawInput;
+window.triggerParseWordText = triggerParseWordText;
+window.setWordQuestionKey = setWordQuestionKey;
+window.deleteWordQuestion = deleteWordQuestion;
+window.saveWordImportedData = saveWordImportedData;
