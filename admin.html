@@ -571,7 +571,7 @@
                     </select>
                   </div>
                 </div>
-                <button class="btn btn-primary btn-sm w-100 mb-3" onclick="openPaketForm()">
+                <button class="btn btn-primary btn-sm w-100 mb-3" id="btn-create-paket" onclick="openPaketForm()">
                   <i class="bi bi-plus-circle me-1"></i> Buat Paket Baru
                 </button>
                 <div class="list-group" id="paket-list-container">
@@ -620,7 +620,7 @@
               <div class="glass-card p-5 text-center h-100 text-muted d-flex flex-column justify-content-center align-items-center" id="paket-empty-state">
                 <i class="bi bi-collection text-secondary mb-3" style="font-size: 3rem;"></i>
                 <h5>Pilih Paket Soal</h5>
-                <p>Silakan pilih paket di samping kiri, atau buat paket baru untuk mengelola soal ujian.</p>
+                <p id="paket-empty-help">Silakan pilih paket di samping kiri, atau buat paket baru untuk mengelola soal ujian.</p>
               </div>
             </div>
           </div>
@@ -1692,13 +1692,13 @@
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   
   <!-- CBT Modules -->
-  <script src="js/config.js?v=50"></script>
-  <script src="js/supabase-config.js?v=50"></script>
-  <script src="js/db-adapter.js?v=50"></script>
-  <script src="js/auth.js?v=50"></script>
-  <script src="js/excel-helpers.js?v=50"></script>
-  <script src="js/templates.js?v=50"></script>
-  <script src="js/admin.js?v=50"></script>
+  <script src="js/config.js?v=51"></script>
+  <script src="js/supabase-config.js?v=51"></script>
+  <script src="js/db-adapter.js?v=51"></script>
+  <script src="js/auth.js?v=51"></script>
+  <script src="js/excel-helpers.js?v=51"></script>
+  <script src="js/templates.js?v=51"></script>
+  <script src="js/admin.js?v=51"></script>
   <script>
     // Dark mode logic
     const themeToggleBtn = document.getElementById('theme-toggle-admin');

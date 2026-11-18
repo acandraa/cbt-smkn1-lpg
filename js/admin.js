@@ -397,6 +397,16 @@ function applyGuruRoleUI() {
   const lblNilai = document.getElementById('nav-label-nilai');
   if (lblNilai) lblNilai.innerText = 'Nilai & Download';
 
+  // Sembunyikan tombol Buat Paket Baru dan Hapus Paket untuk Guru (Wadah paket disiapkan oleh Admin)
+  const btnCreatePaket = document.getElementById('btn-create-paket');
+  if (btnCreatePaket) btnCreatePaket.classList.add('d-none');
+
+  const btnDeletePaket = document.getElementById('btn-delete-paket');
+  if (btnDeletePaket) btnDeletePaket.classList.add('d-none');
+
+  const emptyHelp = document.getElementById('paket-empty-help');
+  if (emptyHelp) emptyHelp.innerText = 'Silakan pilih paket soal di samping kiri untuk mengelola butir soal ujian.';
+
   // 3. Banner informasi di halaman Soal & Nilai: chip terstruktur rapi
   const bannerSoal = document.getElementById('guru-scope-banner-soal');
   const bannerSoalMapel = document.getElementById('guru-banner-mapel-soal');
@@ -4271,6 +4281,15 @@ function setPaketNamaPreset(presetName) {
 }
 
 function openPaketForm() {
+  if (isGuruMode()) {
+    Swal.fire({
+      icon: 'info',
+      title: 'Akses Dibatasi',
+      text: 'Wadah paket soal telah disiapkan dan dikelola oleh Admin CBT. Akun Guru bertugas untuk mengisi dan mengelola butir soal.'
+    });
+    return;
+  }
+
   document.getElementById('paketFormTitle').innerText = "Buat Paket Soal Baru";
   document.getElementById('form-paket-crud').reset();
   document.getElementById('paket-id').value = "";
@@ -4418,6 +4437,14 @@ function editPaket() {
 async function handlePaketCrudSubmit(e) {
   e.preventDefault();
   const id = document.getElementById('paket-id').value;
+  if (!id && isGuruMode()) {
+    Swal.fire({
+      icon: 'warning',
+      title: 'Akses Dibatasi',
+      text: 'Akun Guru tidak diizinkan membuat paket ujian baru. Wadah paket disiapkan oleh Admin CBT.'
+    });
+    return;
+  }
   const nama = document.getElementById('crud-paket-nama').value.trim();
   const jurusan = document.getElementById('crud-paket-jurusan').value.trim();
   const kelas = document.getElementById('crud-paket-kelas').value.trim();
@@ -4522,6 +4549,14 @@ async function handlePaketCrudSubmit(e) {
 }
 
 async function deletePaket() {
+  if (isGuruMode()) {
+    Swal.fire({
+      icon: 'warning',
+      title: 'Akses Dibatasi',
+      text: 'Wadah paket soal dikelola oleh Admin CBT dan tidak dapat dihapus oleh akun Guru.'
+    });
+    return;
+  }
   if (!activePaketId) return;
   const p = allPaket.find(item => item.id === activePaketId);
 
@@ -4586,6 +4621,12 @@ async function selectPaket(id) {
     ${kBadge}
     ${guruBadge}
   `;
+
+  const btnDelete = document.getElementById('btn-delete-paket');
+  if (btnDelete) {
+    if (isGuruMode()) btnDelete.classList.add('d-none');
+    else btnDelete.classList.remove('d-none');
+  }
   
   let jadwalStr = 'Jadwal belum diatur (Peserta tidak bisa mengakses)';
   if (p.jadwal_mulai && p.jadwal_selesai) {
