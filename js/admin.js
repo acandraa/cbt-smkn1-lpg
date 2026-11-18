@@ -10,6 +10,7 @@ let kelasModalInstance = null;
 let cetakKartuModalInstance = null;
 let aiGeneratorModalInstance = null;
 let guruFormModalInstance = null;
+let penugasanGuruModalInstance = null;
 let aiGeneratedQuestions = [];
 
 let currentAdminUser = null;
@@ -50,6 +51,8 @@ document.addEventListener("DOMContentLoaded", async () => {
   if (aiModalEl) aiGeneratorModalInstance = new bootstrap.Modal(aiModalEl);
   const guruModalEl = document.getElementById('guruFormModal');
   if (guruModalEl) guruFormModalInstance = new bootstrap.Modal(guruModalEl);
+  const penugasanGuruEl = document.getElementById('modal-penugasan-guru');
+  if (penugasanGuruEl) penugasanGuruModalInstance = new bootstrap.Modal(penugasanGuruEl);
 
   // Form Handlers
   document.getElementById('form-setup-supabase').addEventListener('submit', handleSupabaseSetup);
@@ -141,18 +144,69 @@ function getGuruAllowedPaketIds() {
   return [];
 }
 
+function getGuruPenugasanList() {
+  if (!isGuruMode() || !currentAdminUser) return [];
+  const raw = currentAdminUser.penugasan_mapel;
+  if (Array.isArray(raw)) return raw;
+  if (typeof raw === 'string' && raw.trim()) {
+    try {
+      const parsed = JSON.parse(raw);
+      if (Array.isArray(parsed)) return parsed;
+    } catch (e) {}
+  }
+  return [];
+}
+
 function isPaketAllowedForGuru(paket) {
   if (!isGuruMode()) return true;
   if (!paket) return false;
 
-  // 1. Jika Guru memiliki penugasan paket spesifik (Solusi 1):
-  // Hak akses dikunci ketat HANYA pada paket-paket yang ditugaskan!
+  // 1. Jika paket soal secara spesifik diberikan via paket_ids, langsung lolos!
   const allowedIds = getGuruAllowedPaketIds();
-  if (allowedIds.length > 0) {
-    return allowedIds.includes(String(paket.id));
+  if (allowedIds.length > 0 && allowedIds.includes(String(paket.id))) {
+    return true;
   }
 
-  // 2. Jika tidak ada penugasan paket spesifik, gunakan pencocokan nama mapel, jurusan, dan kelas:
+  // 2. Cek apakah cocok dengan salah satu Penugasan Mapel (Multi-Mapel & Tingkat)
+  const penugasanList = getGuruPenugasanList();
+  if (penugasanList.length > 0) {
+    const pkNama = String(paket.nama_paket || '').toLowerCase().trim();
+    const pkJurusan = String(paket.jurusan || '').trim().toUpperCase();
+    const pkKelas = String(paket.kelas || '').trim().toUpperCase();
+
+    const matchAny = penugasanList.some(item => {
+      const itemMapel = String(item.mapel || '').toLowerCase().trim();
+      if (!itemMapel) return false;
+      const mapelMatch = pkNama.includes(itemMapel) || itemMapel.includes(pkNama);
+      if (!mapelMatch) return false;
+
+      // Cek jurusan
+      const itemJurusan = String(item.jurusan || '').trim().toUpperCase();
+      if (itemJurusan && itemJurusan !== 'SEMUA') {
+        if (pkJurusan && pkJurusan !== 'SEMUA' && pkJurusan !== itemJurusan) {
+          return false;
+        }
+      }
+
+      // Cek tingkat/kelas
+      const itemTingkat = String(item.tingkat || '').trim().toUpperCase();
+      if (itemTingkat && itemTingkat !== 'SEMUA') {
+        if (pkKelas && pkKelas !== 'SEMUA') {
+          const tVal = itemTingkat.startsWith('TINGKAT:') ? itemTingkat.replace('TINGKAT:', '').trim() : itemTingkat;
+          const kMatch = checkKelasMatch(pkKelas, tVal).match || checkKelasMatch(pkKelas, `Kelas ${tVal}`).match || checkKelasMatch(itemTingkat, pkKelas).match;
+          if (!kMatch) return false;
+        }
+      }
+
+      return true;
+    });
+
+    if (matchAny) return true;
+    // Jika guru sudah punya daftar penugasan atau paket_ids spesifik dan paket ini tidak cocok, tolak
+    return false;
+  }
+
+  // 3. Fallback jika penugasan_mapel belum dikonfigurasi: gunakan pencocokan nama mapel legacy
   const namaPaket = String(paket.nama_paket || '').toLowerCase().trim();
   if (!namaPaket) return false;
   const keywords = getGuruMapelKeywords();
@@ -163,7 +217,6 @@ function isPaketAllowedForGuru(paket) {
   const guruJurusans = getGuruJurusanList();
   if (guruJurusans.length > 0) {
     const pkJurusan = String(paket.jurusan || '').trim().toUpperCase();
-    // Boleh jika paket bersifat umum ('SEMUA' atau kosong), atau jurusannya termasuk yang diampu guru
     if (pkJurusan && pkJurusan !== 'SEMUA' && !guruJurusans.includes(pkJurusan)) {
       return false;
     }
@@ -193,15 +246,24 @@ function isHasilAllowedForGuru(hasil) {
   if (!isGuruMode()) return true;
   if (!hasil) return false;
 
-  // 1. Jika Guru memiliki penugasan paket spesifik (Solusi 1):
-  // HANYA tampilkan hasil ujian siswa yang mengerjakan paket-paket yang ditugaskan!
-  // Siswa dari kelas/jurusan manapun yang mengerjakan paket tersebut PASTI tampil.
+  // 1. Cek paket_ids spesifik
   const allowedIds = getGuruAllowedPaketIds();
-  if (allowedIds.length > 0) {
-    return !!(hasil.paket_soal_id && allowedIds.includes(String(hasil.paket_soal_id)));
+  if (hasil.paket_soal_id && allowedIds.includes(String(hasil.paket_soal_id))) {
+    return true;
   }
 
-  // 2. Jika tidak ada penugasan paket spesifik, gunakan pencocokan nama mapel, jurusan, dan kelas:
+  // 2. Cek apakah paket soal hasil ujian cocok dengan penugasan_mapel guru
+  const penugasanList = getGuruPenugasanList();
+  if (penugasanList.length > 0) {
+    const sourcePakets = (allPaketUnfiltered && allPaketUnfiltered.length > 0) ? allPaketUnfiltered : (allPaket || []);
+    const pk = sourcePakets.find(p => String(p.id) === String(hasil.paket_soal_id));
+    if (pk && isPaketAllowedForGuru(pk)) {
+      return true;
+    }
+    return false;
+  }
+
+  // 3. Fallback jika tidak ada penugasan_mapel & allowedIds
   let mapelOrPaketMatch = false;
   if (hasil.paket_soal_id && Array.isArray(allPaket) && allPaket.some(pk => String(pk.id) === String(hasil.paket_soal_id))) {
     mapelOrPaketMatch = true;
@@ -214,7 +276,7 @@ function isHasilAllowedForGuru(hasil) {
   }
   if (!mapelOrPaketMatch) return false;
 
-  // Cek kecocokan Jurusan Peserta (jika Guru ditugaskan ke jurusan spesifik)
+  // Cek kecocokan Jurusan Peserta
   const guruJurusans = getGuruJurusanList();
   if (guruJurusans.length > 0) {
     const studentJurusan = String((hasil.peserta && hasil.peserta.jurusan) || '').trim().toUpperCase();
@@ -223,7 +285,7 @@ function isHasilAllowedForGuru(hasil) {
     }
   }
 
-  // Cek kecocokan Kelas / Tingkat Peserta (jika Guru ditugaskan ke kelas/tingkat spesifik)
+  // Cek kecocokan Kelas / Tingkat Peserta
   const guruKelas = getGuruKelasList();
   if (guruKelas.length > 0) {
     const studentKelas = String((hasil.peserta && hasil.peserta.kelas) || '').trim().toUpperCase();
@@ -2376,8 +2438,8 @@ function renderGuruTable(list) {
   if (!list || list.length === 0) {
     tbody.innerHTML = `
       <tr>
-        <td colspan="7" class="text-center py-4 text-muted">
-          Belum ada akun guru mata pelajaran. Klik tombol <strong>+ Tambah Akun Guru</strong> di kanan atas untuk membuat akun guru baru.
+        <td colspan="6" class="text-center py-4 text-muted">
+          Belum ada akun guru mata pelajaran. Klik tombol <strong>+ Tambah Akun Guru</strong> di kanan atas untuk membuat akun baru.
         </td>
       </tr>
     `;
@@ -2390,30 +2452,43 @@ function renderGuruTable(list) {
   });
 
   const rows = list.map((g, idx) => {
-    const mapelBadges = String(g.mapel_diampu || '')
-      .split(',')
-      .map(m => m.trim())
-      .filter(Boolean)
-      .map(m => `<span class="badge bg-success-subtle text-success border border-success-subtle me-1 mb-1">${escapeHtml(m)}</span>`)
-      .join('') || '<span class="text-muted">-</span>';
+    // 1. Tampilkan daftar penugasan mapel (Multi-Mapel & Tingkat)
+    let penugasanList = [];
+    if (Array.isArray(g.penugasan_mapel)) {
+      penugasanList = g.penugasan_mapel;
+    } else if (typeof g.penugasan_mapel === 'string' && g.penugasan_mapel.trim()) {
+      try {
+        const parsed = JSON.parse(g.penugasan_mapel);
+        if (Array.isArray(parsed)) penugasanList = parsed;
+      } catch (e) {}
+    }
 
-    const jurusanBadges = String(g.jurusan_diampu || '')
-      .split(',')
-      .map(j => j.trim())
-      .filter(Boolean)
-      .map(j => `<span class="badge bg-info-subtle text-dark border me-1 mb-1"><i class="bi bi-diagram-3 me-1"></i>${escapeHtml(j)}</span>`)
-      .join('') || `<span class="badge bg-secondary-subtle text-secondary border me-1 mb-1">Semua Jurusan</span>`;
+    let penugasanHtml = '';
+    if (penugasanList.length > 0) {
+      penugasanHtml = penugasanList.map(item => {
+        const jText = (item.jurusan && item.jurusan.toUpperCase() !== 'SEMUA') ? item.jurusan : 'Semua Jurusan';
+        let kText = 'Semua Kelas';
+        if (item.tingkat && item.tingkat.toUpperCase() !== 'SEMUA') {
+          kText = item.tingkat.toUpperCase().startsWith('TINGKAT:') ? `Tingkat ${item.tingkat.split(':')[1]}` : item.tingkat;
+        }
+        return `
+          <div class="d-inline-flex align-items-center gap-1 border rounded px-2 py-1 bg-light me-1 mb-1 shadow-sm" style="font-size: 0.8rem;">
+            <i class="bi bi-book text-primary"></i>
+            <strong class="text-dark">${escapeHtml(item.mapel)}</strong>
+            <span class="badge bg-primary-subtle text-primary border" style="font-size: 0.68rem;">${escapeHtml(kText)}</span>
+            <span class="badge bg-info-subtle text-dark border" style="font-size: 0.68rem;">${escapeHtml(jText)}</span>
+          </div>
+        `;
+      }).join('');
+    } else if (g.mapel_diampu) {
+      const mapels = String(g.mapel_diampu).split(',').map(m => m.trim()).filter(Boolean);
+      penugasanHtml = mapels.map(m => `<span class="badge bg-success-subtle text-success border me-1 mb-1">${escapeHtml(m)}</span>`).join('') +
+        `<div class="small text-muted mt-1"><span class="badge bg-secondary-subtle text-secondary border me-1">${escapeHtml(g.kelas_diampu || 'Semua Kelas')}</span> <span class="badge bg-secondary-subtle text-secondary border">${escapeHtml(g.jurusan_diampu || 'Semua Jurusan')}</span></div>`;
+    } else {
+      penugasanHtml = `<span class="badge bg-warning-subtle text-dark border"><i class="bi bi-exclamation-circle me-1"></i>Belum ada mapel diatur</span>`;
+    }
 
-    const kelasBadges = String(g.kelas_diampu || '')
-      .split(',')
-      .map(k => k.trim())
-      .filter(Boolean)
-      .map(k => {
-        const lbl = k.toUpperCase().startsWith('TINGKAT:') ? `Tingkat ${k.split(':')[1]}` : k;
-        return `<span class="badge bg-warning-subtle text-dark border border-warning-subtle me-1 mb-1"><i class="bi bi-mortarboard me-1"></i>${escapeHtml(lbl)}</span>`;
-      })
-      .join('') || `<span class="badge bg-secondary-subtle text-secondary border me-1 mb-1">Semua Kelas</span>`;
-
+    // 2. Tampilkan paket soal terkait
     let paketIds = [];
     if (Array.isArray(g.paket_ids)) {
       paketIds = g.paket_ids;
@@ -2428,27 +2503,26 @@ function renderGuruTable(list) {
       ? paketIds.map(pid => {
           const pkObj = paketLookup.get(String(pid));
           const pName = pkObj ? pkObj.nama_paket : 'Paket Terkait';
-          return `<span class="badge bg-primary-subtle text-primary border border-primary-subtle me-1 mb-1"><i class="bi bi-journal-check me-1"></i>${escapeHtml(pName)}</span>`;
+          return `<span class="badge bg-primary-subtle text-primary border border-primary-subtle me-1 mb-1" style="font-size: 0.72rem;"><i class="bi bi-journal-check me-1"></i>${escapeHtml(pName)}</span>`;
         }).join('')
-      : `<span class="text-muted small"><i class="bi bi-magic me-1"></i>Otomatis sesuai Mapel, Jurusan & Kelas</span>`;
+      : `<span class="text-muted small"><i class="bi bi-magic me-1"></i>Otomatis</span>`;
 
     return `
       <tr>
         <td>${idx + 1}</td>
         <td class="font-monospace fw-bold text-primary">${escapeHtml(g.username)}</td>
         <td class="fw-semibold">${escapeHtml(g.nama_lengkap)}</td>
-        <td>${mapelBadges}</td>
-        <td>
-          <div>${jurusanBadges}</div>
-          <div class="mt-1">${kelasBadges}</div>
-        </td>
+        <td>${penugasanHtml}</td>
         <td>${paketBadges}</td>
         <td class="text-center">
-          <div class="btn-group btn-group-sm">
-            <button class="btn btn-outline-primary" onclick="editGuru('${escapeAttr(g.id)}')" title="Edit Akun & Mapel Guru">
-              <i class="bi bi-pencil"></i> Edit
+          <div class="d-flex align-items-center justify-content-center gap-1 flex-wrap">
+            <button class="btn btn-sm btn-primary py-1 px-2" onclick="openPenugasanGuruModal('${escapeAttr(g.id)}')" title="Tambah & Atur Mapel Guru Ini">
+              <i class="bi bi-journal-plus me-1"></i>+ Atur Mapel
             </button>
-            <button class="btn btn-outline-danger" onclick="deleteGuru('${escapeAttr(g.id)}', '${escapeAttr(g.nama_lengkap)}')" title="Hapus Akun Guru">
+            <button class="btn btn-sm btn-outline-secondary py-1 px-2" onclick="editGuru('${escapeAttr(g.id)}')" title="Edit Akun Guru">
+              <i class="bi bi-pencil"></i>
+            </button>
+            <button class="btn btn-sm btn-outline-danger py-1 px-2" onclick="deleteGuru('${escapeAttr(g.id)}', '${escapeAttr(g.nama_lengkap)}')" title="Hapus Akun">
               <i class="bi bi-trash"></i>
             </button>
           </div>
@@ -2748,7 +2822,7 @@ async function handleGuruCrudSubmit(e) {
   btn.disabled = true;
 
   try {
-    await DB.saveGuru(id, {
+    const saved = await DB.saveGuru(id, {
       username,
       nama_lengkap: nama,
       mapel_diampu: mapel,
@@ -2757,9 +2831,25 @@ async function handleGuruCrudSubmit(e) {
       paket_ids: checkedPakets
     }, pass);
 
-    Swal.fire('Berhasil', `Akun guru "${nama}" berhasil disimpan.`, 'success');
     if (guruFormModalInstance) guruFormModalInstance.hide();
     await loadGuru();
+
+    if (!id && saved && saved.id) {
+      const ask = await Swal.fire({
+        title: 'Akun Guru Dibuat!',
+        text: `Akun untuk "${nama}" berhasil dibuat. Ingin langsung menambahkan mata pelajaran & tingkat kelas yang diampu?`,
+        icon: 'success',
+        showCancelButton: true,
+        confirmButtonText: '<i class="bi bi-journal-plus me-1"></i> Ya, Tambah Mapel Sekarang',
+        cancelButtonText: 'Nanti Saja',
+        confirmButtonColor: '#0d6efd'
+      });
+      if (ask.isConfirmed) {
+        openPenugasanGuruModal(saved.id);
+      }
+    } else {
+      Swal.fire('Berhasil', `Akun guru "${nama}" berhasil disimpan.`, 'success');
+    }
   } catch (err) {
     Swal.fire('Gagal Menyimpan', err.message || 'Terjadi kesalahan saat menyimpan akun guru.', 'error');
   } finally {
@@ -2787,6 +2877,225 @@ async function deleteGuru(id, name) {
     } catch (err) {
       Swal.fire('Gagal Menghapus', err.message || 'Terjadi kesalahan.', 'error');
     }
+  }
+}
+
+// -------------------------------------------------------------
+// PENUGASAN MAPEL GURU (MULTI-MAPEL, TINGKAT & JURUSAN)
+// -------------------------------------------------------------
+
+function openPenugasanGuruModal(id) {
+  const g = (allGuru || []).find(item => String(item.id) === String(id));
+  if (!g) return;
+
+  document.getElementById('penugasan-guru-id').value = g.id;
+  document.getElementById('penugasanGuruTitle').innerHTML = `
+    <i class="bi bi-journal-bookmark-fill me-2 text-primary"></i>Atur Mata Pelajaran: <strong>${escapeHtml(g.nama_lengkap || g.username)}</strong>
+  `;
+
+  const tbody = document.getElementById('tbody-penugasan-mapel');
+  if (tbody) tbody.innerHTML = '';
+
+  let list = [];
+  if (Array.isArray(g.penugasan_mapel)) {
+    list = g.penugasan_mapel;
+  } else if (typeof g.penugasan_mapel === 'string' && g.penugasan_mapel.trim()) {
+    try {
+      const parsed = JSON.parse(g.penugasan_mapel);
+      if (Array.isArray(parsed)) list = parsed;
+    } catch (e) {}
+  }
+
+  // Jika penugasan_mapel masih kosong tapi punya mapel_diampu legacy, konversi otomatis
+  if (list.length === 0 && g.mapel_diampu) {
+    const mapels = String(g.mapel_diampu).split(',').map(m => m.trim()).filter(Boolean);
+    const jList = String(g.jurusan_diampu || '').split(',').map(j => j.trim()).filter(Boolean);
+    const kList = String(g.kelas_diampu || '').split(',').map(k => k.trim()).filter(Boolean);
+    mapels.forEach(m => {
+      list.push({
+        mapel: m,
+        tingkat: kList[0] || '',
+        jurusan: jList[0] || ''
+      });
+    });
+  }
+
+  if (list.length > 0) {
+    list.forEach(item => addPenugasanRow(item));
+  } else {
+    addPenugasanRow(); // buat 1 baris kosong siap diisi
+  }
+
+  if (penugasanGuruModalInstance) {
+    penugasanGuruModalInstance.show();
+  }
+}
+
+function addPenugasanRow(data = {}) {
+  const tbody = document.getElementById('tbody-penugasan-mapel');
+  if (!tbody) return;
+
+  const currentMapel = data.mapel || '';
+  const currentTingkat = (data.tingkat || '').toUpperCase();
+  const currentJurusan = (data.jurusan || '').toUpperCase();
+
+  // Opsi Tingkat / Kelas
+  const tingkatOptions = [
+    { value: '', label: 'Semua Kelas (Umum)' },
+    { value: 'TINGKAT:X', label: 'Tingkat X (Semua Rombel Kelas 10)' },
+    { value: 'TINGKAT:XI', label: 'Tingkat XI (Semua Rombel Kelas 11)' },
+    { value: 'TINGKAT:XII', label: 'Tingkat XII (Semua Rombel Kelas 12)' }
+  ];
+
+  (allKelas || []).forEach(k => {
+    const kName = typeof k === 'string' ? k : (k.nama_kelas || k.nama || '');
+    if (kName && !tingkatOptions.some(o => o.value.toUpperCase() === kName.toUpperCase())) {
+      tingkatOptions.push({ value: kName, label: `Rombel ${kName}` });
+    }
+  });
+
+  const optTingkatHtml = tingkatOptions.map(opt => {
+    const selected = (opt.value.toUpperCase() === currentTingkat || (!opt.value && (!currentTingkat || currentTingkat === 'SEMUA'))) ? 'selected' : '';
+    return `<option value="${escapeAttr(opt.value)}" ${selected}>${escapeHtml(opt.label)}</option>`;
+  }).join('');
+
+  // Opsi Jurusan
+  const jurusanOptions = [
+    { value: '', label: 'Semua Jurusan (Umum)' }
+  ];
+
+  (allJurusan || []).forEach(j => {
+    const jName = typeof j === 'string' ? j : (j.kode || j.nama || '');
+    if (jName && !jurusanOptions.some(o => o.value.toUpperCase() === jName.toUpperCase())) {
+      jurusanOptions.push({ value: jName, label: jName });
+    }
+  });
+
+  const optJurusanHtml = jurusanOptions.map(opt => {
+    const selected = (opt.value.toUpperCase() === currentJurusan || (!opt.value && (!currentJurusan || currentJurusan === 'SEMUA'))) ? 'selected' : '';
+    return `<option value="${escapeAttr(opt.value)}" ${selected}>${escapeHtml(opt.label)}</option>`;
+  }).join('');
+
+  const tr = document.createElement('tr');
+  tr.innerHTML = `
+    <td>
+      <input type="text" class="form-control form-control-sm penugasan-mapel-input" placeholder="Nama mapel (cth: Matematika, Koding)" value="${escapeAttr(currentMapel)}" required>
+    </td>
+    <td>
+      <select class="form-select form-select-sm penugasan-tingkat-select">
+        ${optTingkatHtml}
+      </select>
+    </td>
+    <td>
+      <select class="form-select form-select-sm penugasan-jurusan-select">
+        ${optJurusanHtml}
+      </select>
+    </td>
+    <td class="text-center">
+      <button type="button" class="btn btn-outline-danger btn-sm p-1" onclick="this.closest('tr').remove()" title="Hapus baris mapel ini">
+        <i class="bi bi-trash"></i>
+      </button>
+    </td>
+  `;
+  tbody.appendChild(tr);
+}
+
+async function savePenugasanGuru() {
+  const guruId = document.getElementById('penugasan-guru-id').value;
+  const g = (allGuru || []).find(item => String(item.id) === String(guruId));
+  if (!g) return;
+
+  const rows = document.querySelectorAll('#tbody-penugasan-mapel tr');
+  const penugasanList = [];
+  rows.forEach(tr => {
+    const mapel = (tr.querySelector('.penugasan-mapel-input')?.value || '').trim();
+    const tingkat = (tr.querySelector('.penugasan-tingkat-select')?.value || '').trim();
+    const jurusan = (tr.querySelector('.penugasan-jurusan-select')?.value || '').trim();
+    if (mapel) {
+      penugasanList.push({ mapel, tingkat, jurusan });
+    }
+  });
+
+  const btn = document.getElementById('btn-save-penugasan-guru');
+  btn.disabled = true;
+
+  try {
+    const autoCreatePaket = document.getElementById('chk-auto-create-paket')?.checked;
+    let updatedPaketIds = Array.isArray(g.paket_ids) ? [...g.paket_ids] : [];
+    if (typeof g.paket_ids === 'string' && g.paket_ids.trim()) {
+      try { updatedPaketIds = JSON.parse(g.paket_ids) || []; } catch (e) {}
+    }
+    updatedPaketIds = updatedPaketIds.map(String);
+
+    if (autoCreatePaket && penugasanList.length > 0) {
+      const sourcePakets = (allPaketUnfiltered && allPaketUnfiltered.length > 0) ? allPaketUnfiltered : (allPaket || []);
+      
+      for (const item of penugasanList) {
+        const tVal = item.tingkat ? (item.tingkat.startsWith('TINGKAT:') ? `Tingkat ${item.tingkat.split(':')[1]}` : item.tingkat) : '';
+        const jVal = item.jurusan || '';
+        
+        const existingPaket = sourcePakets.find(p => {
+          const pName = String(p.nama_paket || '').toLowerCase();
+          const mName = item.mapel.toLowerCase();
+          const pJ = String(p.jurusan || '').toUpperCase();
+          const pK = String(p.kelas || '').toUpperCase();
+          const matchM = pName.includes(mName);
+          const matchJ = (!jVal && (!pJ || pJ === 'SEMUA')) || (pJ === jVal.toUpperCase());
+          const matchK = (!item.tingkat && (!pK || pK === 'SEMUA')) || (pK === item.tingkat.toUpperCase());
+          return matchM && matchJ && matchK;
+        });
+
+        if (!existingPaket) {
+          let newName = item.mapel;
+          if (tVal) newName += ` - ${tVal}`;
+          if (jVal) newName += ` (${jVal})`;
+
+          const created = await DB.savePaket('', {
+            nama_paket: newName,
+            jurusan: jVal || null,
+            kelas: item.tingkat || null,
+            jadwal_mulai: null,
+            jadwal_selesai: null
+          });
+
+          if (created && created.id) {
+            if (!updatedPaketIds.includes(String(created.id))) {
+              updatedPaketIds.push(String(created.id));
+            }
+          }
+        } else {
+          if (!updatedPaketIds.includes(String(existingPaket.id))) {
+            updatedPaketIds.push(String(existingPaket.id));
+          }
+        }
+      }
+    }
+
+    const uniqueMapels = Array.from(new Set(penugasanList.map(p => p.mapel).filter(Boolean)));
+    const uniqueJurusans = Array.from(new Set(penugasanList.map(p => p.jurusan).filter(Boolean)));
+    const uniqueTingkats = Array.from(new Set(penugasanList.map(p => p.tingkat).filter(Boolean)));
+
+    await DB.saveGuru(g.id, {
+      username: g.username,
+      nama_lengkap: g.nama_lengkap,
+      mapel_diampu: uniqueMapels.join(', '),
+      jurusan_diampu: uniqueJurusans.join(', '),
+      kelas_diampu: uniqueTingkats.join(', '),
+      paket_ids: updatedPaketIds,
+      penugasan_mapel: penugasanList
+    });
+
+    if (penugasanGuruModalInstance) {
+      penugasanGuruModalInstance.hide();
+    }
+
+    Swal.fire('Berhasil Disimpan', `Daftar mata pelajaran untuk guru "${g.nama_lengkap}" berhasil diperbarui.`, 'success');
+    await loadGuru();
+    await loadPaket();
+  } catch (err) {
+    Swal.fire('Gagal Menyimpan', err.message || 'Terjadi kesalahan.', 'error');
+  } finally {
+    btn.disabled = false;
   }
 }
 
@@ -3668,7 +3977,22 @@ function openPaketForm() {
 
   // Jika login sebagai Guru Mapel, isi otomatis nama paket, jurusan, dan kelas sesuai yang diampu
   if (isGuruMode()) {
-    if (currentAdminUser.mapel_diampu) {
+    const penugasanList = getGuruPenugasanList();
+    if (penugasanList.length > 0) {
+      const first = penugasanList[0];
+      if (first.mapel) {
+        document.getElementById('crud-paket-nama').value = first.mapel;
+        detectPaketAgamaHint(first.mapel);
+      }
+      if (first.jurusan) {
+        const selJ = document.getElementById('crud-paket-jurusan');
+        if (selJ) selJ.value = (first.jurusan === 'SEMUA') ? '' : first.jurusan;
+      }
+      if (first.tingkat) {
+        const selK = document.getElementById('crud-paket-kelas');
+        if (selK) selK.value = (first.tingkat === 'SEMUA') ? '' : first.tingkat;
+      }
+    } else if (currentAdminUser.mapel_diampu) {
       const firstMapel = String(currentAdminUser.mapel_diampu).split(',')[0].trim();
       if (firstMapel) {
         document.getElementById('crud-paket-nama').value = firstMapel;
@@ -3681,7 +4005,6 @@ function openPaketForm() {
       if (selJ) {
         selJ.innerHTML = `<option value="">Semua Jurusan (Umum)</option>` +
           guruJurusans.map(j => `<option value="${escapeHtml(j)}">${escapeHtml(j)}</option>`).join('');
-        selJ.value = "";
       }
     }
     const guruKelas = getGuruKelasList();

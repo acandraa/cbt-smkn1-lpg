@@ -484,7 +484,8 @@ const DB = {
               ...g,
               ...existing,
               jurusan_diampu: existing.jurusan_diampu || g.jurusan_diampu || '',
-              kelas_diampu: existing.kelas_diampu || g.kelas_diampu || ''
+              kelas_diampu: existing.kelas_diampu || g.kelas_diampu || '',
+              penugasan_mapel: existing.penugasan_mapel || g.penugasan_mapel || []
             });
           }
         });
@@ -504,9 +505,12 @@ const DB = {
     const paketIdsStr = typeof payload.paket_ids === 'string'
       ? payload.paket_ids
       : JSON.stringify(Array.isArray(payload.paket_ids) ? payload.paket_ids : []);
+    const penugasanStr = typeof payload.penugasan_mapel === 'string'
+      ? payload.penugasan_mapel
+      : JSON.stringify(Array.isArray(payload.penugasan_mapel) ? payload.penugasan_mapel : []);
 
-    if (!cleanUsername || !cleanNama || !cleanMapel) {
-      throw new Error("Username, Nama Lengkap, dan Mata Pelajaran yang diampu wajib diisi.");
+    if (!cleanUsername || !cleanNama) {
+      throw new Error("Username dan Nama Lengkap guru wajib diisi.");
     }
 
     const passHash = password ? await this.sha256(password) : '';
@@ -529,6 +533,7 @@ const DB = {
           jurusan_diampu: cleanJurusan,
           kelas_diampu: cleanKelas,
           paket_ids: paketIdsStr,
+          penugasan_mapel: penugasanStr,
           ...(passHash ? { password_hash: passHash } : {})
         };
         localStorage.setItem('CBT_LOCAL_GURU', JSON.stringify(list));
@@ -544,6 +549,7 @@ const DB = {
           jurusan_diampu: cleanJurusan,
           kelas_diampu: cleanKelas,
           paket_ids: paketIdsStr,
+          penugasan_mapel: penugasanStr,
           created_at: new Date().toISOString()
         };
         list.push(newGuru);
@@ -571,6 +577,7 @@ const DB = {
         jurusan_diampu: cleanJurusan,
         kelas_diampu: cleanKelas,
         paket_ids: paketIdsStr,
+        penugasan_mapel: penugasanStr,
         ...(passHash ? { password_hash: passHash } : {})
       };
       currentList[idx] = savedRecord;
@@ -585,6 +592,7 @@ const DB = {
         jurusan_diampu: cleanJurusan,
         kelas_diampu: cleanKelas,
         paket_ids: paketIdsStr,
+        penugasan_mapel: penugasanStr,
         created_at: new Date().toISOString()
       };
       currentList.push(savedRecord);

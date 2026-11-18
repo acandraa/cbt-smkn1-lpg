@@ -500,13 +500,12 @@
               <table class="table table-hover align-middle mb-0 custom-table">
                 <thead>
                   <tr>
-                    <th style="width: 50px;">No</th>
-                    <th style="min-width: 120px;">Username Login</th>
-                    <th style="min-width: 190px;">Nama Lengkap Guru</th>
-                    <th style="min-width: 180px;">Mata Pelajaran Diampu</th>
-                    <th style="min-width: 190px;">Jurusan & Kelas Diampu</th>
-                    <th style="min-width: 180px;">Akses Paket Soal</th>
-                    <th class="text-center" style="width: 130px;">Aksi</th>
+                    <th style="width: 45px;">No</th>
+                    <th style="min-width: 120px;">Username</th>
+                    <th style="min-width: 180px;">Nama Lengkap Guru</th>
+                    <th style="min-width: 320px;">Tugas Mengajar (Mapel, Tingkat & Jurusan)</th>
+                    <th style="min-width: 150px;">Paket Soal Terkait</th>
+                    <th class="text-center" style="min-width: 180px;">Aksi</th>
                   </tr>
                 </thead>
                 <tbody id="table-guru-body">
@@ -1167,8 +1166,8 @@
                 <input type="text" class="form-control" id="crud-guru-nama" placeholder="Contoh: Bpk. Noferson, S.Pd, Gr, M.Eng." required>
               </div>
               <div class="col-12">
-                <label for="crud-guru-mapel" class="form-label fw-semibold">Mata Pelajaran yang Diampu <span class="text-danger">*</span></label>
-                <input type="text" class="form-control" id="crud-guru-mapel" placeholder="Contoh: Matematika (Pisahkan dengan koma jika lebih dari 1 mapel)" required>
+                <label for="crud-guru-mapel" class="form-label fw-semibold">Mata Pelajaran yang Diampu (Opsional)</label>
+                <input type="text" class="form-control" id="crud-guru-mapel" placeholder="Contoh: Matematika (Bisa diatur lebih rinci per tingkat/jurusan setelah akun dibuat)">
                 <div class="d-flex align-items-center gap-1 flex-wrap mt-2">
                   <span class="small text-muted me-1">Pilih Cepat Mapel:</span>
                   <button type="button" class="btn btn-outline-secondary btn-sm py-0 px-2" style="font-size: 0.74rem;" onclick="appendGuruMapelPreset('Matematika')">Matematika</button>
@@ -1181,7 +1180,9 @@
                   <button type="button" class="btn btn-outline-secondary btn-sm py-0 px-2" style="font-size: 0.74rem;" onclick="appendGuruMapelPreset('Sejarah')">Sejarah</button>
                   <button type="button" class="btn btn-outline-secondary btn-sm py-0 px-2" style="font-size: 0.74rem;" onclick="appendGuruMapelPreset('Produktif TKJ')">Produktif TKJ</button>
                 </div>
-                <small class="text-muted d-block mt-1">Guru otomatis dapat membuat & mengelola paket soal yang sesuai dengan nama mata pelajaran di atas.</small>
+                <small class="text-muted d-block mt-1">
+                  <i class="bi bi-lightbulb text-warning me-1"></i>Anda dapat langsung menyimpan akun guru terlebih dahulu, kemudian menambahkan mapel, tingkat kelas, dan jurusannya melalui tombol <strong>+ Atur Mapel</strong> di tabel data guru.
+                </small>
               </div>
               <div class="col-md-6">
                 <div class="d-flex justify-content-between align-items-center mb-1">
@@ -1238,6 +1239,71 @@
             <button type="submit" class="btn btn-primary" id="btn-save-guru-crud"><i class="bi bi-save me-1"></i> Simpan Akun Guru</button>
           </div>
         </form>
+      </div>
+    </div>
+  </div>
+
+  <!-- Modal: Kelola Penugasan Mapel Guru (Multi-Mapel & Tingkat) -->
+  <div class="modal fade" id="modal-penugasan-guru" tabindex="-1">
+    <div class="modal-dialog modal-lg">
+      <div class="modal-content glass-card border-0">
+        <div class="modal-header">
+          <h5 class="modal-title fw-bold" id="penugasanGuruTitle">
+            <i class="bi bi-journal-bookmark-fill me-2 text-primary"></i>Atur Mata Pelajaran Guru
+          </h5>
+          <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+        </div>
+        <div class="modal-body">
+          <input type="hidden" id="penugasan-guru-id">
+          
+          <div class="alert alert-info py-2 px-3 small d-flex align-items-center mb-3">
+            <i class="bi bi-info-circle-fill fs-5 me-2 text-primary flex-shrink-0"></i>
+            <div>
+              Tambahkan mata pelajaran yang diajar oleh guru ini. Satu guru bisa ditambahkan <strong>banyak mapel</strong> dengan tingkat kelas dan jurusan masing-masing (misal: <em>Matematika Kelas XI Semua Jurusan</em> dan <em>Koding Kelas X TKJ</em>).
+            </div>
+          </div>
+
+          <div class="d-flex justify-content-between align-items-center mb-2">
+            <h6 class="fw-bold mb-0 text-dark"><i class="bi bi-list-check me-1"></i>Daftar Mata Pelajaran yang Diampu:</h6>
+            <button type="button" class="btn btn-sm btn-success" onclick="addPenugasanRow()">
+              <i class="bi bi-plus-circle me-1"></i>+ Tambah Mapel
+            </button>
+          </div>
+
+          <div class="table-responsive border rounded-3 bg-white mb-3" style="max-height: 350px; overflow-y: auto;">
+            <table class="table table-bordered table-sm align-middle mb-0" id="table-penugasan-mapel">
+              <thead class="table-light">
+                <tr>
+                  <th style="min-width: 220px;">Mata Pelajaran</th>
+                  <th style="min-width: 170px;">Tingkat / Kelas</th>
+                  <th style="min-width: 170px;">Jurusan</th>
+                  <th class="text-center" style="width: 60px;">Hapus</th>
+                </tr>
+              </thead>
+              <tbody id="tbody-penugasan-mapel">
+                <!-- Baris penugasan dinamis -->
+              </tbody>
+            </table>
+          </div>
+
+          <div class="card bg-light border-0 p-3 mb-2">
+            <div class="form-check">
+              <input class="form-check-input" type="checkbox" id="chk-auto-create-paket" checked>
+              <label class="form-check-label small fw-semibold text-dark" for="chk-auto-create-paket">
+                <i class="bi bi-lightning-charge-fill text-warning me-1"></i>Otomatis buatkan wadah Paket Soal di Bank Soal jika belum ada
+              </label>
+            </div>
+            <small class="text-muted ms-4">
+              Sistem akan otomatis membuat wadah paket ujian di Bank Soal (misal: <code>Matematika - Tingkat XI</code> & <code>Koding - Tingkat X</code>) dan langsung menugaskannya ke akun guru ini sehingga guru tinggal mengisi butir soal.
+            </small>
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Tutup</button>
+          <button type="button" class="btn btn-primary" id="btn-save-penugasan-guru" onclick="savePenugasanGuru()">
+            <i class="bi bi-save me-1"></i> Simpan Penugasan Mapel
+          </button>
+        </div>
       </div>
     </div>
   </div>
@@ -1678,13 +1744,13 @@
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   
   <!-- CBT Modules -->
-  <script src="js/config.js?v=46"></script>
-  <script src="js/supabase-config.js?v=46"></script>
-  <script src="js/db-adapter.js?v=46"></script>
-  <script src="js/auth.js?v=46"></script>
-  <script src="js/excel-helpers.js?v=46"></script>
-  <script src="js/templates.js?v=46"></script>
-  <script src="js/admin.js?v=46"></script>
+  <script src="js/config.js?v=47"></script>
+  <script src="js/supabase-config.js?v=47"></script>
+  <script src="js/db-adapter.js?v=47"></script>
+  <script src="js/auth.js?v=47"></script>
+  <script src="js/excel-helpers.js?v=47"></script>
+  <script src="js/templates.js?v=47"></script>
+  <script src="js/admin.js?v=47"></script>
   <script>
     // Dark mode logic
     const themeToggleBtn = document.getElementById('theme-toggle-admin');

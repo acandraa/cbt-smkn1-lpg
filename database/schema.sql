@@ -50,6 +50,7 @@ CREATE TABLE IF NOT EXISTS public.guru (
   jurusan_diampu TEXT DEFAULT '',
   kelas_diampu TEXT DEFAULT '',
   paket_ids TEXT DEFAULT '[]',
+  penugasan_mapel TEXT DEFAULT '[]',
   created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
 
