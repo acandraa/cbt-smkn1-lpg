@@ -183,8 +183,11 @@ function isPaketAllowedForGuru(paket) {
       // Cek jurusan
       const itemJurusan = String(item.jurusan || '').trim().toUpperCase();
       if (itemJurusan && itemJurusan !== 'SEMUA') {
-        if (pkJurusan && pkJurusan !== 'SEMUA' && pkJurusan !== itemJurusan) {
-          return false;
+        const allowedJurusans = itemJurusan.split(',').map(s => s.trim().toUpperCase()).filter(Boolean);
+        if (allowedJurusans.length > 0 && pkJurusan && pkJurusan !== 'SEMUA') {
+          const pkJurParts = pkJurusan.split(',').map(s => s.trim().toUpperCase()).filter(Boolean);
+          const jurOverlap = pkJurParts.some(j => allowedJurusans.includes(j));
+          if (!jurOverlap) return false;
         }
       }
 
@@ -192,8 +195,12 @@ function isPaketAllowedForGuru(paket) {
       const itemTingkat = String(item.tingkat || '').trim().toUpperCase();
       if (itemTingkat && itemTingkat !== 'SEMUA') {
         if (pkKelas && pkKelas !== 'SEMUA') {
-          const tVal = itemTingkat.startsWith('TINGKAT:') ? itemTingkat.replace('TINGKAT:', '').trim() : itemTingkat;
-          const kMatch = checkKelasMatch(pkKelas, tVal).match || checkKelasMatch(pkKelas, `Kelas ${tVal}`).match || checkKelasMatch(itemTingkat, pkKelas).match;
+          const allowedTingkats = itemTingkat.split(',').map(s => s.trim().toUpperCase()).filter(Boolean);
+          const kMatch = allowedTingkats.some(tk => {
+            if (tk === pkKelas) return true;
+            const tVal = tk.startsWith('TINGKAT:') ? tk.replace('TINGKAT:', '').trim() : tk;
+            return checkKelasMatch(pkKelas, tVal).match || checkKelasMatch(pkKelas, `Kelas ${tVal}`).match || checkKelasMatch(tk, pkKelas).match;
+          });
           if (!kMatch) return false;
         }
       }
@@ -217,8 +224,10 @@ function isPaketAllowedForGuru(paket) {
   const guruJurusans = getGuruJurusanList();
   if (guruJurusans.length > 0) {
     const pkJurusan = String(paket.jurusan || '').trim().toUpperCase();
-    if (pkJurusan && pkJurusan !== 'SEMUA' && !guruJurusans.includes(pkJurusan)) {
-      return false;
+    if (pkJurusan && pkJurusan !== 'SEMUA') {
+      const pkJurParts = pkJurusan.split(',').map(s => s.trim().toUpperCase()).filter(Boolean);
+      const jurOverlap = pkJurParts.some(j => guruJurusans.includes(j));
+      if (!jurOverlap) return false;
     }
   }
 
@@ -1779,29 +1788,28 @@ function checkKelasMatch(pKelas, studentKelas) {
   }
   if (!studentKelas) return { match: false, specificity: 0 };
 
-  const p = pKelas.toLowerCase().trim();
   const s = studentKelas.toLowerCase().trim();
+  const parts = pKelas.toLowerCase().split(',').map(x => x.trim()).filter(Boolean);
 
-  // 1. Cocok persis
-  if (p === s) return { match: true, specificity: 3 };
-
-  // 2. Daftar rombel dipisah koma
-  const parts = p.split(',').map(x => x.trim());
+  // 1. Cocok persis (cth: "x tkj 1" === "x tkj 1" atau ada dalam daftar rombel)
   if (parts.includes(s)) return { match: true, specificity: 3 };
 
-  // 3. Cocok Tingkat Kelas (Tingkat X, XI, XII)
-  let targetTingkat = "";
-  if (p.startsWith("tingkat:")) {
-    targetTingkat = p.replace("tingkat:", "").trim();
-  } else if (['x', 'xi', 'xii', '10', '11', '12'].includes(p)) {
-    targetTingkat = p;
-  }
+  // 2. Cocok per Tingkat / Jenjang Angkatan pada setiap token (cth: "tingkat:x", "tingkat:xi", "tingkat:xii", atau "x", "xi", "xii")
+  const sTokens = s.split(/[\s\-_]+/);
+  let sTingkat = sTokens[0] || "";
+  if (sTingkat === "kelas" && sTokens.length > 1) sTingkat = sTokens[1];
 
-  if (targetTingkat) {
-    const sTokens = s.split(/[\s\-_]+/);
-    let sTingkat = sTokens[0] || "";
-    if (sTingkat === "kelas" && sTokens.length > 1) sTingkat = sTokens[1];
-    if (sTingkat === targetTingkat) return { match: true, specificity: 2 };
+  for (const part of parts) {
+    let targetTingkat = "";
+    if (part.startsWith("tingkat:")) {
+      targetTingkat = part.replace("tingkat:", "").trim();
+    } else if (['x', 'xi', 'xii', '10', '11', '12'].includes(part)) {
+      targetTingkat = part;
+    }
+
+    if (targetTingkat && sTingkat === targetTingkat) {
+      return { match: true, specificity: 2 };
+    }
   }
 
   return { match: false, specificity: 0 };
@@ -2469,14 +2477,17 @@ function renderGuruTable(list) {
         const jText = (item.jurusan && item.jurusan.toUpperCase() !== 'SEMUA') ? item.jurusan : 'Semua Jurusan';
         let kText = 'Semua Kelas';
         if (item.tingkat && item.tingkat.toUpperCase() !== 'SEMUA') {
-          kText = item.tingkat.toUpperCase().startsWith('TINGKAT:') ? `Tingkat ${item.tingkat.split(':')[1]}` : item.tingkat;
+          kText = item.tingkat.split(',').map(k => {
+            const clean = k.trim();
+            return clean.toUpperCase().startsWith('TINGKAT:') ? `Tingkat ${clean.split(':')[1]}` : clean;
+          }).filter(Boolean).join(', ');
         }
         return `
           <div class="d-inline-flex align-items-center gap-1 border rounded px-2 py-1 bg-light me-1 mb-1 shadow-sm" style="font-size: 0.8rem;">
             <i class="bi bi-book text-primary"></i>
             <strong class="text-dark">${escapeHtml(item.mapel)}</strong>
-            <span class="badge bg-primary-subtle text-primary border" style="font-size: 0.68rem;">${escapeHtml(kText)}</span>
-            <span class="badge bg-info-subtle text-dark border" style="font-size: 0.68rem;">${escapeHtml(jText)}</span>
+            <span class="badge bg-primary-subtle text-primary border" style="font-size: 0.68rem;" title="${escapeAttr(kText)}">${escapeHtml(kText)}</span>
+            <span class="badge bg-info-subtle text-dark border" style="font-size: 0.68rem;" title="${escapeAttr(jText)}">${escapeHtml(jText)}</span>
           </div>
         `;
       }).join('');
@@ -2895,13 +2906,13 @@ function openPenugasanGuruModal(id) {
   // Jika penugasan_mapel masih kosong tapi punya mapel_diampu legacy, konversi otomatis
   if (list.length === 0 && g.mapel_diampu) {
     const mapels = String(g.mapel_diampu).split(',').map(m => m.trim()).filter(Boolean);
-    const jList = String(g.jurusan_diampu || '').split(',').map(j => j.trim()).filter(Boolean);
-    const kList = String(g.kelas_diampu || '').split(',').map(k => k.trim()).filter(Boolean);
+    const jStr = String(g.jurusan_diampu || '').trim();
+    const kStr = String(g.kelas_diampu || '').trim();
     mapels.forEach(m => {
       list.push({
         mapel: m,
-        tingkat: kList[0] || '',
-        jurusan: jList[0] || ''
+        tingkat: kStr,
+        jurusan: jStr
       });
     });
   }
@@ -2917,65 +2928,190 @@ function openPenugasanGuruModal(id) {
   }
 }
 
+function updatePenugasanKelasLabel(tr) {
+  const allChk = tr.querySelector('.chk-kelas-all');
+  const checkedItems = Array.from(tr.querySelectorAll('.chk-kelas-item:checked'));
+  const labelEl = tr.querySelector('.penugasan-dropdown-kelas .dropdown-label');
+  if (!labelEl) return;
+
+  if (allChk && allChk.checked) {
+    labelEl.textContent = 'Semua Kelas (Umum)';
+    labelEl.className = 'dropdown-label text-truncate text-muted';
+    return;
+  }
+
+  if (checkedItems.length === 0) {
+    if (allChk) allChk.checked = true;
+    labelEl.textContent = 'Semua Kelas (Umum)';
+    labelEl.className = 'dropdown-label text-truncate text-muted';
+    return;
+  }
+
+  const labels = checkedItems.map(c => c.dataset.label || c.value);
+  if (labels.length <= 2) {
+    labelEl.textContent = labels.join(', ');
+  } else {
+    labelEl.textContent = `${labels.slice(0, 2).join(', ')} (+${labels.length - 2})`;
+  }
+  labelEl.className = 'dropdown-label text-truncate fw-semibold text-primary';
+}
+
+function updatePenugasanJurusanLabel(tr) {
+  const allChk = tr.querySelector('.chk-jurusan-all');
+  const checkedItems = Array.from(tr.querySelectorAll('.chk-jurusan-item:checked'));
+  const labelEl = tr.querySelector('.penugasan-dropdown-jurusan .dropdown-label');
+  if (!labelEl) return;
+
+  if (allChk && allChk.checked) {
+    labelEl.textContent = 'Semua Jurusan (Umum)';
+    labelEl.className = 'dropdown-label text-truncate text-muted';
+    return;
+  }
+
+  if (checkedItems.length === 0) {
+    if (allChk) allChk.checked = true;
+    labelEl.textContent = 'Semua Jurusan (Umum)';
+    labelEl.className = 'dropdown-label text-truncate text-muted';
+    return;
+  }
+
+  const labels = checkedItems.map(c => c.dataset.label || c.value);
+  if (labels.length <= 2) {
+    labelEl.textContent = labels.join(', ');
+  } else {
+    labelEl.textContent = `${labels.slice(0, 2).join(', ')} (+${labels.length - 2})`;
+  }
+  labelEl.className = 'dropdown-label text-truncate fw-semibold text-primary';
+}
+
 function addPenugasanRow(data = {}) {
   const tbody = document.getElementById('tbody-penugasan-mapel');
   if (!tbody) return;
 
+  const rowId = 'prow_' + Math.random().toString(36).substring(2, 9);
   const currentMapel = data.mapel || '';
-  const currentTingkat = (data.tingkat || '').toUpperCase();
-  const currentJurusan = (data.jurusan || '').toUpperCase();
 
-  // Opsi Tingkat / Kelas
-  const tingkatOptions = [
-    { value: '', label: 'Semua Kelas (Umum)' },
-    { value: 'TINGKAT:X', label: 'Tingkat X (Semua Rombel Kelas 10)' },
-    { value: 'TINGKAT:XI', label: 'Tingkat XI (Semua Rombel Kelas 11)' },
-    { value: 'TINGKAT:XII', label: 'Tingkat XII (Semua Rombel Kelas 12)' }
+  // 1. Parsing Nilai Tingkat/Kelas Terpilih (bisa string koma atau array)
+  let selTingkat = [];
+  if (Array.isArray(data.tingkat)) {
+    selTingkat = data.tingkat.map(s => String(s).trim().toUpperCase()).filter(Boolean);
+  } else if (typeof data.tingkat === 'string' && data.tingkat.trim()) {
+    selTingkat = data.tingkat.split(',').map(s => s.trim().toUpperCase()).filter(Boolean);
+  }
+  selTingkat = selTingkat.filter(s => s !== 'SEMUA');
+  const isAllKelas = selTingkat.length === 0;
+
+  // 2. Parsing Nilai Jurusan Terpilih (bisa string koma atau array)
+  let selJurusan = [];
+  if (Array.isArray(data.jurusan)) {
+    selJurusan = data.jurusan.map(s => String(s).trim().toUpperCase()).filter(Boolean);
+  } else if (typeof data.jurusan === 'string' && data.jurusan.trim()) {
+    selJurusan = data.jurusan.split(',').map(s => s.trim().toUpperCase()).filter(Boolean);
+  }
+  selJurusan = selJurusan.filter(s => s !== 'SEMUA');
+  const isAllJurusan = selJurusan.length === 0;
+
+  // 3. Bangun Opsi Checkbox Tingkat & Rombel
+  const tingkats = [
+    { val: 'TINGKAT:X', label: 'Tingkat X (Semua Rombel)' },
+    { val: 'TINGKAT:XI', label: 'Tingkat XI (Semua Rombel)' },
+    { val: 'TINGKAT:XII', label: 'Tingkat XII (Semua Rombel)' }
   ];
+  const allAvailableKelas = getAllAvailableKelasNames();
 
-  (allKelas || []).forEach(k => {
-    const kName = typeof k === 'string' ? k : (k.nama_kelas || k.nama || '');
-    if (kName && !tingkatOptions.some(o => o.value.toUpperCase() === kName.toUpperCase())) {
-      tingkatOptions.push({ value: kName, label: `Rombel ${kName}` });
-    }
-  });
-
-  const optTingkatHtml = tingkatOptions.map(opt => {
-    const selected = (opt.value.toUpperCase() === currentTingkat || (!opt.value && (!currentTingkat || currentTingkat === 'SEMUA'))) ? 'selected' : '';
-    return `<option value="${escapeAttr(opt.value)}" ${selected}>${escapeHtml(opt.label)}</option>`;
+  const tingkatItemsHtml = tingkats.map((t, idx) => {
+    const checked = selTingkat.includes(t.val) ? 'checked' : '';
+    return `
+      <div class="form-check mb-1">
+        <input class="form-check-input chk-kelas-item" type="checkbox" value="${escapeAttr(t.val)}" data-label="Tingkat ${t.val.split(':')[1]}" id="chk-k-${rowId}-${idx}" ${checked}>
+        <label class="form-check-label small fw-semibold text-dark" for="chk-k-${rowId}-${idx}">
+          ${escapeHtml(t.label)}
+        </label>
+      </div>
+    `;
   }).join('');
 
-  // Opsi Jurusan
-  const jurusanOptions = [
-    { value: '', label: 'Semua Jurusan (Umum)' }
-  ];
+  const rombelItemsHtml = allAvailableKelas.map((k, idx) => {
+    const checked = selTingkat.includes(k.toUpperCase()) ? 'checked' : '';
+    return `
+      <div class="form-check mb-1">
+        <input class="form-check-input chk-kelas-item" type="checkbox" value="${escapeAttr(k)}" data-label="${escapeAttr(k)}" id="chk-kr-${rowId}-${idx}" ${checked}>
+        <label class="form-check-label small text-secondary" for="chk-kr-${rowId}-${idx}">
+          Rombel ${escapeHtml(k)}
+        </label>
+      </div>
+    `;
+  }).join('');
 
-  (allJurusan || []).forEach(j => {
-    const jName = typeof j === 'string' ? j : (j.kode || j.nama || '');
-    if (jName && !jurusanOptions.some(o => o.value.toUpperCase() === jName.toUpperCase())) {
-      jurusanOptions.push({ value: jName, label: jName });
-    }
-  });
-
-  const optJurusanHtml = jurusanOptions.map(opt => {
-    const selected = (opt.value.toUpperCase() === currentJurusan || (!opt.value && (!currentJurusan || currentJurusan === 'SEMUA'))) ? 'selected' : '';
-    return `<option value="${escapeAttr(opt.value)}" ${selected}>${escapeHtml(opt.label)}</option>`;
+  // 4. Bangun Opsi Checkbox Jurusan
+  const allAvailableJurusan = getAllAvailableJurusanNames();
+  const jurusanItemsHtml = allAvailableJurusan.map((j, idx) => {
+    const checked = selJurusan.includes(j.toUpperCase()) ? 'checked' : '';
+    return `
+      <div class="form-check mb-1">
+        <input class="form-check-input chk-jurusan-item" type="checkbox" value="${escapeAttr(j)}" data-label="${escapeAttr(j)}" id="chk-j-${rowId}-${idx}" ${checked}>
+        <label class="form-check-label small fw-semibold" for="chk-j-${rowId}-${idx}">
+          Jurusan ${escapeHtml(j)}
+        </label>
+      </div>
+    `;
   }).join('');
 
   const tr = document.createElement('tr');
+  tr.id = rowId;
   tr.innerHTML = `
     <td>
       <input type="text" class="form-control form-control-sm penugasan-mapel-input" placeholder="Nama mapel (cth: Matematika, Koding)" value="${escapeAttr(currentMapel)}" required>
     </td>
     <td>
-      <select class="form-select form-select-sm penugasan-tingkat-select">
-        ${optTingkatHtml}
-      </select>
+      <div class="dropdown penugasan-dropdown-kelas">
+        <button class="btn btn-outline-secondary btn-sm dropdown-toggle w-100 text-start d-flex justify-content-between align-items-center" 
+                type="button" 
+                id="btn-k-${rowId}" 
+                data-bs-toggle="dropdown" 
+                data-bs-auto-close="outside" 
+                data-bs-display="dynamic"
+                aria-expanded="false">
+          <span class="dropdown-label text-truncate" style="max-width: 175px;">Semua Kelas (Umum)</span>
+        </button>
+        <div class="dropdown-menu p-2 shadow penugasan-menu-kelas" aria-labelledby="btn-k-${rowId}" style="max-height: 280px; overflow-y: auto; min-width: 250px; z-index: 1060;">
+          <div class="form-check border-bottom pb-1 mb-2">
+            <input class="form-check-input chk-kelas-all" type="checkbox" id="chk-kall-${rowId}" ${isAllKelas ? 'checked' : ''}>
+            <label class="form-check-label fw-bold text-success small" for="chk-kall-${rowId}">
+              <i class="bi bi-check-all me-1"></i>Semua Kelas (Umum)
+            </label>
+          </div>
+          <div class="text-muted fw-bold mb-1" style="font-size: 0.68rem; text-transform: uppercase;">Per Tingkat Angkatan:</div>
+          ${tingkatItemsHtml}
+          ${rombelItemsHtml ? `
+            <div class="text-muted fw-bold mt-2 mb-1 pt-1 border-top" style="font-size: 0.68rem; text-transform: uppercase;">Rombel Spesifik:</div>
+            ${rombelItemsHtml}
+          ` : ''}
+        </div>
+      </div>
     </td>
     <td>
-      <select class="form-select form-select-sm penugasan-jurusan-select">
-        ${optJurusanHtml}
-      </select>
+      <div class="dropdown penugasan-dropdown-jurusan">
+        <button class="btn btn-outline-secondary btn-sm dropdown-toggle w-100 text-start d-flex justify-content-between align-items-center" 
+                type="button" 
+                id="btn-j-${rowId}" 
+                data-bs-toggle="dropdown" 
+                data-bs-auto-close="outside" 
+                data-bs-display="dynamic"
+                aria-expanded="false">
+          <span class="dropdown-label text-truncate" style="max-width: 175px;">Semua Jurusan (Umum)</span>
+        </button>
+        <div class="dropdown-menu p-2 shadow penugasan-menu-jurusan" aria-labelledby="btn-j-${rowId}" style="max-height: 280px; overflow-y: auto; min-width: 220px; z-index: 1060;">
+          <div class="form-check border-bottom pb-1 mb-2">
+            <input class="form-check-input chk-jurusan-all" type="checkbox" id="chk-jall-${rowId}" ${isAllJurusan ? 'checked' : ''}>
+            <label class="form-check-label fw-bold text-primary small" for="chk-jall-${rowId}">
+              <i class="bi bi-check-all me-1"></i>Semua Jurusan (Umum)
+            </label>
+          </div>
+          <div class="text-muted fw-bold mb-1" style="font-size: 0.68rem; text-transform: uppercase;">Pilih Jurusan:</div>
+          ${jurusanItemsHtml}
+        </div>
+      </div>
     </td>
     <td class="text-center">
       <button type="button" class="btn btn-outline-danger btn-sm p-1" onclick="this.closest('tr').remove()" title="Hapus baris mapel ini">
@@ -2983,7 +3119,50 @@ function addPenugasanRow(data = {}) {
       </button>
     </td>
   `;
+
   tbody.appendChild(tr);
+
+  // Pasang event listeners untuk checkbox kelas
+  const chkKelasAll = tr.querySelector('.chk-kelas-all');
+  const chkKelasItems = tr.querySelectorAll('.chk-kelas-item');
+  if (chkKelasAll) {
+    chkKelasAll.addEventListener('change', () => {
+      if (chkKelasAll.checked) {
+        chkKelasItems.forEach(c => { c.checked = false; });
+      }
+      updatePenugasanKelasLabel(tr);
+    });
+  }
+  chkKelasItems.forEach(c => {
+    c.addEventListener('change', () => {
+      const anyChecked = Array.from(chkKelasItems).some(x => x.checked);
+      if (chkKelasAll) chkKelasAll.checked = !anyChecked;
+      updatePenugasanKelasLabel(tr);
+    });
+  });
+
+  // Pasang event listeners untuk checkbox jurusan
+  const chkJurusanAll = tr.querySelector('.chk-jurusan-all');
+  const chkJurusanItems = tr.querySelectorAll('.chk-jurusan-item');
+  if (chkJurusanAll) {
+    chkJurusanAll.addEventListener('change', () => {
+      if (chkJurusanAll.checked) {
+        chkJurusanItems.forEach(c => { c.checked = false; });
+      }
+      updatePenugasanJurusanLabel(tr);
+    });
+  }
+  chkJurusanItems.forEach(c => {
+    c.addEventListener('change', () => {
+      const anyChecked = Array.from(chkJurusanItems).some(x => x.checked);
+      if (chkJurusanAll) chkJurusanAll.checked = !anyChecked;
+      updatePenugasanJurusanLabel(tr);
+    });
+  });
+
+  // Set initial labels
+  updatePenugasanKelasLabel(tr);
+  updatePenugasanJurusanLabel(tr);
 }
 
 async function savePenugasanGuru() {
@@ -2995,11 +3174,29 @@ async function savePenugasanGuru() {
   const penugasanList = [];
   rows.forEach(tr => {
     const mapel = (tr.querySelector('.penugasan-mapel-input')?.value || '').trim();
-    const tingkat = (tr.querySelector('.penugasan-tingkat-select')?.value || '').trim();
-    const jurusan = (tr.querySelector('.penugasan-jurusan-select')?.value || '').trim();
-    if (mapel) {
-      penugasanList.push({ mapel, tingkat, jurusan });
+    if (!mapel) return;
+
+    // Tingkat / Kelas
+    const chkKelasAll = tr.querySelector('.chk-kelas-all');
+    let tingkat = '';
+    if (!chkKelasAll || !chkKelasAll.checked) {
+      const checkedKelas = Array.from(tr.querySelectorAll('.chk-kelas-item:checked')).map(c => c.value);
+      if (checkedKelas.length > 0) {
+        tingkat = checkedKelas.join(', ');
+      }
     }
+
+    // Jurusan
+    const chkJurusanAll = tr.querySelector('.chk-jurusan-all');
+    let jurusan = '';
+    if (!chkJurusanAll || !chkJurusanAll.checked) {
+      const checkedJurusan = Array.from(tr.querySelectorAll('.chk-jurusan-item:checked')).map(c => c.value);
+      if (checkedJurusan.length > 0) {
+        jurusan = checkedJurusan.join(', ');
+      }
+    }
+
+    penugasanList.push({ mapel, tingkat, jurusan });
   });
 
   const btn = document.getElementById('btn-save-penugasan-guru');
@@ -3017,7 +3214,16 @@ async function savePenugasanGuru() {
       const sourcePakets = (allPaketUnfiltered && allPaketUnfiltered.length > 0) ? allPaketUnfiltered : (allPaket || []);
       
       for (const item of penugasanList) {
-        const tVal = item.tingkat ? (item.tingkat.startsWith('TINGKAT:') ? `Tingkat ${item.tingkat.split(':')[1]}` : item.tingkat) : '';
+        const tVal = item.tingkat
+          ? item.tingkat
+              .split(',')
+              .map(k => {
+                const clean = k.trim();
+                return clean.toUpperCase().startsWith('TINGKAT:') ? `Tingkat ${clean.split(':')[1]}` : clean;
+              })
+              .filter(Boolean)
+              .join(', ')
+          : '';
         const jVal = item.jurusan || '';
         
         const existingPaket = sourcePakets.find(p => {
@@ -3058,8 +3264,8 @@ async function savePenugasanGuru() {
     }
 
     const uniqueMapels = Array.from(new Set(penugasanList.map(p => p.mapel).filter(Boolean)));
-    const uniqueJurusans = Array.from(new Set(penugasanList.map(p => p.jurusan).filter(Boolean)));
-    const uniqueTingkats = Array.from(new Set(penugasanList.map(p => p.tingkat).filter(Boolean)));
+    const uniqueJurusans = Array.from(new Set(penugasanList.flatMap(p => (p.jurusan || '').split(',').map(s => s.trim())).filter(Boolean)));
+    const uniqueTingkats = Array.from(new Set(penugasanList.flatMap(p => (p.tingkat || '').split(',').map(s => s.trim())).filter(Boolean)));
 
     await DB.saveGuru(g.id, {
       username: g.username,

@@ -71,34 +71,28 @@ function checkKelasMatch(pKelas, studentKelas) {
   }
   if (!studentKelas) return { match: false, specificity: 0 };
 
-  const p = pKelas.toLowerCase().trim();
   const s = studentKelas.toLowerCase().trim();
+  const parts = pKelas.toLowerCase().split(',').map(x => x.trim()).filter(Boolean);
 
-  // 1. Cocok persis (cth: "x tkj 1" === "x tkj 1")
-  if (p === s) {
-    return { match: true, specificity: 3 };
-  }
-
-  // 2. Jika paket berisi daftar rombel dipisah koma (cth: "x tkj 1, x tkj 2")
-  const parts = p.split(',').map(x => x.trim());
+  // 1. Cocok persis (cth: "x tkj 1" === "x tkj 1" atau ada dalam daftar rombel)
   if (parts.includes(s)) {
     return { match: true, specificity: 3 };
   }
 
-  // 3. Cocok per Tingkat / Jenjang Angkatan (cth: "tingkat:x", "tingkat:xi", "tingkat:xii", atau "x", "xi", "xii")
-  let targetTingkat = "";
-  if (p.startsWith("tingkat:")) {
-    targetTingkat = p.replace("tingkat:", "").trim();
-  } else if (['x', 'xi', 'xii', '10', '11', '12'].includes(p)) {
-    targetTingkat = p;
-  }
+  // 2. Cocok per Tingkat / Jenjang Angkatan (cth: "tingkat:x", "tingkat:xi", "tingkat:xii", atau "x", "xi", "xii")
+  const sTokens = s.split(/[\s\-_]+/);
+  let sTingkat = sTokens[0] || "";
+  if (sTingkat === "kelas" && sTokens.length > 1) sTingkat = sTokens[1];
 
-  if (targetTingkat) {
-    const sTokens = s.split(/[\s\-_]+/);
-    let sTingkat = sTokens[0] || "";
-    if (sTingkat === "kelas" && sTokens.length > 1) sTingkat = sTokens[1];
+  for (const part of parts) {
+    let targetTingkat = "";
+    if (part.startsWith("tingkat:")) {
+      targetTingkat = part.replace("tingkat:", "").trim();
+    } else if (['x', 'xi', 'xii', '10', '11', '12'].includes(part)) {
+      targetTingkat = part;
+    }
 
-    if (sTingkat === targetTingkat) {
+    if (targetTingkat && sTingkat === targetTingkat) {
       return { match: true, specificity: 2 };
     }
   }
@@ -167,12 +161,13 @@ function findAllActivePaketsForStudent(allPaket, profile) {
 
     if (now >= start && now <= end) {
       const pJurusan = (p.jurusan || "").toLowerCase().trim();
-      const jurusanMatch = (pJurusan === "" || pJurusan === "semua" || pJurusan === studentJurusan);
+      const jurParts = pJurusan.split(',').map(x => x.trim()).filter(Boolean);
+      const jurusanMatch = (pJurusan === "" || pJurusan === "semua" || jurParts.includes(studentJurusan));
       const kelasResult = checkKelasMatch(p.kelas, studentKelas);
 
       if (jurusanMatch && kelasResult.match) {
         let score = 0;
-        if (pJurusan && pJurusan !== "semua" && pJurusan === studentJurusan) score += 4;
+        if (pJurusan && pJurusan !== "semua" && jurParts.includes(studentJurusan)) score += 4;
         score += kelasResult.specificity;
         matching.push({ ...p, matchScore: score });
       }
