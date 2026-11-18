@@ -189,8 +189,21 @@
     // Show configuration warnings or local demo notice
     document.addEventListener("DOMContentLoaded", () => {
       const urlParamsInit = new URLSearchParams(window.location.search);
-      if (urlParamsInit.get('role') === 'guru') {
+      const roleParam = urlParamsInit.get('role');
+      const userParam = urlParamsInit.get('username') || urlParamsInit.get('user');
+
+      if (roleParam === 'guru' || userParam) {
         switchLoginRole('guru');
+        if (userParam) {
+          const uInput = document.getElementById('guru-username');
+          if (uInput) {
+            uInput.value = userParam;
+            setTimeout(() => {
+              const passInput = document.getElementById('guru-password');
+              if (passInput) passInput.focus();
+            }, 100);
+          }
+        }
       }
       if (!window.CBT_CONFIG.isConfigured) {
         document.getElementById('config-warning').className = 'alert alert-info';

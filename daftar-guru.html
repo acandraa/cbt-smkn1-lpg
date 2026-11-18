@@ -1,0 +1,421 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Daftar Penugasan Guru & Mapel CBT - SMKN 1 Lempuing</title>
+  
+  <!-- Google Fonts: Plus Jakarta Sans -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+  
+  <!-- Bootstrap 5 CSS -->
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
+  <!-- Bootstrap Icons -->
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.1/font/bootstrap-icons.css">
+  
+  <!-- Custom Styles -->
+  <link rel="stylesheet" href="css/styles.css?v=51">
+  <style>
+    body {
+      background-color: #f8fafc;
+      font-family: 'Plus Jakarta Sans', sans-serif;
+    }
+    .hero-header {
+      background: linear-gradient(135deg, #1e3c72 0%, #2a5298 100%);
+      color: #fff;
+      padding: 2.5rem 1rem 3.5rem;
+      border-radius: 0 0 2rem 2rem;
+      box-shadow: 0 10px 25px rgba(30, 60, 114, 0.15);
+    }
+    .main-card {
+      margin-top: -2rem;
+      background: #ffffff;
+      border-radius: 1.25rem;
+      border: 1px solid rgba(0,0,0,0.06);
+      box-shadow: 0 10px 30px rgba(0,0,0,0.05);
+    }
+    .badge-mapel-item {
+      font-size: 0.8rem;
+      padding: 0.35rem 0.65rem;
+      border-radius: 0.5rem;
+    }
+    .table-hover tbody tr:hover {
+      background-color: #f1f5f9;
+    }
+    .search-input {
+      border-radius: 0.75rem;
+      padding: 0.65rem 1rem 0.65rem 2.5rem;
+    }
+    .search-icon {
+      position: absolute;
+      left: 1rem;
+      top: 50%;
+      transform: translateY(-50%);
+      color: #94a3b8;
+    }
+  </style>
+</head>
+<body>
+
+  <!-- Hero Header -->
+  <header class="hero-header text-center">
+    <div class="container">
+      <div class="d-flex justify-content-between align-items-center mb-3">
+        <a href="index.html" class="btn btn-sm btn-outline-light rounded-pill px-3">
+          <i class="bi bi-arrow-left me-1"></i> Portal Siswa
+        </a>
+        <a href="login-admin.html?role=guru" class="btn btn-sm btn-light fw-bold rounded-pill px-3 shadow-sm text-primary">
+          <i class="bi bi-person-workspace me-1"></i> Login Guru Mapel
+        </a>
+      </div>
+
+      <div class="d-inline-flex p-3 rounded-circle bg-white bg-opacity-10 mb-2">
+        <i class="bi bi-journal-bookmark-fill fs-2"></i>
+      </div>
+      <h2 class="fw-bold mb-1">Daftar Akun & Penugasan Mapel Guru</h2>
+      <p class="text-white-50 small mb-3">SMK Negeri 1 Lempuing &bull; Computer Based Test (CBT)</p>
+
+      <div class="d-flex justify-content-center gap-2 flex-wrap">
+        <span class="badge bg-white bg-opacity-20 px-3 py-2 rounded-pill" id="stat-total-guru">
+          <i class="bi bi-people me-1"></i> Memuat Data Guru...
+        </span>
+        <span class="badge bg-white bg-opacity-20 px-3 py-2 rounded-pill" id="stat-total-paket">
+          <i class="bi bi-journal-check me-1"></i> Memuat Paket Soal...
+        </span>
+      </div>
+    </div>
+  </header>
+
+  <!-- Main Content Container -->
+  <main class="container pb-5">
+    <div class="main-card p-4 p-md-5">
+      
+      <!-- Info Alert -->
+      <div class="alert alert-info border-0 bg-info-subtle text-dark rounded-3 d-flex align-items-start gap-3 mb-4">
+        <i class="bi bi-info-circle-fill fs-4 text-info flex-shrink-0 mt-1"></i>
+        <div class="small">
+          Halaman ini menampilkan rekapitulasi akun dan penugasan mata pelajaran guru CBT.
+          Bapak/Ibu Guru dapat melihat <strong>Username</strong> masing-masing dan langsung mengklik tombol 
+          <strong>"Login ke Bank Soal"</strong> untuk masuk ke portal pembuat soal.
+        </div>
+      </div>
+
+      <!-- Search & Filters -->
+      <div class="row g-3 mb-4 align-items-center">
+        <div class="col-lg-6 col-md-12">
+          <div class="position-relative">
+            <i class="bi bi-search search-icon"></i>
+            <input type="text" id="filter-search" class="form-control search-input" placeholder="Ketik nama guru, username, mapel, atau rombel..." oninput="filterDataGuru()">
+          </div>
+        </div>
+        <div class="col-lg-3 col-sm-6">
+          <select class="form-select" id="filter-jurusan" onchange="filterDataGuru()">
+            <option value="">Semua Jurusan</option>
+          </select>
+        </div>
+        <div class="col-lg-3 col-sm-6">
+          <select class="form-select" id="filter-tingkat" onchange="filterDataGuru()">
+            <option value="">Semua Tingkat</option>
+            <option value="TINGKAT:X">Tingkat X (Kelas 10)</option>
+            <option value="TINGKAT:XI">Tingkat XI (Kelas 11)</option>
+            <option value="TINGKAT:XII">Tingkat XII (Kelas 12)</option>
+          </select>
+        </div>
+      </div>
+
+      <!-- Table Container -->
+      <div class="table-responsive border rounded-3 bg-white">
+        <table class="table table-hover align-middle mb-0" id="table-guru-rekap">
+          <thead class="table-light">
+            <tr>
+              <th class="text-center" style="width: 50px;">No</th>
+              <th style="min-width: 170px;">Nama Lengkap Guru</th>
+              <th style="min-width: 130px;">Username Login</th>
+              <th style="min-width: 250px;">Tugas Mengajar (Mapel, Kelas & Jurusan)</th>
+              <th style="min-width: 180px;">Paket Soal Terkait</th>
+              <th class="text-center" style="min-width: 140px;">Aksi</th>
+            </tr>
+          </thead>
+          <tbody id="tbody-guru-rekap">
+            <tr>
+              <td colspan="6" class="text-center py-5 text-muted">
+                <span class="spinner-border spinner-border-sm me-2 text-primary"></span>Memuat daftar guru dan penugasan mapel...
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <!-- Empty State Filter -->
+      <div id="empty-filter-state" class="text-center py-5 d-none">
+        <i class="bi bi-search fs-1 text-muted mb-2 d-block"></i>
+        <h6 class="fw-bold text-secondary">Tidak ada data guru yang cocok</h6>
+        <p class="text-muted small">Coba ubah kata kunci pencarian atau bersihkan filter jurusan/tingkat.</p>
+        <button class="btn btn-outline-secondary btn-sm rounded-pill" onclick="resetFilters()">Reset Filter</button>
+      </div>
+
+    </div>
+  </main>
+
+  <!-- Footer -->
+  <footer class="text-center py-4 text-muted small">
+    &copy; 2026 CBT SMKN 1 Lempuing &bull; Dikembangkan untuk Penilaian & Evaluasi Pembelajaran Digital
+  </footer>
+
+  <!-- Scripts -->
+  <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  
+  <script src="js/config.js?v=51"></script>
+  <script src="js/supabase-config.js?v=51"></script>
+  <script src="js/db-adapter.js?v=51"></script>
+
+  <script>
+    let allGuruList = [];
+    let allPaketMap = new Map();
+    let allPaketList = [];
+
+    document.addEventListener('DOMContentLoaded', async () => {
+      await loadDataPublic();
+    });
+
+    async function loadDataPublic() {
+      const tbody = document.getElementById('tbody-guru-rekap');
+      try {
+        const [guruRes, paketRes] = await Promise.all([
+          DB.getGuruList(),
+          DB.getPaketList()
+        ]);
+
+        allGuruList = Array.isArray(guruRes) ? guruRes : [];
+        allPaketList = Array.isArray(paketRes) ? paketRes : [];
+
+        allPaketMap.clear();
+        allPaketList.forEach(p => {
+          allPaketMap.set(String(p.id), p);
+        });
+
+        // Update stats
+        document.getElementById('stat-total-guru').innerHTML = `<i class="bi bi-people me-1"></i> ${allGuruList.length} Akun Guru`;
+        document.getElementById('stat-total-paket').innerHTML = `<i class="bi bi-journal-check me-1"></i> ${allPaketList.length} Paket Ujian`;
+
+        populateFilterJurusan();
+        renderTable(allGuruList);
+      } catch (err) {
+        console.error('Gagal memuat data:', err);
+        tbody.innerHTML = `
+          <tr>
+            <td colspan="6" class="text-center py-4 text-danger">
+              <i class="bi bi-exclamation-triangle-fill me-2"></i>Gagal memuat data guru. Silakan muat ulang halaman.
+            </td>
+          </tr>
+        `;
+      }
+    }
+
+    function populateFilterJurusan() {
+      const sel = document.getElementById('filter-jurusan');
+      if (!sel) return;
+
+      const jSet = new Set();
+      allGuruList.forEach(g => {
+        const jList = (g.jurusan_diampu || '').split(',').map(s => s.trim().toUpperCase()).filter(Boolean);
+        jList.forEach(j => { if (j !== 'SEMUA') jSet.add(j); });
+      });
+
+      const sorted = Array.from(jSet).sort();
+      sel.innerHTML = '<option value="">Semua Jurusan</option>' + sorted.map(j => `<option value="${escapeHtml(j)}">${escapeHtml(j)}</option>`).join('');
+    }
+
+    function renderTable(list) {
+      const tbody = document.getElementById('tbody-guru-rekap');
+      const emptyState = document.getElementById('empty-filter-state');
+      if (!tbody) return;
+
+      if (!list || list.length === 0) {
+        tbody.innerHTML = '';
+        if (emptyState) emptyState.classList.remove('d-none');
+        return;
+      }
+
+      if (emptyState) emptyState.classList.add('d-none');
+
+      const rows = list.map((g, idx) => {
+        // 1. Tugas Mengajar (Penugasan Mapel)
+        let penugasanList = [];
+        if (Array.isArray(g.penugasan_mapel)) {
+          penugasanList = g.penugasan_mapel;
+        } else if (typeof g.penugasan_mapel === 'string' && g.penugasan_mapel.trim()) {
+          try {
+            const parsed = JSON.parse(g.penugasan_mapel);
+            if (Array.isArray(parsed)) penugasanList = parsed;
+          } catch (e) {}
+        }
+
+        let mapelHtml = '';
+        if (penugasanList.length > 0) {
+          mapelHtml = penugasanList.map(item => {
+            const jText = (item.jurusan && item.jurusan.toUpperCase() !== 'SEMUA') ? item.jurusan : 'Semua Jurusan';
+            let kText = 'Semua Kelas';
+            if (item.tingkat && item.tingkat.toUpperCase() !== 'SEMUA') {
+              kText = item.tingkat.split(',').map(k => {
+                const clean = k.trim();
+                return clean.toUpperCase().startsWith('TINGKAT:') ? `Tingkat ${clean.split(':')[1]}` : clean;
+              }).filter(Boolean).join(', ');
+            }
+            return `
+              <div class="d-inline-flex align-items-center gap-1 border rounded px-2 py-1 bg-light me-1 mb-1 shadow-sm badge-mapel-item">
+                <i class="bi bi-book text-primary"></i>
+                <strong class="text-dark">${escapeHtml(item.mapel)}</strong>
+                <span class="badge bg-primary-subtle text-primary border" style="font-size: 0.68rem;" title="${escapeAttr(kText)}">${escapeHtml(kText)}</span>
+                <span class="badge bg-info-subtle text-dark border" style="font-size: 0.68rem;" title="${escapeAttr(jText)}">${escapeHtml(jText)}</span>
+              </div>
+            `;
+          }).join('');
+        } else if (g.mapel_diampu) {
+          const mapels = String(g.mapel_diampu).split(',').map(m => m.trim()).filter(Boolean);
+          mapelHtml = mapels.map(m => `<span class="badge bg-success-subtle text-success border me-1 mb-1 px-2 py-1">${escapeHtml(m)}</span>`).join('') +
+            `<div class="small text-muted mt-1"><span class="badge bg-secondary-subtle text-secondary border me-1">${escapeHtml(g.kelas_diampu || 'Semua Kelas')}</span> <span class="badge bg-secondary-subtle text-secondary border">${escapeHtml(g.jurusan_diampu || 'Semua Jurusan')}</span></div>`;
+        } else {
+          mapelHtml = `<span class="badge bg-warning-subtle text-dark border"><i class="bi bi-exclamation-circle me-1"></i>Belum diatur</span>`;
+        }
+
+        // 2. Paket Soal Terkait
+        let paketIds = [];
+        if (Array.isArray(g.paket_ids)) {
+          paketIds = g.paket_ids;
+        } else if (typeof g.paket_ids === 'string' && g.paket_ids.trim()) {
+          try {
+            const parsed = JSON.parse(g.paket_ids);
+            if (Array.isArray(parsed)) paketIds = parsed;
+          } catch (e) {}
+        }
+
+        const paketBadges = paketIds.length > 0
+          ? paketIds.map(pid => {
+              const pk = allPaketMap.get(String(pid));
+              const pName = pk ? getCleanPaketName(pk.nama_paket, pk.kelas, pk.jurusan) : 'Paket Terkait';
+              return `<span class="badge bg-primary-subtle text-primary border border-primary-subtle me-1 mb-1" style="font-size: 0.72rem;"><i class="bi bi-journal-check me-1"></i>${escapeHtml(pName)}</span>`;
+            }).join('')
+          : `<span class="badge bg-light text-muted border" style="font-size: 0.72rem;"><i class="bi bi-magic me-1"></i>Otomatis</span>`;
+
+        // 3. Tombol Login Cepat
+        const loginUrl = `login-admin.html?role=guru&username=${encodeURIComponent(g.username || '')}`;
+
+        return `
+          <tr>
+            <td class="text-center fw-bold text-muted">${idx + 1}</td>
+            <td>
+              <div class="fw-bold text-dark">${escapeHtml(g.nama_lengkap || '-')}</div>
+            </td>
+            <td>
+              <span class="badge bg-secondary-subtle text-dark font-monospace px-2 py-1 border" style="font-size: 0.82rem;">
+                <i class="bi bi-person me-1"></i>${escapeHtml(g.username || '-')}
+              </span>
+            </td>
+            <td>${mapelHtml}</td>
+            <td>${paketBadges}</td>
+            <td class="text-center">
+              <a href="${loginUrl}" class="btn btn-sm btn-success fw-bold px-3 py-1 rounded-pill shadow-sm text-nowrap">
+                <i class="bi bi-box-arrow-in-right me-1"></i>Login Guru
+              </a>
+            </td>
+          </tr>
+        `;
+      });
+
+      tbody.innerHTML = rows.join('');
+    }
+
+    function filterDataGuru() {
+      const q = (document.getElementById('filter-search')?.value || '').toLowerCase().trim();
+      const jur = (document.getElementById('filter-jurusan')?.value || '').toUpperCase().trim();
+      const tkt = (document.getElementById('filter-tingkat')?.value || '').toUpperCase().trim();
+
+      const filtered = allGuruList.filter(g => {
+        // Filter Pencarian Teks
+        if (q) {
+          const name = String(g.nama_lengkap || '').toLowerCase();
+          const user = String(g.username || '').toLowerCase();
+          const mapel = String(g.mapel_diampu || '').toLowerCase();
+          const kls = String(g.kelas_diampu || '').toLowerCase();
+          const jurStr = String(g.jurusan_diampu || '').toLowerCase();
+          const matchQ = name.includes(q) || user.includes(q) || mapel.includes(q) || kls.includes(q) || jurStr.includes(q);
+          if (!matchQ) return false;
+        }
+
+        // Filter Jurusan
+        if (jur) {
+          const gJurList = String(g.jurusan_diampu || '').split(',').map(s => s.trim().toUpperCase()).filter(Boolean);
+          if (gJurList.length > 0 && !gJurList.includes('SEMUA') && !gJurList.includes(jur)) {
+            return false;
+          }
+        }
+
+        // Filter Tingkat
+        if (tkt) {
+          const tVal = tkt.replace('TINGKAT:', '').trim();
+          const gKls = String(g.kelas_diampu || '').toUpperCase();
+          if (gKls && gKls !== 'SEMUA') {
+            const hasTingkat = gKls.includes(tkt) || gKls.includes(`TINGKAT ${tVal}`) || gKls.split(',').some(k => k.trim().startsWith(tVal + ' '));
+            if (!hasTingkat) return false;
+          }
+        }
+
+        return true;
+      });
+
+      renderTable(filtered);
+    }
+
+    function resetFilters() {
+      document.getElementById('filter-search').value = '';
+      document.getElementById('filter-jurusan').value = '';
+      document.getElementById('filter-tingkat').value = '';
+      renderTable(allGuruList);
+    }
+
+    function getCleanPaketName(namaPaket, rawKelas, rawJurusan) {
+      if (!namaPaket || typeof namaPaket !== 'string') return namaPaket || 'Paket Soal';
+      let name = namaPaket.trim();
+
+      if (name.includes(',') && name.length > 25 && name.includes(' - ')) {
+        const dashIdx = name.indexOf(' - ');
+        const mapelPart = name.substring(0, dashIdx).trim();
+
+        const kList = String(rawKelas || '').split(',').map(s => s.trim()).filter(Boolean);
+        let kStr = '';
+        if (kList.length === 1) {
+          kStr = kList[0].toUpperCase().startsWith('TINGKAT:') ? `Tingkat ${kList[0].split(':')[1]}` : kList[0];
+        } else if (kList.length > 1) {
+          const firstT = kList[0].split(/[\s\-_]+/)[0].toUpperCase();
+          if (kList.every(k => k.split(/[\s\-_]+/)[0].toUpperCase() === firstT) && ['X', 'XI', 'XII', '10', '11', '12'].includes(firstT)) {
+            kStr = `Kelas ${firstT}`;
+          } else {
+            kStr = `${kList.length} Kelas`;
+          }
+        }
+        return kStr ? `${mapelPart} - ${kStr}` : mapelPart;
+      }
+
+      return name;
+    }
+
+    function escapeHtml(text) {
+      if (!text) return '';
+      return String(text)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#039;');
+    }
+
+    function escapeAttr(text) {
+      return escapeHtml(text);
+    }
+  </script>
+</body>
+</html>

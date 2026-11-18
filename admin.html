@@ -1,5 +1,6 @@
 <!DOCTYPE html>
 <html lang="id">
+
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -13,6 +14,7 @@
   <!-- Custom Styles -->
   <link rel="stylesheet" href="css/styles.css?v=9">
 </head>
+
 <body>
 
   <!-- Supabase Setup Configuration Modal (shows if credentials are not configured) -->
@@ -20,10 +22,12 @@
     <div class="modal-dialog modal-dialog-centered">
       <div class="modal-content glass-card border-0">
         <div class="modal-header border-0">
-          <h5 class="modal-title fw-bold text-primary"><i class="bi bi-gear-fill me-2"></i>Konfigurasi Awal Supabase</h5>
+          <h5 class="modal-title fw-bold text-primary"><i class="bi bi-gear-fill me-2"></i>Konfigurasi Awal Supabase
+          </h5>
         </div>
         <div class="modal-body">
-          <p class="small text-muted">Aplikasi ini berjalan client-side. Masukkan URL dan Anon Key project Supabase Anda untuk menghubungkan database.</p>
+          <p class="small text-muted">Aplikasi ini berjalan client-side. Masukkan URL dan Anon Key project Supabase Anda
+            untuk menghubungkan database.</p>
           <form id="form-setup-supabase">
             <div class="mb-3">
               <label for="setup-url" class="form-label fw-semibold">Supabase URL</label>
@@ -31,10 +35,12 @@
             </div>
             <div class="mb-3">
               <label for="setup-key" class="form-label fw-semibold">Supabase Anon Key</label>
-              <textarea class="form-control" id="setup-key" rows="3" placeholder="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..." required></textarea>
+              <textarea class="form-control" id="setup-key" rows="3"
+                placeholder="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..." required></textarea>
             </div>
             <div class="d-grid mt-4">
-              <button type="submit" class="btn btn-primary-custom text-white">Simpan & Hubungkan <i class="bi bi-check-circle ms-1"></i></button>
+              <button type="submit" class="btn btn-primary-custom text-white">Simpan & Hubungkan <i
+                  class="bi bi-check-circle ms-1"></i></button>
             </div>
           </form>
         </div>
@@ -47,9 +53,9 @@
     <div class="container-fluid px-4">
       <a class="navbar-brand d-flex align-items-center gap-2 fw-bold" href="#">
         <svg width="30" height="30" viewBox="0 0 100 100" fill="none" xmlns="http://www.w3.org/2000/svg">
-          <circle cx="50" cy="50" r="45" fill="#0d6efd" stroke="#ffffff" stroke-width="4"/>
-          <path d="M50 20 L25 40 L35 40 L35 75 L65 75 L65 40 L75 40 Z" fill="#ffffff"/>
-          <circle cx="50" cy="50" r="8" fill="#ffc107"/>
+          <circle cx="50" cy="50" r="45" fill="#0d6efd" stroke="#ffffff" stroke-width="4" />
+          <path d="M50 20 L25 40 L35 40 L35 75 L65 75 L65 40 L75 40 Z" fill="#ffffff" />
+          <circle cx="50" cy="50" r="8" fill="#ffc107" />
         </svg>
         <span>Panel Admin CBT</span>
       </a>
@@ -57,15 +63,17 @@
         <button id="theme-toggle-admin" class="btn btn-sm btn-outline-light me-3 border-0" title="Toggle Dark Mode">
           <i class="bi bi-moon-fill"></i>
         </button>
-        <span class="navbar-text text-white fw-semibold me-3 d-none d-md-block" id="admin-email">admin@smkn1lempuing.sch.id</span>
-        <button class="btn btn-outline-light btn-sm" onclick="Auth.logout()"><i class="bi bi-box-arrow-right"></i> Keluar</button>
+        <span class="navbar-text text-white fw-semibold me-3 d-none d-md-block"
+          id="admin-email">admin@smkn1lempuing.sch.id</span>
+        <button class="btn btn-outline-light btn-sm" onclick="Auth.logout()"><i class="bi bi-box-arrow-right"></i>
+          Keluar</button>
       </div>
     </div>
   </nav>
 
   <div class="container-fluid">
     <div class="row">
-      
+
       <!-- Sidebar -->
       <nav class="col-md-3 col-lg-2 d-md-block admin-sidebar collapse p-0" id="sidebarMenu">
         <div class="position-sticky pt-3">
@@ -78,8 +86,10 @@
           </div>
           <!-- Multi-Shard Selector (Muncul jika ada lebih dari 1 project Supabase) -->
           <div class="px-3 mb-3" id="admin-shard-selector-wrapper" style="display: none;">
-            <label class="form-label text-warning small fw-bold mb-1"><i class="bi bi-hdd-network me-1"></i>Server Database:</label>
-            <select class="form-select form-select-sm bg-dark text-white border-warning" id="admin-shard-selector" onchange="handleAdminShardSwitch(this.value)">
+            <label class="form-label text-warning small fw-bold mb-1"><i class="bi bi-hdd-network me-1"></i>Server
+              Database:</label>
+            <select class="form-select form-select-sm bg-dark text-white border-warning" id="admin-shard-selector"
+              onchange="handleAdminShardSwitch(this.value)">
             </select>
           </div>
           <ul class="nav flex-column">
@@ -123,39 +133,53 @@
       </nav>
 
       <!-- Main Content Area -->
-      <main class="col-md-9 ms-sm-auto col-lg-10 px-md-4 py-4" id="main-content" style="min-height: calc(100vh - 56px);">
-        
+      <main class="col-md-9 ms-sm-auto col-lg-10 px-md-4 py-4" id="main-content"
+        style="min-height: calc(100vh - 56px);">
+
         <!-- SECTION: DASHBOARD & LIVE MONITORING -->
         <section id="sec-dashboard">
           <!-- Header Dashboard -->
-          <div class="d-flex justify-content-between flex-wrap flex-md-nowrap align-items-center pt-3 pb-2 mb-3 border-bottom">
+          <div
+            class="d-flex justify-content-between flex-wrap flex-md-nowrap align-items-center pt-3 pb-2 mb-3 border-bottom">
             <div>
               <div class="d-flex align-items-center gap-2">
                 <h1 class="h2 text-dark mb-0">Live Monitoring & Statistik</h1>
-                <span class="badge bg-success-subtle text-success border border-success-subtle rounded-pill px-2 py-1 small">
-                  <span class="spinner-grow spinner-grow-sm me-1 text-success" style="width: 0.5rem; height: 0.5rem;" role="status"></span> Live Proktor
+                <span
+                  class="badge bg-success-subtle text-success border border-success-subtle rounded-pill px-2 py-1 small">
+                  <span class="spinner-grow spinner-grow-sm me-1 text-success" style="width: 0.5rem; height: 0.5rem;"
+                    role="status"></span> Live Proktor
                 </span>
               </div>
-              <p class="text-muted small mb-0 mt-1">Pantau kehadiran, progres pengerjaan ujian siswa per kelas & jurusan secara real-time</p>
+              <p class="text-muted small mb-0 mt-1">Pantau kehadiran, progres pengerjaan ujian siswa per kelas & jurusan
+                secara real-time</p>
             </div>
             <div class="d-flex align-items-center flex-wrap gap-2 mt-2 mt-md-0">
-              <div class="d-inline-flex align-items-center bg-warning-subtle border border-warning rounded-pill px-3 py-1 me-1" title="Token Pembebas otomatis berganti acak setiap 3 menit">
+              <div
+                class="d-inline-flex align-items-center bg-warning-subtle border border-warning rounded-pill px-3 py-1 me-1"
+                title="Token Pembebas otomatis berganti acak setiap 3 menit">
                 <i class="bi bi-key-fill text-warning-emphasis me-1"></i>
                 <span class="small text-dark me-1">Token Pembebas:</span>
                 <strong class="font-monospace text-danger fs-6 me-2" id="dash-active-token">------</strong>
-                <span class="badge bg-dark text-warning font-monospace me-2" id="dash-token-countdown" title="Hitung mundur acak otomatis 3 menit">03:00</span>
-                <button type="button" class="btn btn-sm btn-warning py-0 px-2 rounded-pill fw-semibold" style="font-size: 0.72rem;" onclick="quickRotateTokenPembebas()" title="Acak Token Sekarang">
+                <span class="badge bg-dark text-warning font-monospace me-2" id="dash-token-countdown"
+                  title="Hitung mundur acak otomatis 3 menit">03:00</span>
+                <button type="button" class="btn btn-sm btn-warning py-0 px-2 rounded-pill fw-semibold"
+                  style="font-size: 0.72rem;" onclick="quickRotateTokenPembebas()" title="Acak Token Sekarang">
                   <i class="bi bi-arrow-repeat"></i> Acak
                 </button>
               </div>
               <div class="form-check form-switch d-inline-flex align-items-center me-1 mb-0">
-                <input class="form-check-input me-1" type="checkbox" id="switch-auto-refresh" onchange="toggleAutoRefresh(this.checked)" checked>
-                <label class="form-check-label small fw-semibold text-muted" for="switch-auto-refresh">Auto-Refresh (15d)</label>
+                <input class="form-check-input me-1" type="checkbox" id="switch-auto-refresh"
+                  onchange="toggleAutoRefresh(this.checked)" checked>
+                <label class="form-check-label small fw-semibold text-muted" for="switch-auto-refresh">Auto-Refresh
+                  (15d)</label>
               </div>
-              <button class="btn btn-outline-primary btn-sm rounded-pill px-3" onclick="loadDashboardStats(true)" id="btn-refresh-dashboard">
+              <button class="btn btn-outline-primary btn-sm rounded-pill px-3" onclick="loadDashboardStats(true)"
+                id="btn-refresh-dashboard">
                 <i class="bi bi-arrow-clockwise me-1" id="icon-refresh-dashboard"></i> Refresh Data
               </button>
-              <button class="btn btn-warning btn-sm rounded-pill px-3 fw-bold text-dark shadow-sm border border-warning" onclick="bukaSesiMapelBaruModal()" id="btn-buka-sesi-mapel" title="Buka sesi mapel berikutnya & bersihkan pelanggaran siswa tanpa menghapus nilai">
+              <button class="btn btn-warning btn-sm rounded-pill px-3 fw-bold text-dark shadow-sm border border-warning"
+                onclick="bukaSesiMapelBaruModal()" id="btn-buka-sesi-mapel"
+                title="Buka sesi mapel berikutnya & bersihkan pelanggaran siswa tanpa menghapus nilai">
                 <i class="bi bi-skip-forward-circle-fill me-1 text-danger"></i> Buka Sesi Mapel Berikutnya
               </button>
             </div>
@@ -169,19 +193,22 @@
                   <h6 class="text-muted small text-uppercase mb-1">Total Peserta</h6>
                   <h3 class="fw-bold mb-0 text-dark" id="stat-total-peserta">0</h3>
                 </div>
-                <div class="avatar-circle" style="background-color: rgba(13, 110, 253, 0.1); color: var(--primary-color);">
+                <div class="avatar-circle"
+                  style="background-color: rgba(13, 110, 253, 0.1); color: var(--primary-color);">
                   <i class="bi bi-people-fill fs-4"></i>
                 </div>
               </div>
             </div>
             <div class="col-sm-6 col-xl">
-              <div class="glass-card p-3 d-flex align-items-center justify-content-between border-start border-4 border-success">
+              <div
+                class="glass-card p-3 d-flex align-items-center justify-content-between border-start border-4 border-success">
                 <div>
                   <h6 class="text-muted small text-uppercase mb-1">Sedang Ujian</h6>
                   <h3 class="fw-bold mb-0 text-success" id="stat-sedang-ujian">0</h3>
                   <small class="text-muted" style="font-size: 0.75rem;">Online Aktif</small>
                 </div>
-                <div class="avatar-circle" style="background-color: rgba(25, 135, 84, 0.1); color: var(--success-color);">
+                <div class="avatar-circle"
+                  style="background-color: rgba(25, 135, 84, 0.1); color: var(--success-color);">
                   <i class="bi bi-laptop-fill fs-4"></i>
                 </div>
               </div>
@@ -193,7 +220,8 @@
                   <h3 class="fw-bold mb-0 text-primary" id="stat-sudah-ujian">0</h3>
                   <small class="text-muted" style="font-size: 0.75rem;">Submit Nilai</small>
                 </div>
-                <div class="avatar-circle" style="background-color: rgba(13, 110, 253, 0.1); color: var(--primary-color);">
+                <div class="avatar-circle"
+                  style="background-color: rgba(13, 110, 253, 0.1); color: var(--primary-color);">
                   <i class="bi bi-check-circle-fill fs-4"></i>
                 </div>
               </div>
@@ -205,19 +233,22 @@
                   <h3 class="fw-bold mb-0 text-warning" id="stat-belum-ujian">0</h3>
                   <small class="text-muted" style="font-size: 0.75rem;">Belum Masuk</small>
                 </div>
-                <div class="avatar-circle" style="background-color: rgba(255, 193, 7, 0.1); color: var(--warning-color);">
+                <div class="avatar-circle"
+                  style="background-color: rgba(255, 193, 7, 0.1); color: var(--warning-color);">
                   <i class="bi bi-clock-history fs-4"></i>
                 </div>
               </div>
             </div>
             <div class="col-sm-6 col-xl">
-              <div class="glass-card p-3 d-flex align-items-center justify-content-between border-start border-4 border-danger">
+              <div
+                class="glass-card p-3 d-flex align-items-center justify-content-between border-start border-4 border-danger">
                 <div>
                   <h6 class="text-muted small text-uppercase mb-1">Terkunci / Warning</h6>
                   <h3 class="fw-bold mb-0 text-danger" id="stat-terkunci-count">0</h3>
                   <small class="text-muted" style="font-size: 0.75rem;">Pelanggaran</small>
                 </div>
-                <div class="avatar-circle" style="background-color: rgba(220, 53, 69, 0.1); color: var(--danger-color);">
+                <div class="avatar-circle"
+                  style="background-color: rgba(220, 53, 69, 0.1); color: var(--danger-color);">
                   <i class="bi bi-shield-exclamation fs-4"></i>
                 </div>
               </div>
@@ -228,15 +259,18 @@
           <div class="glass-card p-4 mb-4">
             <div class="d-flex justify-content-between align-items-center flex-wrap gap-2 mb-3">
               <div>
-                <h5 class="fw-bold mb-1"><i class="bi bi-grid-3x3-gap-fill text-primary me-2"></i>Status Pengerjaan per Kelas / Rombel</h5>
+                <h5 class="fw-bold mb-1"><i class="bi bi-grid-3x3-gap-fill text-primary me-2"></i>Status Pengerjaan per
+                  Kelas / Rombel</h5>
                 <p class="text-muted small mb-0">Klik pada kelas untuk menyaring daftar peserta aktif di bawah</p>
               </div>
               <!-- Toolbar Filter Card Kelas -->
               <div class="d-flex align-items-center gap-2">
-                <select class="form-select form-select-sm" id="monitor-card-filter-jurusan" onchange="renderMonitoringKelasCards()" style="min-width: 150px;">
+                <select class="form-select form-select-sm" id="monitor-card-filter-jurusan"
+                  onchange="renderMonitoringKelasCards()" style="min-width: 150px;">
                   <option value="">Semua Jurusan</option>
                 </select>
-                <button class="btn btn-sm btn-outline-secondary py-1" onclick="resetMonitoringKelasFilter()" title="Tampilkan Semua">
+                <button class="btn btn-sm btn-outline-secondary py-1" onclick="resetMonitoringKelasFilter()"
+                  title="Tampilkan Semua">
                   <i class="bi bi-arrow-repeat"></i> Semua
                 </button>
               </div>
@@ -254,13 +288,15 @@
           <div class="glass-card p-4 mb-4" id="section-live-peserta">
             <div class="d-flex justify-content-between align-items-center flex-wrap gap-2 mb-3">
               <div class="d-flex align-items-center gap-2">
-                <h5 class="fw-bold mb-0"><i class="bi bi-broadcast text-danger me-2"></i>Tabel Monitoring Peserta CBT</h5>
+                <h5 class="fw-bold mb-0"><i class="bi bi-broadcast text-danger me-2"></i>Tabel Monitoring Peserta CBT
+                </h5>
                 <span class="badge bg-danger rounded-pill px-2 py-1 small" id="badge-live-table-count">0 Peserta</span>
               </div>
               <div id="monitor-active-class-pill" class="d-none">
                 <span class="badge bg-primary-subtle text-primary border border-primary-subtle px-3 py-1 rounded-pill">
                   Kelas: <strong id="monitor-active-class-name">-</strong>
-                  <button type="button" class="btn-close btn-close-sm ms-2" style="font-size: 0.65rem;" onclick="clearMonitoringClassFilter()"></button>
+                  <button type="button" class="btn-close btn-close-sm ms-2" style="font-size: 0.65rem;"
+                    onclick="clearMonitoringClassFilter()"></button>
                 </span>
               </div>
             </div>
@@ -270,25 +306,29 @@
               <div class="col-md-3 col-sm-6">
                 <div class="input-group input-group-sm">
                   <span class="input-group-text"><i class="bi bi-search"></i></span>
-                  <input type="text" class="form-control" id="monitor-search-input" placeholder="Cari nama / username..." oninput="filterMonitoringTable()">
+                  <input type="text" class="form-control" id="monitor-search-input"
+                    placeholder="Cari nama / username..." oninput="filterMonitoringTable()">
                 </div>
               </div>
               <div class="col-md-2 col-sm-6">
-                <select class="form-select form-select-sm" id="monitor-table-filter-jurusan" onchange="onMonitorFilterJurusanChange()">
+                <select class="form-select form-select-sm" id="monitor-table-filter-jurusan"
+                  onchange="onMonitorFilterJurusanChange()">
                   <option value="">Semua Jurusan</option>
                 </select>
               </div>
               <div class="col-md-2 col-sm-6">
-                <select class="form-select form-select-sm" id="monitor-table-filter-kelas" onchange="filterMonitoringTable()">
+                <select class="form-select form-select-sm" id="monitor-table-filter-kelas"
+                  onchange="filterMonitoringTable()">
                   <option value="">Semua Kelas</option>
                 </select>
               </div>
               <div class="col-md-3 col-sm-6">
-                <select class="form-select form-select-sm" id="monitor-table-filter-status" onchange="filterMonitoringTable()">
-                  <option value="Sedang Ujian" selected>Ã°Å¸Å¸Â¢ Sedang Ujian (Online)</option>
-                  <option value="Belum Ujian">Ã¢Å¡Âª Belum Ujian (Belum Masuk)</option>
-                  <option value="Sudah Ujian">Ã°Å¸â€Âµ Sudah Ujian (Selesai)</option>
-                  <option value="PELANGGARAN">Ã¢Å¡Â Ã¯Â¸Â Ada Pelanggaran / Terkunci</option>
+                <select class="form-select form-select-sm" id="monitor-table-filter-status"
+                  onchange="filterMonitoringTable()">
+                  <option value="Sedang Ujian" selected>Sedang Ujian (Online)</option>
+                  <option value="Belum Ujian">Belum Ujian (Belum Masuk)</option>
+                  <option value="Sudah Ujian">Sudah Ujian (Selesai)</option>
+                  <option value="PELANGGARAN">Ada Pelanggaran / Terkunci</option>
                   <option value="">Semua Status Peserta</option>
                 </select>
               </div>
@@ -326,9 +366,11 @@
 
           <!-- Section: Statistik & Distribusi Nilai Ujian (Collapsible Card) -->
           <div class="glass-card p-4 mb-4">
-            <div class="d-flex justify-content-between align-items-center cursor-pointer mb-3" data-bs-toggle="collapse" data-bs-target="#collapseAnalytics" style="cursor: pointer;">
+            <div class="d-flex justify-content-between align-items-center cursor-pointer mb-3" data-bs-toggle="collapse"
+              data-bs-target="#collapseAnalytics" style="cursor: pointer;">
               <div class="d-flex align-items-center gap-2">
-                <h5 class="fw-bold mb-0 text-dark"><i class="bi bi-bar-chart-line-fill text-primary me-2"></i>Statistik & Distribusi Nilai Ujian</h5>
+                <h5 class="fw-bold mb-0 text-dark"><i class="bi bi-bar-chart-line-fill text-primary me-2"></i>Statistik
+                  & Distribusi Nilai Ujian</h5>
                 <span class="badge bg-secondary-subtle text-dark border small">Grafik Distribusi</span>
               </div>
               <div class="d-flex align-items-center gap-3">
@@ -346,7 +388,8 @@
               <div class="row g-4 mt-1">
                 <div class="col-12">
                   <div class="p-3 border rounded-3 bg-white h-100">
-                    <h6 class="fw-semibold mb-3 text-muted"><i class="bi bi-bar-chart-fill me-2"></i>Distribusi Nilai Peserta (Rentang 0 - 100)</h6>
+                    <h6 class="fw-semibold mb-3 text-muted"><i class="bi bi-bar-chart-fill me-2"></i>Distribusi Nilai
+                      Peserta (Rentang 0 - 100)</h6>
                     <div style="position: relative; height: 260px;">
                       <canvas id="scoreDistributionChart"></canvas>
                     </div>
@@ -359,16 +402,21 @@
 
         <!-- SECTION: DATA PESERTA -->
         <section id="sec-peserta" class="d-none">
-          <div class="d-flex justify-content-between flex-wrap flex-md-nowrap align-items-center pt-3 pb-2 mb-4 border-bottom">
+          <div
+            class="d-flex justify-content-between flex-wrap flex-md-nowrap align-items-center pt-3 pb-2 mb-4 border-bottom">
             <h1 class="h2 text-dark">Data Peserta Seleksi</h1>
             <div class="btn-toolbar mb-2 mb-md-0 gap-2">
-              <button class="btn btn-warning btn-sm rounded-pill px-3 text-dark fw-bold shadow-sm" onclick="bukaSesiMapelBaruModal()" title="Buka sesi mapel berikutnya & reset kehadiran tanpa hapus nilai">
+              <button class="btn btn-warning btn-sm rounded-pill px-3 text-dark fw-bold shadow-sm"
+                onclick="bukaSesiMapelBaruModal()"
+                title="Buka sesi mapel berikutnya & reset kehadiran tanpa hapus nilai">
                 <i class="bi bi-skip-forward-circle-fill me-1 text-danger"></i> Buka Sesi Mapel Baru
               </button>
-              <button class="btn btn-outline-warning btn-sm rounded-pill px-3 text-dark fw-semibold" onclick="openCetakKartuModal()">
+              <button class="btn btn-outline-warning btn-sm rounded-pill px-3 text-dark fw-semibold"
+                onclick="openCetakKartuModal()">
                 <i class="bi bi-printer-fill me-1"></i> Cetak Kartu Ujian
               </button>
-              <button class="btn btn-outline-primary btn-sm rounded-pill px-3" onclick="ExcelTemplates.downloadPesertaTemplate()">
+              <button class="btn btn-outline-primary btn-sm rounded-pill px-3"
+                onclick="ExcelTemplates.downloadPesertaTemplate()">
                 <i class="bi bi-cloud-download me-1"></i> Unduh Template
               </button>
               <button class="btn btn-success btn-sm rounded-pill px-3" onclick="openImportModal('peserta')">
@@ -391,7 +439,8 @@
             <div class="col-md-3">
               <div class="input-group">
                 <span class="input-group-text"><i class="bi bi-search"></i></span>
-                <input type="text" class="form-control" id="search-peserta" placeholder="Cari Nama/Username..." oninput="filterPesertaList()">
+                <input type="text" class="form-control" id="search-peserta" placeholder="Cari Nama/Username..."
+                  oninput="filterPesertaList()">
               </div>
             </div>
             <div class="col-md-2">
@@ -449,14 +498,16 @@
               </table>
             </div>
             <!-- Pagination Controls Peserta -->
-            <div class="d-flex justify-content-between align-items-center flex-wrap gap-2 p-3 border-top bg-light-subtle rounded-bottom">
+            <div
+              class="d-flex justify-content-between align-items-center flex-wrap gap-2 p-3 border-top bg-light-subtle rounded-bottom">
               <div class="small text-muted" id="peserta-pagination-info">
                 Menampilkan 0 - 0 dari 0 peserta
               </div>
               <div class="d-flex align-items-center gap-2">
                 <div class="d-flex align-items-center gap-1">
                   <span class="small text-muted me-1">Per halaman:</span>
-                  <select class="form-select form-select-sm" id="peserta-page-size" style="width: auto;" onchange="changePesertaPageSize(this.value)">
+                  <select class="form-select form-select-sm" id="peserta-page-size" style="width: auto;"
+                    onchange="changePesertaPageSize(this.value)">
                     <option value="50" selected>50</option>
                     <option value="100">100</option>
                     <option value="200">200</option>
@@ -473,12 +524,17 @@
 
         <!-- SECTION: DATA GURU MATA PELAJARAN -->
         <section id="sec-guru" class="d-none">
-          <div class="d-flex justify-content-between flex-wrap flex-md-nowrap align-items-center pt-3 pb-2 mb-4 border-bottom">
+          <div
+            class="d-flex justify-content-between flex-wrap flex-md-nowrap align-items-center pt-3 pb-2 mb-4 border-bottom">
             <div>
               <h1 class="h2 text-dark mb-1">Data Guru Mata Pelajaran</h1>
-              <p class="text-muted small mb-0">Kelola akun guru pengampu mata pelajaran agar guru dapat membuat soal (Manual / Excel / AI) dan mengunduh nilai sesuai mapel yang ditentukan Admin.</p>
+              <p class="text-muted small mb-0">Kelola akun guru pengampu mata pelajaran agar guru dapat membuat soal
+                (Manual / Excel / AI) dan mengunduh nilai sesuai mapel yang ditentukan Admin.</p>
             </div>
             <div class="btn-toolbar mb-2 mb-md-0 gap-2">
+              <a href="daftar-guru.html" target="_blank" class="btn btn-outline-success btn-sm rounded-pill px-3" title="Buka dan bagikan link halaman rekap guru publik tanpa perlu login">
+                <i class="bi bi-share me-1"></i> Bagikan Link Publik (Tanpa Login)
+              </a>
               <button class="btn btn-outline-primary btn-sm rounded-pill px-3" onclick="loadGuru()">
                 <i class="bi bi-arrow-clockwise me-1"></i> Refresh
               </button>
@@ -491,7 +547,10 @@
           <div class="alert alert-info border-0 shadow-sm d-flex align-items-center mb-4">
             <i class="bi bi-person-workspace fs-4 me-3 text-primary"></i>
             <div class="small">
-              <strong>Cara Kerja Akun Guru:</strong> Setiap guru yang didaftarkan di sini dapat login melalui halaman <code>Login Guru Mapel</code>. Guru <strong>hanya dapat melihat, membuat soal (Manual / Import Excel / AI Generator), dan mengunduh nilai (Excel)</strong> untuk Mata Pelajaran atau Paket Soal yang ditugaskan oleh Admin.
+              <strong>Cara Kerja Akun Guru:</strong> Setiap guru yang didaftarkan di sini dapat login melalui halaman
+              <code>Login Guru Mapel</code>. Guru <strong>hanya dapat melihat, membuat soal (Manual / Import Excel / AI
+                Generator), dan mengunduh nilai (Excel)</strong> untuk Mata Pelajaran atau Paket Soal yang ditugaskan
+              oleh Admin.
             </div>
           </div>
 
@@ -511,7 +570,8 @@
                 <tbody id="table-guru-body">
                   <tr>
                     <td colspan="7" class="text-center py-4 text-muted">
-                      <span class="spinner-border spinner-border-sm me-1 text-primary"></span> Memuat daftar akun guru...
+                      <span class="spinner-border spinner-border-sm me-1 text-primary"></span> Memuat daftar akun
+                      guru...
                     </td>
                   </tr>
                 </tbody>
@@ -522,24 +582,29 @@
 
         <!-- SECTION: DATA SOAL -->
         <section id="sec-soal" class="d-none">
-          <div class="d-flex justify-content-between flex-wrap flex-md-nowrap align-items-center pt-3 pb-2 mb-3 border-bottom">
+          <div
+            class="d-flex justify-content-between flex-wrap flex-md-nowrap align-items-center pt-3 pb-2 mb-3 border-bottom">
             <div>
               <h1 class="h2 text-dark mb-0" id="heading-sec-soal">Bank Soal & Paket Ujian</h1>
             </div>
             <div class="btn-toolbar mb-2 mb-md-0 gap-2">
-              <button class="btn btn-outline-primary btn-sm rounded-pill px-3" onclick="ExcelTemplates.downloadSoalTemplate()">
+              <button class="btn btn-outline-primary btn-sm rounded-pill px-3"
+                onclick="ExcelTemplates.downloadSoalTemplate()">
                 <i class="bi bi-cloud-download me-1"></i> Unduh Template Soal
               </button>
             </div>
           </div>
 
           <!-- Banner Info khusus ketika login sebagai Guru Mapel -->
-          <div id="guru-scope-banner-soal" class="alert alert-success border-success border-opacity-25 d-none align-items-center justify-content-between flex-wrap gap-2 mb-4">
+          <div id="guru-scope-banner-soal"
+            class="alert alert-success border-success border-opacity-25 d-none align-items-center justify-content-between flex-wrap gap-2 mb-4">
             <div class="d-flex align-items-center">
               <i class="bi bi-person-workspace fs-4 me-3 text-success"></i>
               <div>
                 <div class="fw-bold text-dark">Mode Guru Pengampu Mata Pelajaran</div>
-                <div class="small text-muted">Anda memiliki akses penuh untuk membuat & mengelola soal (Manual, Import Excel, dan AI Generator) pada mata pelajaran: <strong class="text-success" id="guru-banner-mapel-soal">-</strong></div>
+                <div class="small text-muted">Anda memiliki akses penuh untuk membuat & mengelola soal (Manual, Import
+                  Excel, dan AI Generator) pada mata pelajaran: <strong class="text-success"
+                    id="guru-banner-mapel-soal">-</strong></div>
               </div>
             </div>
           </div>
@@ -551,10 +616,12 @@
                 <div class="d-flex justify-content-between align-items-center mb-2">
                   <h5 class="fw-bold mb-0">Daftar Paket Soal</h5>
                   <div class="btn-group btn-group-sm" id="btn-group-master-jurusan-kelas">
-                    <button class="btn btn-outline-secondary py-0 px-2" onclick="openJurusanModal()" title="Kelola Master Jurusan">
+                    <button class="btn btn-outline-secondary py-0 px-2" onclick="openJurusanModal()"
+                      title="Kelola Master Jurusan">
                       <i class="bi bi-mortarboard-fill me-1"></i>Jurusan
                     </button>
-                    <button class="btn btn-outline-secondary py-0 px-2" onclick="openKelasModal()" title="Kelola Master Kelas">
+                    <button class="btn btn-outline-secondary py-0 px-2" onclick="openKelasModal()"
+                      title="Kelola Master Kelas">
                       <i class="bi bi-collection-fill me-1"></i>Kelas
                     </button>
                   </div>
@@ -575,11 +642,12 @@
                   <i class="bi bi-plus-circle me-1"></i> Buat Paket Baru
                 </button>
                 <div class="list-group" id="paket-list-container">
-                  <div class="text-center py-4 text-muted"><span class="spinner-border spinner-border-sm me-1"></span> Memuat paket...</div>
+                  <div class="text-center py-4 text-muted"><span class="spinner-border spinner-border-sm me-1"></span>
+                    Memuat paket...</div>
                 </div>
               </div>
             </div>
-            
+
             <!-- Paket Content -->
             <div class="col-md-8">
               <div class="glass-card p-4 h-100 d-none flex-column" id="paket-detail-container">
@@ -589,17 +657,21 @@
                     <p class="small text-muted mb-0" id="active-paket-jadwal"><i class="bi bi-clock"></i> Jadwal: -</p>
                   </div>
                   <div>
-                    <button class="btn btn-sm btn-outline-primary" id="btn-edit-paket" onclick="editPaket()"><i class="bi bi-pencil"></i> Edit Paket</button>
-                    <button class="btn btn-sm btn-outline-danger" id="btn-delete-paket" onclick="deletePaket()"><i class="bi bi-trash"></i> Hapus Paket</button>
+                    <button class="btn btn-sm btn-outline-primary" id="btn-edit-paket" onclick="editPaket()"><i
+                        class="bi bi-pencil"></i> Edit Paket</button>
+                    <button class="btn btn-sm btn-outline-danger" id="btn-delete-paket" onclick="deletePaket()"><i
+                        class="bi bi-trash"></i> Hapus Paket</button>
                   </div>
                 </div>
-                
+
                 <hr>
-                
+
                 <div class="d-flex justify-content-between align-items-center mb-3">
                   <h6 class="fw-bold mb-0">Daftar Pertanyaan</h6>
                   <div class="btn-group">
-                    <button class="btn btn-sm text-white shadow-sm" style="background: linear-gradient(135deg, #4f46e5 0%, #7c3aed 100%);" onclick="openAiGeneratorModal()">
+                    <button class="btn btn-sm text-white shadow-sm"
+                      style="background: linear-gradient(135deg, #4f46e5 0%, #7c3aed 100%);"
+                      onclick="openAiGeneratorModal()">
                       <i class="bi bi-robot me-1"></i> Buat Soal dengan AI
                     </button>
                     <button class="btn btn-success btn-sm" onclick="openImportModal('soal')">
@@ -610,17 +682,21 @@
                     </button>
                   </div>
                 </div>
-                
-                <div id="soal-list-container" class="flex-grow-1 overflow-auto" style="max-height: 500px; padding-right: 5px;">
+
+                <div id="soal-list-container" class="flex-grow-1 overflow-auto"
+                  style="max-height: 500px; padding-right: 5px;">
                   <!-- dynamic soal -->
                 </div>
               </div>
-              
+
               <!-- Empty State -->
-              <div class="glass-card p-5 text-center h-100 text-muted d-flex flex-column justify-content-center align-items-center" id="paket-empty-state">
+              <div
+                class="glass-card p-5 text-center h-100 text-muted d-flex flex-column justify-content-center align-items-center"
+                id="paket-empty-state">
                 <i class="bi bi-collection text-secondary mb-3" style="font-size: 3rem;"></i>
                 <h5>Pilih Paket Soal</h5>
-                <p id="paket-empty-help">Silakan pilih paket di samping kiri, atau buat paket baru untuk mengelola soal ujian.</p>
+                <p id="paket-empty-help">Silakan pilih paket di samping kiri, atau buat paket baru untuk mengelola soal
+                  ujian.</p>
               </div>
             </div>
           </div>
@@ -628,10 +704,12 @@
 
         <!-- SECTION: DATA JURUSAN & KELAS -->
         <section id="sec-jurusan" class="d-none">
-          <div class="d-flex justify-content-between flex-wrap flex-md-nowrap align-items-center pt-3 pb-2 mb-4 border-bottom">
+          <div
+            class="d-flex justify-content-between flex-wrap flex-md-nowrap align-items-center pt-3 pb-2 mb-4 border-bottom">
             <div>
               <h1 class="h2 text-dark">Data Jurusan & Kelas</h1>
-              <p class="text-muted small mb-0">Kelola master jurusan dan kelas agar soal dapat disesuaikan per jurusan maupun per kelas</p>
+              <p class="text-muted small mb-0">Kelola master jurusan dan kelas agar soal dapat disesuaikan per jurusan
+                maupun per kelas</p>
             </div>
             <div class="btn-toolbar mb-2 mb-md-0 gap-2">
               <button class="btn btn-outline-primary btn-sm rounded-pill px-3" onclick="refreshJurusanDanKelas()">
@@ -649,10 +727,13 @@
                 <form id="form-jurusan-quick">
                   <div class="mb-3">
                     <label for="quick-nama-jurusan" class="form-label fw-semibold">Nama / Singkatan Jurusan</label>
-                    <input type="text" class="form-control" id="quick-nama-jurusan" placeholder="Cth: TKJ, RPL, DKV, Akuntansi" required>
-                    <small class="text-muted">Nama jurusan akan otomatis muncul di dropdown pilihan paket soal & peserta.</small>
+                    <input type="text" class="form-control" id="quick-nama-jurusan"
+                      placeholder="Cth: TKJ, RPL, DKV, Akuntansi" required>
+                    <small class="text-muted">Nama jurusan akan otomatis muncul di dropdown pilihan paket soal &
+                      peserta.</small>
                   </div>
-                  <button type="submit" class="btn btn-primary-custom text-white btn-sm w-100" id="btn-save-jurusan-quick">
+                  <button type="submit" class="btn btn-primary-custom text-white btn-sm w-100"
+                    id="btn-save-jurusan-quick">
                     <i class="bi bi-save me-1"></i> Simpan Jurusan
                   </button>
                 </form>
@@ -663,7 +744,8 @@
             <div class="col-md-8">
               <div class="glass-card p-4 h-100">
                 <div class="d-flex justify-content-between align-items-center mb-3">
-                  <h5 class="fw-bold mb-0"><i class="bi bi-diagram-3-fill me-2 text-primary"></i>Daftar Jurusan Aktif</h5>
+                  <h5 class="fw-bold mb-0"><i class="bi bi-diagram-3-fill me-2 text-primary"></i>Daftar Jurusan Aktif
+                  </h5>
                   <span class="badge bg-primary" id="badge-total-jurusan">0 Jurusan</span>
                 </div>
                 <div class="table-responsive">
@@ -699,8 +781,10 @@
                 <form id="form-kelas-quick">
                   <div class="mb-3">
                     <label for="quick-nama-kelas" class="form-label fw-semibold">Nama Kelas / Rombel</label>
-                    <input type="text" class="form-control" id="quick-nama-kelas" placeholder="Cth: X TKJ 1, X TKJ 2, XI RPL 1" required>
-                    <small class="text-muted">Kelas dapat digunakan untuk membedakan soal ujian antar kelas dalam jurusan yang sama.</small>
+                    <input type="text" class="form-control" id="quick-nama-kelas"
+                      placeholder="Cth: X TKJ 1, X TKJ 2, XI RPL 1" required>
+                    <small class="text-muted">Kelas dapat digunakan untuk membedakan soal ujian antar kelas dalam
+                      jurusan yang sama.</small>
                   </div>
                   <button type="submit" class="btn btn-success text-white btn-sm w-100" id="btn-save-kelas-quick">
                     <i class="bi bi-save me-1"></i> Simpan Kelas
@@ -743,25 +827,32 @@
 
         <!-- SECTION: HASIL & NILAI -->
         <section id="sec-nilai" class="d-none">
-          <div class="d-flex justify-content-between flex-wrap flex-md-nowrap align-items-center pt-3 pb-2 mb-3 border-bottom">
+          <div
+            class="d-flex justify-content-between flex-wrap flex-md-nowrap align-items-center pt-3 pb-2 mb-3 border-bottom">
             <h1 class="h2 text-dark mb-0" id="heading-sec-nilai">Hasil Nilai Ujian Seleksi</h1>
             <div class="btn-toolbar mb-2 mb-md-0 gap-2">
-              <button class="btn btn-outline-danger btn-sm rounded-pill px-3 fw-semibold shadow-sm" onclick="bersihkanHasilSimulasiModal()" id="btn-bersihkan-simulasi" title="Kosongkan seluruh nilai simulasi & bersihkan status peserta untuk persiapan hari-H">
+              <button class="btn btn-outline-danger btn-sm rounded-pill px-3 fw-semibold shadow-sm"
+                onclick="bersihkanHasilSimulasiModal()" id="btn-bersihkan-simulasi"
+                title="Kosongkan seluruh nilai simulasi & bersihkan status peserta untuk persiapan hari-H">
                 <i class="bi bi-trash3-fill me-1"></i> Bersihkan Hasil Simulasi
               </button>
-              <button class="btn btn-success btn-sm rounded-pill px-3 fw-semibold shadow-sm" onclick="exportHasilUjian()">
+              <button class="btn btn-success btn-sm rounded-pill px-3 fw-semibold shadow-sm"
+                onclick="exportHasilUjian()">
                 <i class="bi bi-file-earmark-excel-fill me-1"></i> Download Nilai (Excel)
               </button>
             </div>
           </div>
 
           <!-- Banner Info khusus ketika login sebagai Guru Mapel -->
-          <div id="guru-scope-banner-nilai" class="alert alert-primary border-primary border-opacity-25 d-none align-items-center justify-content-between flex-wrap gap-2 mb-4">
+          <div id="guru-scope-banner-nilai"
+            class="alert alert-primary border-primary border-opacity-25 d-none align-items-center justify-content-between flex-wrap gap-2 mb-4">
             <div class="d-flex align-items-center">
               <i class="bi bi-award-fill fs-4 me-3 text-primary"></i>
               <div>
                 <div class="fw-bold text-dark">Rekapitulasi Nilai Mata Pelajaran Anda</div>
-                <div class="small text-muted">Menampilkan hasil ujian siswa khusus mata pelajaran: <strong class="text-primary" id="guru-banner-mapel-nilai">-</strong>. Klik tombol <strong>Download Nilai (Excel)</strong> di kanan atas untuk mengunduh rekap nilai.</div>
+                <div class="small text-muted">Menampilkan hasil ujian siswa khusus mata pelajaran: <strong
+                    class="text-primary" id="guru-banner-mapel-nilai">-</strong>. Klik tombol <strong>Download Nilai
+                    (Excel)</strong> di kanan atas untuk mengunduh rekap nilai.</div>
               </div>
             </div>
           </div>
@@ -771,11 +862,13 @@
             <div class="col-md-3">
               <div class="input-group">
                 <span class="input-group-text"><i class="bi bi-search"></i></span>
-                <input type="text" class="form-control" id="search-nilai" placeholder="Cari Username/Nama..." oninput="filterHasilList()">
+                <input type="text" class="form-control" id="search-nilai" placeholder="Cari Username/Nama..."
+                  oninput="filterHasilList()">
               </div>
             </div>
             <div class="col-md-3">
-              <select class="form-select fw-semibold text-primary border-primary" id="filter-mapel-hasil" onchange="filterHasilList()">
+              <select class="form-select fw-semibold text-primary border-primary" id="filter-mapel-hasil"
+                onchange="filterHasilList()">
                 <option value="">Ã°Å¸â€œÅ¡ Semua Mata Pelajaran</option>
                 <!-- Populated dynamically -->
               </select>
@@ -821,14 +914,16 @@
               </table>
             </div>
             <!-- Pagination Controls Hasil -->
-            <div class="d-flex justify-content-between align-items-center flex-wrap gap-2 p-3 border-top bg-light-subtle rounded-bottom">
+            <div
+              class="d-flex justify-content-between align-items-center flex-wrap gap-2 p-3 border-top bg-light-subtle rounded-bottom">
               <div class="small text-muted" id="hasil-pagination-info">
                 Menampilkan 0 - 0 dari 0 nilai
               </div>
               <div class="d-flex align-items-center gap-2">
                 <div class="d-flex align-items-center gap-1">
                   <span class="small text-muted me-1">Per halaman:</span>
-                  <select class="form-select form-select-sm" id="hasil-page-size" style="width: auto;" onchange="changeHasilPageSize(this.value)">
+                  <select class="form-select form-select-sm" id="hasil-page-size" style="width: auto;"
+                    onchange="changeHasilPageSize(this.value)">
                     <option value="50" selected>50</option>
                     <option value="100">100</option>
                     <option value="200">200</option>
@@ -845,7 +940,8 @@
 
         <!-- SECTION: PENGATURAN -->
         <section id="sec-pengaturan" class="d-none">
-          <div class="d-flex justify-content-between flex-wrap flex-md-nowrap align-items-center pt-3 pb-2 mb-4 border-bottom">
+          <div
+            class="d-flex justify-content-between flex-wrap flex-md-nowrap align-items-center pt-3 pb-2 mb-4 border-bottom">
             <h1 class="h2 text-dark">Pengaturan CBT</h1>
           </div>
 
@@ -857,14 +953,17 @@
                 <form id="form-update-supabase">
                   <div class="mb-3">
                     <label for="settings-supabase-url" class="form-label fw-semibold">Supabase URL</label>
-                    <input type="url" class="form-control" id="settings-supabase-url" placeholder="https://xxxxxxxx.supabase.co" required>
+                    <input type="url" class="form-control" id="settings-supabase-url"
+                      placeholder="https://xxxxxxxx.supabase.co" required>
                   </div>
                   <div class="mb-3">
                     <label for="settings-supabase-key" class="form-label fw-semibold">Supabase Anon Public Key</label>
-                    <textarea class="form-control" id="settings-supabase-key" rows="3" placeholder="eyJhbGciOiJIUzI1Ni..." required></textarea>
+                    <textarea class="form-control" id="settings-supabase-key" rows="3"
+                      placeholder="eyJhbGciOiJIUzI1Ni..." required></textarea>
                   </div>
                   <div class="d-grid mt-4">
-                    <button type="submit" class="btn btn-primary-custom text-white btn-sm">Update Koneksi Database <i class="bi bi-save ms-1"></i></button>
+                    <button type="submit" class="btn btn-primary-custom text-white btn-sm">Update Koneksi Database <i
+                        class="bi bi-save ms-1"></i></button>
                   </div>
                 </form>
               </div>
@@ -882,43 +981,53 @@
                       <span class="input-group-text">Menit</span>
                     </div>
                   </div>
-                  
+
                   <hr class="my-4">
                   <h6 class="fw-bold text-dark"><i class="bi bi-shield-lock-fill me-1"></i> Pengaturan Keamanan</h6>
-                  
+
                   <div class="mb-3 d-flex align-items-center gap-2">
                     <div class="flex-grow-1">
                       <div class="d-flex justify-content-between align-items-center">
-                        <label for="settings-exam-token" class="form-label fw-semibold mb-0">Token Ujian &amp; Token Pembebas (Otomatis Acak 3 Menit)</label>
-                        <span class="badge bg-warning-subtle text-dark border border-warning font-monospace" id="settings-token-countdown">⏱️ 03:00</span>
+                        <label for="settings-exam-token" class="form-label fw-semibold mb-0">Token Ujian &amp; Token
+                          Pembebas (Otomatis Acak 3 Menit)</label>
+                        <span class="badge bg-warning-subtle text-dark border border-warning font-monospace"
+                          id="settings-token-countdown">⏱️ 03:00</span>
                       </div>
                       <div class="input-group mt-2">
-                        <input type="text" class="form-control fw-bold fs-5 text-center text-primary" id="settings-exam-token" readonly>
-                        <button type="button" class="btn btn-outline-secondary" onclick="quickRotateTokenPembebas()" title="Acak Token Baru Sekarang">
+                        <input type="text" class="form-control fw-bold fs-5 text-center text-primary"
+                          id="settings-exam-token" readonly>
+                        <button type="button" class="btn btn-outline-secondary" onclick="quickRotateTokenPembebas()"
+                          title="Acak Token Baru Sekarang">
                           <i class="bi bi-arrow-repeat"></i> Acak
                         </button>
                       </div>
-                      <div class="form-text">Token ini <strong>otomatis berganti acak setiap 3 menit</strong> dan digunakan untuk membuka kunci siswa setiap kelipatan 3x pelanggaran.</div>
+                      <div class="form-text">Token ini <strong>otomatis berganti acak setiap 3 menit</strong> dan
+                        digunakan untuk membuka kunci siswa setiap kelipatan 3x pelanggaran.</div>
                     </div>
                   </div>
 
                   <div class="mb-3 form-check form-switch">
                     <input class="form-check-input" type="checkbox" role="switch" id="settings-exam-use-token">
-                    <label class="form-check-label fw-semibold" for="settings-exam-use-token">Wajibkan Token Saat Memulai Ujian</label>
+                    <label class="form-check-label fw-semibold" for="settings-exam-use-token">Wajibkan Token Saat
+                      Memulai Ujian</label>
                   </div>
 
                   <div class="mb-3 form-check form-switch">
                     <input class="form-check-input" type="checkbox" role="switch" id="settings-exam-randomize" checked>
-                    <label class="form-check-label fw-semibold" for="settings-exam-randomize">Acak Urutan Soal (Randomize)</label>
+                    <label class="form-check-label fw-semibold" for="settings-exam-randomize">Acak Urutan Soal
+                      (Randomize)</label>
                   </div>
 
                   <div class="mb-3 form-check form-switch">
                     <input class="form-check-input" type="checkbox" role="switch" id="settings-exam-show-score" checked>
-                    <label class="form-check-label fw-semibold" for="settings-exam-show-score">Tampilkan Nilai Kepada Peserta</label>
-                    <div class="form-text">Jika dimatikan, peserta tidak akan bisa melihat hasil nilainya setelah ujian selesai.</div>
+                    <label class="form-check-label fw-semibold" for="settings-exam-show-score">Tampilkan Nilai Kepada
+                      Peserta</label>
+                    <div class="form-text">Jika dimatikan, peserta tidak akan bisa melihat hasil nilainya setelah ujian
+                      selesai.</div>
                   </div>
                   <div class="d-grid mt-4">
-                    <button type="submit" class="btn btn-success btn-sm btn-primary-custom text-white">Simpan Pengaturan Ujian <i class="bi bi-save ms-1"></i></button>
+                    <button type="submit" class="btn btn-success btn-sm btn-primary-custom text-white">Simpan Pengaturan
+                      Ujian <i class="bi bi-save ms-1"></i></button>
                   </div>
                 </form>
               </div>
@@ -928,20 +1037,24 @@
             <div class="col-md-6">
               <div class="glass-card p-4">
                 <h5 class="fw-bold mb-3 text-warning"><i class="bi bi-database-fill-gear me-2"></i>Backup & Restore</h5>
-                <p class="small text-muted mb-4">Cadangkan seluruh bank soal, data peserta, dan hasil ujian dalam format JSON, atau pulihkan dari cadangan sebelumnya.</p>
+                <p class="small text-muted mb-4">Cadangkan seluruh bank soal, data peserta, dan hasil ujian dalam format
+                  JSON, atau pulihkan dari cadangan sebelumnya.</p>
                 <div class="row g-2">
                   <div class="col-6">
-                    <button class="btn btn-outline-warning w-100 py-3 d-flex flex-column align-items-center gap-2" onclick="backupDatabaseData()">
+                    <button class="btn btn-outline-warning w-100 py-3 d-flex flex-column align-items-center gap-2"
+                      onclick="backupDatabaseData()">
                       <i class="bi bi-cloud-arrow-down-fill fs-3"></i>
                       <span>Backup ke JSON</span>
                     </button>
                   </div>
                   <div class="col-6">
-                    <button class="btn btn-warning w-100 py-3 d-flex flex-column align-items-center gap-2" onclick="triggerRestoreUpload()">
+                    <button class="btn btn-warning w-100 py-3 d-flex flex-column align-items-center gap-2"
+                      onclick="triggerRestoreUpload()">
                       <i class="bi bi-cloud-arrow-up-fill fs-3"></i>
                       <span>Restore dari JSON</span>
                     </button>
-                    <input type="file" id="restore-file-input" class="d-none" accept=".json" onchange="restoreDatabaseData(this)">
+                    <input type="file" id="restore-file-input" class="d-none" accept=".json"
+                      onchange="restoreDatabaseData(this)">
                   </div>
                 </div>
               </div>
@@ -962,7 +1075,8 @@
       <div class="modal-content glass-card border-0">
         <div class="modal-header text-white" style="background: linear-gradient(135deg, #4f46e5 0%, #7c3aed 100%);">
           <div class="d-flex align-items-center gap-2">
-            <div class="avatar-circle" style="background: rgba(255,255,255,0.2); color: #fff; width: 38px; height: 38px; font-size: 1.15rem;">
+            <div class="avatar-circle"
+              style="background: rgba(255,255,255,0.2); color: #fff; width: 38px; height: 38px; font-size: 1.15rem;">
               <i class="bi bi-robot"></i>
             </div>
             <div>
@@ -975,22 +1089,26 @@
         <div class="modal-body p-4">
           <!-- Step 1: Configuration Form -->
           <div class="card border-0 shadow-sm rounded-4 p-3 mb-4 bg-light">
-            <h6 class="fw-bold mb-3 text-dark"><i class="bi bi-sliders me-2 text-primary"></i>Parameter Pembuatan Soal</h6>
-            
+            <h6 class="fw-bold mb-3 text-dark"><i class="bi bi-sliders me-2 text-primary"></i>Parameter Pembuatan Soal
+            </h6>
+
             <div class="row g-3">
               <!-- Status AI Otomatis (Guru Taunya Beres) -->
               <div class="col-12">
-                <div class="p-3 bg-white border rounded-3 d-flex align-items-center justify-content-between flex-wrap gap-2 shadow-sm">
+                <div
+                  class="p-3 bg-white border rounded-3 d-flex align-items-center justify-content-between flex-wrap gap-2 shadow-sm">
                   <div class="d-flex align-items-center gap-2">
                     <span class="badge bg-success py-2 px-3 rounded-pill fs-7">
                       <i class="bi bi-patch-check-fill me-1"></i> AI Siap Digunakan
                     </span>
                     <span class="small text-secondary">
-                      Terhubung otomatis ke <strong>Google Gemini Flash AI</strong> (Standar SLTA: 5 Opsi A, B, C, D, E). Guru tidak perlu mengisi API key.
+                      Terhubung otomatis ke <strong>Google Gemini Flash AI</strong> (Standar SLTA: 5 Opsi A, B, C, D,
+                      E). Guru tidak perlu mengisi API key.
                     </span>
                   </div>
                   <div>
-                    <button class="btn btn-sm btn-link text-muted text-decoration-none p-0" type="button" data-bs-toggle="collapse" data-bs-target="#collapseCustomAiKey">
+                    <button class="btn btn-sm btn-link text-muted text-decoration-none p-0" type="button"
+                      data-bs-toggle="collapse" data-bs-target="#collapseCustomAiKey">
                       <i class="bi bi-gear me-1"></i>Kunci Kustom (Opsional)
                     </button>
                   </div>
@@ -999,11 +1117,14 @@
                 <!-- Collapse untuk Kunci Kustom jika sekolah ingin ganti -->
                 <div class="collapse mt-2" id="collapseCustomAiKey">
                   <div class="card card-body bg-light border p-3">
-                    <label for="ai-api-key" class="form-label fw-semibold small mb-1">Gunakan Google Gemini API Key Sendiri (Opsional)</label>
+                    <label for="ai-api-key" class="form-label fw-semibold small mb-1">Gunakan Google Gemini API Key
+                      Sendiri (Opsional)</label>
                     <div class="input-group input-group-sm">
                       <span class="input-group-text"><i class="bi bi-key-fill text-muted"></i></span>
-                      <input type="password" class="form-control" id="ai-api-key" placeholder="Kunci bawaan sistem aktif (bisa dikosongkan)">
-                      <button class="btn btn-outline-secondary" type="button" onclick="togglePasswordVisibility('ai-api-key')">
+                      <input type="password" class="form-control" id="ai-api-key"
+                        placeholder="Kunci bawaan sistem aktif (bisa dikosongkan)">
+                      <button class="btn btn-outline-secondary" type="button"
+                        onclick="togglePasswordVisibility('ai-api-key')">
                         <i class="bi bi-eye" id="ai-api-key-eye"></i>
                       </button>
                     </div>
@@ -1017,7 +1138,8 @@
                 <label for="ai-topik-input" class="form-label fw-semibold">
                   Topik / Mata Pelajaran &amp; Materi <span class="text-danger">*</span>
                 </label>
-                <input type="text" class="form-control" id="ai-topik-input" placeholder="Contoh: Jaringan Dasar: Topologi, Subnetting IPv4 &amp; Routing">
+                <input type="text" class="form-control" id="ai-topik-input"
+                  placeholder="Contoh: Jaringan Dasar: Topologi, Subnetting IPv4 &amp; Routing">
               </div>
 
               <!-- Tingkat Kesulitan -->
@@ -1051,12 +1173,15 @@
                 <label for="ai-materi-textarea" class="form-label fw-semibold">
                   Materi Bacaan / Silabus / Kisi-kisi <span class="text-muted fw-normal">(Opsional)</span>
                 </label>
-                <textarea class="form-control" id="ai-materi-textarea" rows="3" placeholder="Tempelkan ringkasan materi, teks bacaan, atau kisi-kisi kurikulum di sini agar butir soal yang dibuat AI sangat akurat..."></textarea>
+                <textarea class="form-control" id="ai-materi-textarea" rows="3"
+                  placeholder="Tempelkan ringkasan materi, teks bacaan, atau kisi-kisi kurikulum di sini agar butir soal yang dibuat AI sangat akurat..."></textarea>
               </div>
 
               <!-- Tombol Eksekusi Generator -->
               <div class="col-12 text-end pt-2">
-                <button type="button" class="btn text-white px-4 py-2 fw-semibold shadow-sm" id="btn-generate-ai" style="background: linear-gradient(135deg, #4f46e5 0%, #7c3aed 100%);" onclick="handleGenerateSoalAI()">
+                <button type="button" class="btn text-white px-4 py-2 fw-semibold shadow-sm" id="btn-generate-ai"
+                  style="background: linear-gradient(135deg, #4f46e5 0%, #7c3aed 100%);"
+                  onclick="handleGenerateSoalAI()">
                   <i class="bi bi-stars me-2"></i>Generate Soal Sekarang
                 </button>
               </div>
@@ -1071,16 +1196,20 @@
                   <i class="bi bi-card-checklist me-2 text-success"></i>Pratinjau Soal Hasil Generate
                   (<span id="ai-preview-count" class="text-primary fw-bold">0</span> Soal)
                 </h6>
-                <small class="text-muted">Periksa soal di bawah ini. Anda dapat mencentang atau menghapus butir yang tidak diinginkan.</small>
+                <small class="text-muted">Periksa soal di bawah ini. Anda dapat mencentang atau menghapus butir yang
+                  tidak diinginkan.</small>
               </div>
               <div class="d-flex gap-2">
-                <button class="btn btn-outline-secondary btn-sm" onclick="toggleSelectAllAiQuestions(true)">Pilih Semua</button>
-                <button class="btn btn-outline-secondary btn-sm" onclick="toggleSelectAllAiQuestions(false)">Batal Pilih</button>
+                <button class="btn btn-outline-secondary btn-sm" onclick="toggleSelectAllAiQuestions(true)">Pilih
+                  Semua</button>
+                <button class="btn btn-outline-secondary btn-sm" onclick="toggleSelectAllAiQuestions(false)">Batal
+                  Pilih</button>
               </div>
             </div>
 
             <!-- List Soal Cards -->
-            <div id="ai-soal-cards-list" class="d-flex flex-column gap-3 mb-2" style="max-height: 420px; overflow-y: auto; padding-right: 5px;">
+            <div id="ai-soal-cards-list" class="d-flex flex-column gap-3 mb-2"
+              style="max-height: 420px; overflow-y: auto; padding-right: 5px;">
               <!-- Dynamic preview items -->
             </div>
           </div>
@@ -1088,7 +1217,8 @@
         </div>
         <div class="modal-footer border-top d-flex justify-content-between align-items-center">
           <button type="button" class="btn btn-secondary btn-sm" data-bs-dismiss="modal">Tutup</button>
-          <button type="button" class="btn btn-success btn-sm px-4 fw-semibold shadow-sm" id="btn-save-ai-soal" onclick="saveAiGeneratedSoalToBank()" disabled>
+          <button type="button" class="btn btn-success btn-sm px-4 fw-semibold shadow-sm" id="btn-save-ai-soal"
+            onclick="saveAiGeneratedSoalToBank()" disabled>
             <i class="bi bi-cloud-arrow-up-fill me-2"></i>Simpan ke Bank Soal
           </button>
         </div>
@@ -1106,27 +1236,31 @@
         </div>
         <div class="modal-body">
           <div class="mb-4 text-center">
-            <p class="text-muted small mb-3">Unduh template Excel resmi terlebih dahulu untuk memastikan susunan kolom data Anda tepat.</p>
+            <p class="text-muted small mb-3">Unduh template Excel resmi terlebih dahulu untuk memastikan susunan kolom
+              data Anda tepat.</p>
             <button class="btn btn-outline-primary btn-sm rounded-pill px-3" id="btn-download-template" onclick="">
               <i class="bi bi-download me-1"></i> Unduh Template Excel
             </button>
           </div>
-          
+
           <div class="mb-4">
             <label for="excel-file-input" class="form-label fw-semibold">Pilih Berkas Excel (.xlsx)</label>
-            <input class="form-control" type="file" id="excel-file-input" accept=".xlsx" onchange="handleExcelUpload(this)">
+            <input class="form-control" type="file" id="excel-file-input" accept=".xlsx"
+              onchange="handleExcelUpload(this)">
           </div>
 
           <!-- Preview Area -->
           <div id="excel-preview-area" class="d-none">
             <h6 class="fw-bold mb-2">Pratinjau Data (<span id="excel-preview-count">0</span> Data ditemukan):</h6>
             <div class="excel-preview-container">
-              <table class="table table-striped table-sm text-nowrap align-middle mb-0" id="excel-preview-table" style="font-size: 0.8rem;">
+              <table class="table table-striped table-sm text-nowrap align-middle mb-0" id="excel-preview-table"
+                style="font-size: 0.8rem;">
                 <!-- dynamic head/body -->
               </table>
             </div>
             <div class="alert alert-info mt-3 small mb-0">
-              <i class="bi bi-info-circle-fill me-2"></i> Periksa kembali data di atas. Klik tombol di bawah untuk menyimpan langsung ke database Supabase.
+              <i class="bi bi-info-circle-fill me-2"></i> Periksa kembali data di atas. Klik tombol di bawah untuk
+              menyimpan langsung ke database Supabase.
             </div>
           </div>
 
@@ -1146,7 +1280,8 @@
     <div class="modal-dialog modal-dialog-centered">
       <div class="modal-content glass-card border-0 shadow-lg">
         <div class="modal-header">
-          <h5 class="modal-title fw-bold" id="guruFormTitle"><i class="bi bi-person-plus-fill me-2 text-primary"></i>Buat Akun Guru Baru</h5>
+          <h5 class="modal-title fw-bold" id="guruFormTitle"><i
+              class="bi bi-person-plus-fill me-2 text-primary"></i>Buat Akun Guru Baru</h5>
           <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
         </div>
         <form id="form-guru-crud">
@@ -1154,37 +1289,47 @@
           <div class="modal-body">
             <div class="row g-3">
               <div class="col-12">
-                <label for="crud-guru-username" class="form-label fw-semibold">Username Login Guru <span class="text-danger">*</span></label>
+                <label for="crud-guru-username" class="form-label fw-semibold">Username Login Guru <span
+                    class="text-danger">*</span></label>
                 <div class="input-group">
                   <span class="input-group-text"><i class="bi bi-person-badge"></i></span>
-                  <input type="text" class="form-control" id="crud-guru-username" placeholder="Contoh: guru_budi" required autocomplete="off">
+                  <input type="text" class="form-control" id="crud-guru-username" placeholder="Contoh: guru_budi"
+                    required autocomplete="off">
                 </div>
                 <small class="text-muted">Gunakan huruf kecil atau angka tanpa spasi untuk login guru.</small>
               </div>
               <div class="col-12">
-                <label for="crud-guru-nama" class="form-label fw-semibold">Nama Lengkap & Gelar <span class="text-danger">*</span></label>
-                <input type="text" class="form-control" id="crud-guru-nama" placeholder="Contoh: Noferson, S.Pd, Gr, M.Eng" required>
+                <label for="crud-guru-nama" class="form-label fw-semibold">Nama Lengkap & Gelar <span
+                    class="text-danger">*</span></label>
+                <input type="text" class="form-control" id="crud-guru-nama" placeholder="Contoh: Noferson, S.Pd, M.Eng"
+                  required>
               </div>
               <div class="col-12">
-                <label for="crud-guru-pass" class="form-label fw-semibold">Password Login Guru <span class="text-danger" id="crud-guru-pass-required">*</span></label>
+                <label for="crud-guru-pass" class="form-label fw-semibold">Password Login Guru <span class="text-danger"
+                    id="crud-guru-pass-required">*</span></label>
                 <div class="input-group">
                   <span class="input-group-text"><i class="bi bi-key-fill"></i></span>
                   <input type="password" class="form-control" id="crud-guru-pass" placeholder="Masukkan password login">
-                  <button class="btn btn-outline-secondary" type="button" onclick="togglePasswordVisibility('crud-guru-pass')">
+                  <button class="btn btn-outline-secondary" type="button"
+                    onclick="togglePasswordVisibility('crud-guru-pass')">
                     <i class="bi bi-eye" id="crud-guru-pass-eye"></i>
                   </button>
                 </div>
-                <small class="text-muted d-block mt-1" id="crud-guru-pass-help">Wajib diisi untuk akun baru. Kosongkan saat edit jika tidak ingin mengubah password.</small>
+                <small class="text-muted d-block mt-1" id="crud-guru-pass-help">Wajib diisi untuk akun baru. Kosongkan
+                  saat edit jika tidak ingin mengubah password.</small>
               </div>
             </div>
 
             <div class="alert alert-light border small text-muted mt-3 mb-0">
-              <i class="bi bi-info-circle text-primary me-1"></i> Setelah akun dibuat, Anda dapat langsung menambahkan mata pelajaran, tingkat kelas, dan jurusannya melalui tombol <strong>+ Tambah Mapel</strong> di tabel data guru.
+              <i class="bi bi-info-circle text-primary me-1"></i> Setelah akun dibuat, Anda dapat langsung menambahkan
+              mata pelajaran, tingkat kelas, dan jurusannya melalui tombol <strong>+ Tambah Mapel</strong> di tabel data
+              guru.
             </div>
           </div>
           <div class="modal-footer">
             <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Batal</button>
-            <button type="submit" class="btn btn-primary" id="btn-save-guru-crud"><i class="bi bi-save me-1"></i> Simpan Akun Guru</button>
+            <button type="submit" class="btn btn-primary" id="btn-save-guru-crud"><i class="bi bi-save me-1"></i> Simpan
+              Akun Guru</button>
           </div>
         </form>
       </div>
@@ -1203,16 +1348,19 @@
         </div>
         <div class="modal-body">
           <input type="hidden" id="penugasan-guru-id">
-          
+
           <div class="alert alert-info py-2 px-3 small d-flex align-items-center mb-3">
             <i class="bi bi-info-circle-fill fs-5 me-2 text-primary flex-shrink-0"></i>
             <div>
-              Tambahkan mata pelajaran yang diajar oleh guru ini. Satu guru bisa ditambahkan <strong>banyak mapel</strong> dengan tingkat kelas dan jurusan masing-masing (misal: <em>Matematika Kelas XI Semua Jurusan</em> dan <em>Koding Kelas X TKJ</em>).
+              Tambahkan mata pelajaran yang diajar oleh guru ini. Satu guru bisa ditambahkan <strong>banyak
+                mapel</strong> dengan tingkat kelas dan jurusan masing-masing (misal: <em>Matematika Kelas XI Semua
+                Jurusan</em> dan <em>Koding Kelas X TKJ</em>).
             </div>
           </div>
 
           <div class="d-flex justify-content-between align-items-center mb-2">
-            <h6 class="fw-bold mb-0 text-dark"><i class="bi bi-list-check me-1"></i>Daftar Mata Pelajaran yang Diampu:</h6>
+            <h6 class="fw-bold mb-0 text-dark"><i class="bi bi-list-check me-1"></i>Daftar Mata Pelajaran yang Diampu:
+            </h6>
             <button type="button" class="btn btn-sm btn-success" onclick="addPenugasanRow()">
               <i class="bi bi-plus-circle me-1"></i>+ Tambah Mapel
             </button>
@@ -1238,11 +1386,14 @@
             <div class="form-check">
               <input class="form-check-input" type="checkbox" id="chk-auto-create-paket" checked>
               <label class="form-check-label small fw-semibold text-dark" for="chk-auto-create-paket">
-                <i class="bi bi-lightning-charge-fill text-warning me-1"></i>Otomatis buatkan wadah Paket Soal di Bank Soal jika belum ada
+                <i class="bi bi-lightning-charge-fill text-warning me-1"></i>Otomatis buatkan wadah Paket Soal di Bank
+                Soal jika belum ada
               </label>
             </div>
             <small class="text-muted ms-4">
-              Sistem akan otomatis membuat wadah paket ujian di Bank Soal (misal: <code>Matematika - Tingkat XI</code> & <code>Koding - Tingkat X</code>) dan langsung menugaskannya ke akun guru ini sehingga guru tinggal mengisi butir soal.
+              Sistem akan otomatis membuat wadah paket ujian di Bank Soal (misal: <code>Matematika - Tingkat XI</code> &
+              <code>Koding - Tingkat X</code>) dan langsung menugaskannya ke akun guru ini sehingga guru tinggal mengisi
+              butir soal.
             </small>
           </div>
         </div>
@@ -1282,7 +1433,8 @@
                   <select class="form-select" id="crud-peserta-jurusan">
                     <option value="">Pilih Jurusan...</option>
                   </select>
-                  <button class="btn btn-outline-secondary" type="button" onclick="openJurusanModal()" title="Kelola / Tambah Jurusan">
+                  <button class="btn btn-outline-secondary" type="button" onclick="openJurusanModal()"
+                    title="Kelola / Tambah Jurusan">
                     <i class="bi bi-gear-fill"></i>
                   </button>
                 </div>
@@ -1293,7 +1445,8 @@
                   <select class="form-select" id="crud-peserta-kelas">
                     <option value="">Pilih Kelas...</option>
                   </select>
-                  <button class="btn btn-outline-secondary" type="button" onclick="openKelasModal()" title="Kelola / Tambah Kelas">
+                  <button class="btn btn-outline-secondary" type="button" onclick="openKelasModal()"
+                    title="Kelola / Tambah Kelas">
                     <i class="bi bi-gear-fill"></i>
                   </button>
                 </div>
@@ -1312,7 +1465,8 @@
             <div class="mb-3" id="crud-peserta-pass-wrapper">
               <label for="crud-peserta-pass" class="form-label fw-semibold">Password Akun</label>
               <input type="password" class="form-control" id="crud-peserta-pass" placeholder="Akan di-hash secara aman">
-              <small class="text-muted d-block mt-1" id="crud-peserta-pass-help">Biarkan kosong saat mengedit jika tidak ingin mengubah password.</small>
+              <small class="text-muted d-block mt-1" id="crud-peserta-pass-help">Biarkan kosong saat mengedit jika tidak
+                ingin mengubah password.</small>
             </div>
           </div>
           <div class="modal-footer">
@@ -1347,9 +1501,10 @@
             </div>
             <div class="mb-3">
               <label for="crud-soal-pertanyaan" class="form-label fw-semibold">Pertanyaan</label>
-              <textarea class="form-control" id="crud-soal-pertanyaan" rows="4" placeholder="Tulis soal ujian di sini..." required></textarea>
+              <textarea class="form-control" id="crud-soal-pertanyaan" rows="4"
+                placeholder="Tulis soal ujian di sini..." required></textarea>
             </div>
-            
+
             <div class="mb-3">
               <label for="crud-soal-gambar" class="form-label fw-semibold">Lampiran Gambar (Opsional)</label>
               <input type="file" class="form-control" id="crud-soal-gambar" accept="image/png, image/jpeg, image/jpg">
@@ -1359,7 +1514,7 @@
               <small class="text-muted">Gambar akan otomatis dikompres sebelum disimpan.</small>
               <input type="hidden" id="crud-soal-gambar-base64">
             </div>
-            
+
             <div class="row">
               <div class="col-md-6 mb-3">
                 <label for="crud-soal-opsia" class="form-label fw-semibold">Opsi A</label>
@@ -1382,11 +1537,12 @@
             </div>
             <div class="row">
               <div class="col-md-6 mb-3">
-                <label for="crud-soal-opsie" class="form-label fw-semibold">Opsi E (Standar Tingkat SLTA / SMK / SMA)</label>
+                <label for="crud-soal-opsie" class="form-label fw-semibold">Opsi E (Standar Tingkat SLTA / SMK /
+                  SMA)</label>
                 <input type="text" class="form-control" id="crud-soal-opsie" placeholder="Jawaban E">
               </div>
             </div>
-            
+
             <div class="mb-3">
               <label for="crud-soal-jawaban" class="form-label fw-semibold">Jawaban yang Benar</label>
               <select class="form-select" id="crud-soal-jawaban" required>
@@ -1421,17 +1577,24 @@
           <div class="modal-body">
             <div class="mb-3">
               <label for="crud-paket-nama" class="form-label fw-semibold">Nama Paket Soal</label>
-              <input type="text" class="form-control" id="crud-paket-nama" required placeholder="Cth: Pendidikan Agama Islam - Kelas X" oninput="detectPaketAgamaHint(this.value)">
+              <input type="text" class="form-control" id="crud-paket-nama" required
+                placeholder="Cth: Pendidikan Agama Islam - Kelas X" oninput="detectPaketAgamaHint(this.value)">
               <div class="d-flex align-items-center gap-1 flex-wrap mt-2">
                 <span class="small text-muted me-1">Pilihan Cepat Mapel Agama:</span>
-                <button type="button" class="btn btn-outline-success btn-sm py-0 px-2" style="font-size: 0.75rem;" onclick="setPaketNamaPreset('Pendidikan Agama Islam')">PAI</button>
-                <button type="button" class="btn btn-outline-primary btn-sm py-0 px-2" style="font-size: 0.75rem;" onclick="setPaketNamaPreset('Pendidikan Agama Kristen')">Kristen</button>
-                <button type="button" class="btn btn-outline-danger btn-sm py-0 px-2" style="font-size: 0.75rem;" onclick="setPaketNamaPreset('Pendidikan Agama Katolik')">Katolik</button>
-                <button type="button" class="btn btn-outline-warning btn-sm py-0 px-2" style="font-size: 0.75rem;" onclick="setPaketNamaPreset('Pendidikan Agama Hindu')">Hindu</button>
-                <button type="button" class="btn btn-outline-info btn-sm py-0 px-2" style="font-size: 0.75rem;" onclick="setPaketNamaPreset('Pendidikan Agama Buddha')">Buddha</button>
+                <button type="button" class="btn btn-outline-success btn-sm py-0 px-2" style="font-size: 0.75rem;"
+                  onclick="setPaketNamaPreset('Pendidikan Agama Islam')">PAI</button>
+                <button type="button" class="btn btn-outline-primary btn-sm py-0 px-2" style="font-size: 0.75rem;"
+                  onclick="setPaketNamaPreset('Pendidikan Agama Kristen')">Kristen</button>
+                <button type="button" class="btn btn-outline-danger btn-sm py-0 px-2" style="font-size: 0.75rem;"
+                  onclick="setPaketNamaPreset('Pendidikan Agama Katolik')">Katolik</button>
+                <button type="button" class="btn btn-outline-warning btn-sm py-0 px-2" style="font-size: 0.75rem;"
+                  onclick="setPaketNamaPreset('Pendidikan Agama Hindu')">Hindu</button>
+                <button type="button" class="btn btn-outline-info btn-sm py-0 px-2" style="font-size: 0.75rem;"
+                  onclick="setPaketNamaPreset('Pendidikan Agama Buddha')">Buddha</button>
               </div>
               <div id="paket-agama-hint" class="alert alert-success py-1 px-2 small mt-2 mb-0 d-none">
-                <i class="bi bi-shield-check me-1"></i> <strong>Paket Ujian Agama Terdeteksi:</strong> Siswa akan otomatis diminta mengonfirmasi agamanya di portal ujian sebelum mulai.
+                <i class="bi bi-shield-check me-1"></i> <strong>Paket Ujian Agama Terdeteksi:</strong> Siswa akan
+                otomatis diminta mengonfirmasi agamanya di portal ujian sebelum mulai.
               </div>
             </div>
             <div class="mb-3">
@@ -1440,11 +1603,13 @@
                 <select class="form-select" id="crud-paket-jurusan">
                   <option value="">Semua Jurusan (Umum)</option>
                 </select>
-                <button class="btn btn-outline-secondary" type="button" onclick="openJurusanModal()" title="Kelola / Tambah Jurusan">
+                <button class="btn btn-outline-secondary" type="button" onclick="openJurusanModal()"
+                  title="Kelola / Tambah Jurusan">
                   <i class="bi bi-gear-fill"></i>
                 </button>
               </div>
-              <small class="text-muted">Pilih jurusan spesifik atau biarkan 'Semua Jurusan' jika berlaku untuk seluruh siswa.</small>
+              <small class="text-muted">Pilih jurusan spesifik atau biarkan 'Semua Jurusan' jika berlaku untuk seluruh
+                siswa.</small>
             </div>
             <div class="mb-3">
               <label for="crud-paket-kelas" class="form-label fw-semibold">Kelas Paket Soal</label>
@@ -1452,18 +1617,22 @@
                 <select class="form-select" id="crud-paket-kelas">
                   <option value="">Semua Kelas (Umum)</option>
                 </select>
-                <button class="btn btn-outline-secondary" type="button" onclick="openKelasModal()" title="Kelola / Tambah Kelas">
+                <button class="btn btn-outline-secondary" type="button" onclick="openKelasModal()"
+                  title="Kelola / Tambah Kelas">
                   <i class="bi bi-gear-fill"></i>
                 </button>
               </div>
-              <small class="text-muted">Pilih <b>Semua Kelas</b> untuk semua angkatan, atau <b>Tingkat X</b> untuk seluruh rombel kelas 10 (X TKJ 1 & X TKJ 2 sama-sama dapat), atau pilih rombel tertentu.</small>
+              <small class="text-muted">Pilih <b>Semua Kelas</b> untuk semua angkatan, atau <b>Tingkat X</b> untuk
+                seluruh rombel kelas 10 (X TKJ 1 & X TKJ 2 sama-sama dapat), atau pilih rombel tertentu.</small>
             </div>
             <div class="mb-3" id="crud-paket-guru-wrapper">
-              <label for="crud-paket-guru" class="form-label fw-semibold"><i class="bi bi-person-badge text-primary me-1"></i>Guru Pengampu / Pembuat Soal (Opsional)</label>
+              <label for="crud-paket-guru" class="form-label fw-semibold"><i
+                  class="bi bi-person-badge text-primary me-1"></i>Guru Pengampu / Pembuat Soal (Opsional)</label>
               <select class="form-select" id="crud-paket-guru">
                 <option value="">-- Tanpa Penugasan Khusus (Otomatis Sesuai Mapel) --</option>
               </select>
-              <small class="text-muted">Pilih guru yang bertugas mengelola butir soal paket ini. Paket ini akan langsung otomatis masuk ke akun guru tersebut.</small>
+              <small class="text-muted">Pilih guru yang bertugas mengelola butir soal paket ini. Paket ini akan langsung
+                otomatis masuk ke akun guru tersebut.</small>
             </div>
             <div class="mb-3">
               <label for="crud-paket-mulai" class="form-label fw-semibold">Jadwal Mulai (Otomatis Terbuka)</label>
@@ -1495,15 +1664,18 @@
           <form id="form-jurusan-modal" class="mb-3">
             <label for="modal-input-jurusan" class="form-label fw-semibold">Tambah Jurusan Baru</label>
             <div class="input-group">
-              <input type="text" class="form-control" id="modal-input-jurusan" placeholder="Nama / Singkatan Jurusan (Cth: TKJ, RPL)" required>
+              <input type="text" class="form-control" id="modal-input-jurusan"
+                placeholder="Nama / Singkatan Jurusan (Cth: TKJ, RPL)" required>
               <button class="btn btn-primary" type="submit"><i class="bi bi-plus-lg"></i> Tambah</button>
             </div>
             <small class="text-muted">Jurusan baru akan langsung muncul di pilihan dropdown soal & siswa.</small>
           </form>
           <hr>
           <h6 class="fw-semibold mb-2">Daftar Jurusan:</h6>
-          <div class="list-group list-group-flush border rounded-3" id="modal-jurusan-list" style="max-height: 250px; overflow-y: auto;">
-            <div class="text-center py-3 text-muted small"><span class="spinner-border spinner-border-sm me-1"></span> Memuat jurusan...</div>
+          <div class="list-group list-group-flush border rounded-3" id="modal-jurusan-list"
+            style="max-height: 250px; overflow-y: auto;">
+            <div class="text-center py-3 text-muted small"><span class="spinner-border spinner-border-sm me-1"></span>
+              Memuat jurusan...</div>
           </div>
         </div>
         <div class="modal-footer">
@@ -1525,15 +1697,18 @@
           <form id="form-kelas-modal" class="mb-3">
             <label for="modal-input-kelas" class="form-label fw-semibold">Tambah Kelas Baru</label>
             <div class="input-group">
-              <input type="text" class="form-control" id="modal-input-kelas" placeholder="Nama Kelas (Cth: X TKJ 1, X RPL 2)" required>
+              <input type="text" class="form-control" id="modal-input-kelas"
+                placeholder="Nama Kelas (Cth: X TKJ 1, X RPL 2)" required>
               <button class="btn btn-success" type="submit"><i class="bi bi-plus-lg"></i> Tambah</button>
             </div>
             <small class="text-muted">Kelas baru akan langsung muncul di pilihan dropdown soal & siswa.</small>
           </form>
           <hr>
           <h6 class="fw-semibold mb-2">Daftar Kelas:</h6>
-          <div class="list-group list-group-flush border rounded-3" id="modal-kelas-list" style="max-height: 250px; overflow-y: auto;">
-            <div class="text-center py-3 text-muted small"><span class="spinner-border spinner-border-sm me-1"></span> Memuat kelas...</div>
+          <div class="list-group list-group-flush border rounded-3" id="modal-kelas-list"
+            style="max-height: 250px; overflow-y: auto;">
+            <div class="text-center py-3 text-muted small"><span class="spinner-border spinner-border-sm me-1"></span>
+              Memuat kelas...</div>
           </div>
         </div>
         <div class="modal-footer">
@@ -1559,7 +1734,10 @@
             <i class="bi bi-info-circle-fill fs-4 me-3 text-primary"></i>
             <div>
               <strong>Format Kartu Ujian Landscape (8,56 cm &times; 5,4 cm):</strong>
-              <div class="small">Ukuran presisi standar ID Card horizontal (8,56 &times; 5,4 cm), otomatis disusun <strong>10 kartu per lembar A4</strong> (Grid 2 kolom &times; 5 baris) lengkap dengan kop sekolah, nama peserta, kelas, username, password login, QR Code, dan garis potong rapi.</div>
+              <div class="small">Ukuran presisi standar ID Card horizontal (8,56 &times; 5,4 cm), otomatis disusun
+                <strong>10 kartu per lembar A4</strong> (Grid 2 kolom &times; 5 baris) lengkap dengan kop sekolah, nama
+                peserta, kelas, username, password login, QR Code, dan garis potong rapi.
+              </div>
             </div>
           </div>
 
@@ -1585,12 +1763,14 @@
 
           <hr class="my-3">
 
-          <h6 class="fw-bold mb-3 text-dark"><i class="bi bi-funnel-fill me-2 text-primary"></i>Pilih Target Peserta & Pengelompokan Kartu</h6>
-          
+          <h6 class="fw-bold mb-3 text-dark"><i class="bi bi-funnel-fill me-2 text-primary"></i>Pilih Target Peserta &
+            Pengelompokan Kartu</h6>
+
           <div class="row g-3 mb-3">
             <div class="col-md-3">
               <label for="cetak-filter-jurusan" class="form-label fw-semibold">Filter Jurusan</label>
-              <select class="form-select form-select-sm" id="cetak-filter-jurusan" onchange="onCetakFilterJurusanChange()">
+              <select class="form-select form-select-sm" id="cetak-filter-jurusan"
+                onchange="onCetakFilterJurusanChange()">
                 <option value="">Semua Jurusan</option>
               </select>
             </div>
@@ -1624,15 +1804,18 @@
               <label for="cetak-password-mode" class="form-label fw-bold text-dark">
                 <i class="bi bi-key-fill text-warning me-1"></i>Tampilan Password di Kartu
               </label>
-              <select class="form-select form-select-sm" id="cetak-password-mode" onchange="onCetakPasswordModeChange()">
+              <select class="form-select form-select-sm" id="cetak-password-mode"
+                onchange="onCetakPasswordModeChange()">
                 <option value="auto">Gunakan Password Asli Akun (Otomatis)</option>
                 <option value="same_as_username">Sama dengan Username / No. Peserta</option>
                 <option value="custom">Password Seragam (Tentukan Sendiri)</option>
               </select>
             </div>
             <div class="col-md-6" id="col-cetak-custom-pass">
-              <label for="cetak-custom-pass-val" class="form-label fw-bold text-dark" id="label-cetak-custom-pass">Password Cadangan / Pengganti</label>
-              <input type="text" class="form-control form-control-sm font-monospace fw-bold" id="cetak-custom-pass-val" placeholder="Ketik password..." value="123456">
+              <label for="cetak-custom-pass-val" class="form-label fw-bold text-dark"
+                id="label-cetak-custom-pass">Password Cadangan / Pengganti</label>
+              <input type="text" class="form-control form-control-sm font-monospace fw-bold" id="cetak-custom-pass-val"
+                placeholder="Ketik password..." value="123456">
               <div class="form-text" style="font-size: 0.72rem;" id="help-cetak-custom-pass">
                 Jika akun lama belum tercatat password aslinya di database, teks ini yang akan dicetak di kartu.
               </div>
@@ -1642,11 +1825,13 @@
           <div class="row g-3 pt-2">
             <div class="col-md-6">
               <div class="form-check form-switch">
-                <input class="form-check-input" type="checkbox" id="cetak-opt-pisah-kelas" onchange="updateCetakPreviewCount()" checked>
+                <input class="form-check-input" type="checkbox" id="cetak-opt-pisah-kelas"
+                  onchange="updateCetakPreviewCount()" checked>
                 <label class="form-check-label small fw-bold text-dark" for="cetak-opt-pisah-kelas">
                   <i class="bi bi-collection-fill text-primary me-1"></i>Kelompokkan & Pisah Lembar per Kelas
                 </label>
-                <div class="text-muted" style="font-size: 0.72rem;">Setiap ganti kelas otomatis mulai di lembar A4 baru (kartu kelas tidak tercampur)</div>
+                <div class="text-muted" style="font-size: 0.72rem;">Setiap ganti kelas otomatis mulai di lembar A4 baru
+                  (kartu kelas tidak tercampur)</div>
               </div>
             </div>
             <div class="col-md-3">
@@ -1669,7 +1854,8 @@
             <button type="button" class="btn btn-outline-primary btn-sm fw-semibold" onclick="prosesCetakKartu('tab')">
               <i class="bi bi-box-arrow-up-right me-1"></i> Buka Pratinjau Tab
             </button>
-            <button type="button" class="btn btn-primary btn-sm px-3 fw-semibold shadow-sm" onclick="prosesCetakKartu('direct')">
+            <button type="button" class="btn btn-primary btn-sm px-3 fw-semibold shadow-sm"
+              onclick="prosesCetakKartu('direct')">
               <i class="bi bi-printer-fill me-1"></i> Cetak Sekarang (Print / PDF)
             </button>
           </div>
@@ -1687,10 +1873,10 @@
   <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
   <!-- Bootstrap JS -->
   <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
-  
+
   <!-- Supabase -->
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-  
+
   <!-- CBT Modules -->
   <script src="js/config.js?v=51"></script>
   <script src="js/supabase-config.js?v=51"></script>
@@ -1707,7 +1893,7 @@
       document.body.classList.add('dark-mode');
       themeToggleBtn.innerHTML = '<i class="bi bi-sun-fill text-warning"></i>';
     }
-    
+
     themeToggleBtn.addEventListener('click', () => {
       document.body.classList.toggle('dark-mode');
       const isDark = document.body.classList.contains('dark-mode');
@@ -1720,4 +1906,5 @@
     });
   </script>
 </body>
+
 </html>
