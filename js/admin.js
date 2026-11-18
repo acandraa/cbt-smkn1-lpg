@@ -329,20 +329,54 @@ function applyGuruRoleUI() {
   const guruKelas = formatGuruKelasLabel(currentAdminUser.kelas_diampu);
   const fullScopeLabel = `${guruMapel} (${guruJurusan} • ${guruKelas})`;
 
+  // Summary ringkas untuk badge
+  const jurList = (currentAdminUser.jurusan_diampu || '').split(',').map(s => s.trim()).filter(Boolean);
+  const jurSummary = jurList.length === 0 ? 'Semua Jurusan' : (jurList.length <= 2 ? jurList.join(', ') : `${jurList.length} Jurusan`);
+
+  const kList = (currentAdminUser.kelas_diampu || '').split(',').map(s => s.trim()).filter(Boolean);
+  let kSummary = 'Semua Kelas';
+  if (kList.length === 1) {
+    kSummary = kList[0].toUpperCase().startsWith('TINGKAT:') ? `Tingkat ${kList[0].split(':')[1]}` : kList[0];
+  } else if (kList.length > 1) {
+    const firstT = kList[0].split(/[\s\-_]+/)[0].toUpperCase();
+    if (kList.every(k => k.split(/[\s\-_]+/)[0].toUpperCase() === firstT) && ['X', 'XI', 'XII', '10', '11', '12'].includes(firstT)) {
+      kSummary = `Tingkat ${firstT} (${kList.length} Kelas)`;
+    } else {
+      kSummary = `${kList.length} Kelas`;
+    }
+  }
+
   const displayEl = document.getElementById('admin-display-name');
   if (displayEl) displayEl.innerText = guruName;
 
   const subEl = document.getElementById('admin-role-subtitle');
   if (subEl) subEl.innerText = 'Guru Mata Pelajaran';
 
+  // 1. Top Navbar: tampilkan nama guru dan badge mapel ringkas (hover untuk detail lengkap)
   const topEmailEl = document.getElementById('admin-email');
-  if (topEmailEl) topEmailEl.innerHTML = `<i class="bi bi-person-workspace me-1"></i>${escapeHtml(guruName)} <span class="badge bg-success ms-1">${escapeHtml(fullScopeLabel)}</span>`;
+  if (topEmailEl) {
+    topEmailEl.innerHTML = `
+      <i class="bi bi-person-workspace me-1"></i>${escapeHtml(guruName)}
+      <span class="badge bg-success ms-1 px-2 py-1 shadow-sm" style="font-size: 0.75rem;" title="Mengampu: ${escapeAttr(fullScopeLabel)}" data-bs-toggle="tooltip">
+        <i class="bi bi-book me-1"></i>${escapeHtml(guruMapel)}
+      </span>
+    `;
+  }
 
+  // 2. Sidebar: badge 2 tingkat yang proporsional dan tidak berantakan
   const badgeWrap = document.getElementById('guru-mapel-badge-sidebar');
-  const badgeText = document.getElementById('guru-mapel-badge-text');
-  if (badgeWrap && badgeText) {
+  if (badgeWrap) {
     badgeWrap.classList.remove('d-none');
-    badgeText.innerText = fullScopeLabel;
+    badgeWrap.innerHTML = `
+      <div class="d-flex flex-column align-items-center gap-1 w-100 px-1 mt-1">
+        <span class="badge bg-success text-white w-100 text-truncate shadow-sm py-1" style="font-size: 0.78rem;" title="Mata Pelajaran: ${escapeAttr(guruMapel)}">
+          <i class="bi bi-book-half me-1"></i>${escapeHtml(guruMapel)}
+        </span>
+        <span class="badge bg-secondary-subtle text-dark border w-100 text-truncate py-1" style="font-size: 0.68rem;" title="${escapeAttr(fullScopeLabel)}">
+          <i class="bi bi-people me-1 text-primary"></i>${escapeHtml(kSummary)} • ${escapeHtml(jurSummary)}
+        </span>
+      </div>
+    `;
   }
 
   // Sembunyikan menu yang khusus Admin
@@ -363,13 +397,17 @@ function applyGuruRoleUI() {
   const lblNilai = document.getElementById('nav-label-nilai');
   if (lblNilai) lblNilai.innerText = 'Nilai & Download';
 
-  // Tampilkan banner informasi Mapel, Jurusan & Kelas di halaman Soal & Nilai
+  // 3. Banner informasi di halaman Soal & Nilai: chip terstruktur rapi
   const bannerSoal = document.getElementById('guru-scope-banner-soal');
   const bannerSoalMapel = document.getElementById('guru-banner-mapel-soal');
   if (bannerSoal && bannerSoalMapel) {
     bannerSoal.classList.remove('d-none');
     bannerSoal.classList.add('d-flex');
-    bannerSoalMapel.innerText = fullScopeLabel;
+    bannerSoalMapel.innerHTML = `
+      <span class="fw-bold text-success">${escapeHtml(guruMapel)}</span>
+      <span class="badge bg-success-subtle text-success border border-success-subtle ms-2 py-1 px-2" title="${escapeAttr(guruKelas)}"><i class="bi bi-mortarboard me-1"></i>${escapeHtml(kSummary)}</span>
+      <span class="badge bg-info-subtle text-dark border border-info-subtle ms-1 py-1 px-2" title="${escapeAttr(guruJurusan)}"><i class="bi bi-diagram-3 me-1"></i>${escapeHtml(jurSummary)}</span>
+    `;
   }
 
   const bannerNilai = document.getElementById('guru-scope-banner-nilai');
@@ -377,7 +415,11 @@ function applyGuruRoleUI() {
   if (bannerNilai && bannerNilaiMapel) {
     bannerNilai.classList.remove('d-none');
     bannerNilai.classList.add('d-flex');
-    bannerNilaiMapel.innerText = fullScopeLabel;
+    bannerNilaiMapel.innerHTML = `
+      <span class="fw-bold text-primary">${escapeHtml(guruMapel)}</span>
+      <span class="badge bg-primary-subtle text-primary border border-primary-subtle ms-2 py-1 px-2" title="${escapeAttr(guruKelas)}"><i class="bi bi-mortarboard me-1"></i>${escapeHtml(kSummary)}</span>
+      <span class="badge bg-info-subtle text-dark border border-info-subtle ms-1 py-1 px-2" title="${escapeAttr(guruJurusan)}"><i class="bi bi-diagram-3 me-1"></i>${escapeHtml(jurSummary)}</span>
+    `;
   }
 }
 
@@ -3239,8 +3281,25 @@ async function savePenugasanGuru() {
 
         if (!existingPaket) {
           let newName = item.mapel;
-          if (tVal) newName += ` - ${tVal}`;
-          if (jVal) newName += ` (${jVal})`;
+          const kParts = (item.tingkat || '').split(',').map(s => s.trim()).filter(Boolean);
+          if (kParts.length === 1) {
+            const single = kParts[0];
+            newName += ` - ${single.toUpperCase().startsWith('TINGKAT:') ? `Tingkat ${single.split(':')[1]}` : single}`;
+          } else if (kParts.length > 1) {
+            const firstT = kParts[0].split(/[\s\-_]+/)[0].toUpperCase();
+            if (kParts.every(k => k.split(/[\s\-_]+/)[0].toUpperCase() === firstT) && ['X', 'XI', 'XII', '10', '11', '12'].includes(firstT)) {
+              newName += ` - Kelas ${firstT}`;
+            } else {
+              newName += ` (${kParts.length} Kelas)`;
+            }
+          }
+
+          const jParts = (item.jurusan || '').split(',').map(s => s.trim()).filter(Boolean);
+          if (jParts.length === 1) {
+            newName += ` (${jParts[0]})`;
+          } else if (jParts.length === 2) {
+            newName += ` (${jParts.join(', ')})`;
+          }
 
           const created = await DB.savePaket('', {
             nama_paket: newName,
@@ -4007,6 +4066,22 @@ async function loadPaket() {
   try {
     const rawPaket = await DB.getPaketList();
     allPaketUnfiltered = rawPaket || [];
+
+    // Otomatis rapikan nama paket yang terlanjur panjang akibat dump kelas/jurusan koma-koma
+    allPaketUnfiltered.forEach(p => {
+      const clean = getCleanPaketName(p.nama_paket, p.kelas, p.jurusan);
+      if (clean && clean !== p.nama_paket) {
+        p.nama_paket = clean;
+        DB.savePaket(p.id, {
+          nama_paket: clean,
+          jurusan: p.jurusan,
+          kelas: p.kelas,
+          jadwal_mulai: p.jadwal_mulai,
+          jadwal_selesai: p.jadwal_selesai
+        }).catch(err => console.warn('Gagal merapikan nama paket otomatis di DB:', err));
+      }
+    });
+
     allPaket = isGuruMode()
       ? allPaketUnfiltered.filter(p => isPaketAllowedForGuru(p))
       : allPaketUnfiltered;
@@ -4034,6 +4109,68 @@ async function loadPaket() {
   } catch (err) {
     console.error("Gagal memuat paket:", err);
   }
+}
+
+function getCleanPaketName(namaPaket, rawKelas, rawJurusan) {
+  if (!namaPaket || typeof namaPaket !== 'string') return namaPaket || 'Paket Soal';
+  let name = namaPaket.trim();
+
+  // Jika nama paket mengandung dump daftar kelas/jurusan koma-koma yang panjang
+  if (name.includes(',') && name.length > 25 && name.includes(' - ')) {
+    const dashIdx = name.indexOf(' - ');
+    const mapelPart = name.substring(0, dashIdx).trim();
+
+    const kList = String(rawKelas || '').split(',').map(s => s.trim()).filter(Boolean);
+    let kStr = '';
+    if (kList.length === 1) {
+      kStr = kList[0].toUpperCase().startsWith('TINGKAT:') ? `Tingkat ${kList[0].split(':')[1]}` : kList[0];
+    } else if (kList.length > 1) {
+      const firstT = kList[0].split(/[\s\-_]+/)[0].toUpperCase();
+      if (kList.every(k => k.split(/[\s\-_]+/)[0].toUpperCase() === firstT) && ['X', 'XI', 'XII', '10', '11', '12'].includes(firstT)) {
+        kStr = `Kelas ${firstT}`;
+      } else {
+        kStr = `${kList.length} Kelas`;
+      }
+    }
+    return kStr ? `${mapelPart} - ${kStr}` : mapelPart;
+  }
+
+  return name;
+}
+
+function formatKelasBadge(rawKelas) {
+  if (!rawKelas || rawKelas.toLowerCase() === 'semua') {
+    return `<span class="badge bg-secondary-subtle text-dark border ms-1"><i class="bi bi-mortarboard me-1"></i>Semua Kelas</span>`;
+  }
+  const list = rawKelas.split(',').map(s => s.trim()).filter(Boolean);
+  if (list.length === 1) {
+    const single = list[0];
+    if (single.toUpperCase().startsWith('TINGKAT:')) {
+      const tVal = single.split(':')[1];
+      return `<span class="badge bg-primary text-white ms-1" title="Semua rombel tingkat ${escapeHtml(tVal)}"><i class="bi bi-mortarboard-fill me-1"></i>Tingkat ${escapeHtml(tVal)}</span>`;
+    }
+    return `<span class="badge bg-success text-white ms-1"><i class="bi bi-mortarboard me-1"></i>${escapeHtml(single)}</span>`;
+  }
+
+  const firstT = list[0].split(/[\s\-_]+/)[0].toUpperCase();
+  const allSame = list.every(k => k.split(/[\s\-_]+/)[0].toUpperCase() === firstT);
+  const prefix = (allSame && ['X', 'XI', 'XII', '10', '11', '12'].includes(firstT)) ? `Tingkat ${firstT} • ` : '';
+
+  if (list.length <= 2) {
+    return `<span class="badge bg-success text-white ms-1" title="${escapeAttr(rawKelas)}"><i class="bi bi-mortarboard me-1"></i>${escapeHtml(list.join(', '))}</span>`;
+  }
+  return `<span class="badge bg-success-subtle text-success border ms-1" title="${escapeAttr(rawKelas)}" data-bs-toggle="tooltip"><i class="bi bi-mortarboard me-1"></i>${prefix}${list.length} Kelas (${list.slice(0, 2).join(', ')} +${list.length - 2})</span>`;
+}
+
+function formatJurusanBadge(rawJurusan) {
+  if (!rawJurusan || rawJurusan.toLowerCase() === 'semua') {
+    return `<span class="badge bg-secondary ms-1">Semua Jurusan</span>`;
+  }
+  const list = rawJurusan.split(',').map(s => s.trim()).filter(Boolean);
+  if (list.length <= 2) {
+    return `<span class="badge bg-info text-dark ms-1" title="${escapeAttr(rawJurusan)}"><i class="bi bi-diagram-3 me-1"></i>${escapeHtml(list.join(', '))}</span>`;
+  }
+  return `<span class="badge bg-info-subtle text-dark border ms-1" title="${escapeAttr(rawJurusan)}" data-bs-toggle="tooltip"><i class="bi bi-diagram-3 me-1"></i>${list.length} Jurusan (${list.join(', ')})</span>`;
 }
 
 function renderPaketList(list) {
@@ -4073,18 +4210,9 @@ function renderPaketList(list) {
 
   const items = filtered.map(p => {
     const isActive = p.id === activePaketId ? 'active' : '';
-    const jurusanBadge = p.jurusan && p.jurusan.toLowerCase() !== 'semua' ? `<span class="badge bg-info text-dark ms-1">${escapeHtml(p.jurusan)}</span>` : `<span class="badge bg-secondary ms-1">Semua Jurusan</span>`;
-    
-    let kelasBadge = `<span class="badge bg-secondary-subtle text-dark border ms-1">Semua Kelas</span>`;
-    if (p.kelas && p.kelas.toLowerCase() !== 'semua') {
-      if (p.kelas.toUpperCase().startsWith('TINGKAT:')) {
-        const tVal = p.kelas.split(':')[1];
-        kelasBadge = `<span class="badge bg-primary text-white ms-1" title="Berlaku untuk semua rombel tingkat ${escapeHtml(tVal)}"><i class="bi bi-mortarboard-fill me-1"></i>Tingkat ${escapeHtml(tVal)}</span>`;
-      } else {
-        kelasBadge = `<span class="badge bg-success text-white ms-1">${escapeHtml(p.kelas)}</span>`;
-      }
-    }
-
+    const cleanTitle = getCleanPaketName(p.nama_paket, p.kelas, p.jurusan);
+    const jurusanBadge = formatJurusanBadge(p.jurusan);
+    const kelasBadge = formatKelasBadge(p.kelas);
     const soalCount = p.total_soal !== undefined ? p.total_soal : (p.soal_count || 0);
     const soalBadge = `<span class="badge ${soalCount > 0 ? 'bg-primary text-white' : 'bg-warning text-dark'} ms-1"><i class="bi bi-question-circle me-1"></i>${soalCount} Soal</span>`;
 
@@ -4106,7 +4234,7 @@ function renderPaketList(list) {
     return `
       <a href="#" class="list-group-item list-group-item-action ${isActive}" onclick="selectPaket('${p.id}'); return false;">
         <div class="d-flex justify-content-between align-items-center mb-1">
-          <h6 class="mb-0 fw-bold">${escapeHtml(p.nama_paket)}</h6>
+          <h6 class="mb-0 fw-bold">${escapeHtml(cleanTitle)}</h6>
           ${soalBadge}
         </div>
         <div class="mb-1">${jurusanBadge} ${kelasBadge} ${guruBadge}</div>
@@ -4259,7 +4387,7 @@ function editPaket() {
 
   document.getElementById('paketFormTitle').innerText = "Edit Paket Soal";
   document.getElementById('paket-id').value = p.id;
-  document.getElementById('crud-paket-nama').value = p.nama_paket;
+  document.getElementById('crud-paket-nama').value = getCleanPaketName(p.nama_paket, p.kelas, p.jurusan);
   detectPaketAgamaHint(p.nama_paket);
   document.getElementById('crud-paket-jurusan').value = p.jurusan || "";
   document.getElementById('crud-paket-kelas').value = p.kelas || "";
@@ -4431,16 +4559,9 @@ async function selectPaket(id) {
   document.getElementById('paket-detail-container').classList.remove('d-none');
   document.getElementById('paket-empty-state').classList.add('d-none');
   
-  const jText = p.jurusan && p.jurusan.toLowerCase() !== 'semua' ? p.jurusan : 'Semua Jurusan';
-  let kText = 'Semua Kelas';
-  if (p.kelas && p.kelas.toLowerCase() !== 'semua') {
-    if (p.kelas.toUpperCase().startsWith('TINGKAT:')) {
-      kText = `Tingkat ${p.kelas.split(':')[1]}`;
-    } else {
-      kText = p.kelas;
-    }
-  }
-
+  const cleanTitle = getCleanPaketName(p.nama_paket, p.kelas, p.jurusan);
+  const jBadge = formatJurusanBadge(p.jurusan);
+  const kBadge = formatKelasBadge(p.kelas);
   const soalCount = p.total_soal !== undefined ? p.total_soal : (p.soal_count || 0);
 
   let guruBadge = '';
@@ -4459,10 +4580,10 @@ async function selectPaket(id) {
   }
 
   document.getElementById('active-paket-title').innerHTML = `
-    <span class="align-middle">${escapeHtml(p.nama_paket)}</span>
+    <span class="align-middle fw-bold text-dark">${escapeHtml(cleanTitle)}</span>
     <span class="badge ${soalCount > 0 ? 'bg-primary' : 'bg-warning text-dark'} fs-6 ms-2 align-middle" id="active-paket-soal-count"><i class="bi bi-question-circle me-1"></i>${soalCount} Soal</span>
-    <span class="badge bg-info-subtle text-dark border ms-1 fs-6 align-middle"><i class="bi bi-briefcase me-1"></i>${escapeHtml(jText)}</span>
-    <span class="badge bg-secondary-subtle text-dark border ms-1 fs-6 align-middle"><i class="bi bi-mortarboard me-1"></i>${escapeHtml(kText)}</span>
+    ${jBadge}
+    ${kBadge}
     ${guruBadge}
   `;
   
