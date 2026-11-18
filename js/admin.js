@@ -2516,8 +2516,8 @@ function renderGuruTable(list) {
         <td>${paketBadges}</td>
         <td class="text-center">
           <div class="d-flex align-items-center justify-content-center gap-1 flex-wrap">
-            <button class="btn btn-sm btn-primary py-1 px-2" onclick="openPenugasanGuruModal('${escapeAttr(g.id)}')" title="Tambah & Atur Mapel Guru Ini">
-              <i class="bi bi-journal-plus me-1"></i>+ Atur Mapel
+            <button class="btn btn-sm btn-success fw-bold py-1 px-2 shadow-sm" onclick="openPenugasanGuruModal('${escapeAttr(g.id)}')" title="Tambah & Atur Mapel Guru Ini">
+              <i class="bi bi-plus-circle me-1"></i>+ Tambah Mapel
             </button>
             <button class="btn btn-sm btn-outline-secondary py-1 px-2" onclick="editGuru('${escapeAttr(g.id)}')" title="Edit Akun Guru">
               <i class="bi bi-pencil"></i>
@@ -2761,16 +2761,13 @@ function appendGuruMapelPreset(mapelName) {
 }
 
 function openGuruForm() {
-  document.getElementById('guruFormTitle').innerHTML = `<i class="bi bi-person-plus-fill me-2 text-primary"></i>Tambah Akun Guru Mapel`;
+  document.getElementById('guruFormTitle').innerHTML = `<i class="bi bi-person-plus-fill me-2 text-primary"></i>Buat Akun Guru Baru`;
   document.getElementById('form-guru-crud').reset();
   document.getElementById('guru-id').value = "";
   document.getElementById('crud-guru-pass').required = true;
+  const passReq = document.getElementById('crud-guru-pass-required');
+  if (passReq) passReq.classList.remove('d-none');
   document.getElementById('crud-guru-pass-help').innerText = "Wajib diisi untuk akun guru baru.";
-  const filterInput = document.getElementById('filter-guru-paket-input');
-  if (filterInput) filterInput.value = '';
-  renderGuruJurusanChecklist('');
-  renderGuruKelasChecklist('');
-  renderGuruPaketChecklist([]);
   if (guruFormModalInstance) guruFormModalInstance.show();
 }
 
@@ -2778,31 +2775,16 @@ function editGuru(id) {
   const g = (allGuru || []).find(item => String(item.id) === String(id));
   if (!g) return;
 
-  document.getElementById('guruFormTitle').innerHTML = `<i class="bi bi-pencil-square me-2 text-primary"></i>Edit Akun Guru Mapel`;
+  document.getElementById('guruFormTitle').innerHTML = `<i class="bi bi-pencil-square me-2 text-primary"></i>Edit Akun Guru`;
   document.getElementById('guru-id').value = g.id;
   document.getElementById('crud-guru-username').value = g.username || '';
   document.getElementById('crud-guru-nama').value = g.nama_lengkap || '';
-  document.getElementById('crud-guru-mapel').value = g.mapel_diampu || '';
   document.getElementById('crud-guru-pass').value = '';
   document.getElementById('crud-guru-pass').required = false;
+  const passReq = document.getElementById('crud-guru-pass-required');
+  if (passReq) passReq.classList.add('d-none');
   document.getElementById('crud-guru-pass-help').innerText = "Biarkan kosong jika tidak ingin mengubah password guru.";
 
-  const filterInput = document.getElementById('filter-guru-paket-input');
-  if (filterInput) filterInput.value = '';
-
-  renderGuruJurusanChecklist(g.jurusan_diampu || '');
-  renderGuruKelasChecklist(g.kelas_diampu || '');
-
-  let selectedIds = [];
-  if (Array.isArray(g.paket_ids)) {
-    selectedIds = g.paket_ids;
-  } else if (typeof g.paket_ids === 'string' && g.paket_ids.trim()) {
-    try {
-      const parsed = JSON.parse(g.paket_ids);
-      if (Array.isArray(parsed)) selectedIds = parsed;
-    } catch (e) {}
-  }
-  renderGuruPaketChecklist(selectedIds);
   if (guruFormModalInstance) guruFormModalInstance.show();
 }
 
@@ -2811,12 +2793,14 @@ async function handleGuruCrudSubmit(e) {
   const id = document.getElementById('guru-id').value;
   const username = document.getElementById('crud-guru-username').value.trim();
   const nama = document.getElementById('crud-guru-nama').value.trim();
-  const mapel = document.getElementById('crud-guru-mapel').value.trim();
   const pass = document.getElementById('crud-guru-pass').value;
 
-  const checkedJurusans = Array.from(document.querySelectorAll('.chk-guru-jurusan:checked')).map(el => el.value);
-  const checkedKelas = Array.from(document.querySelectorAll('.chk-guru-kelas:checked')).map(el => el.value);
-  const checkedPakets = Array.from(document.querySelectorAll('.chk-guru-paket:checked')).map(el => el.value);
+  if (!username || !nama) {
+    Swal.fire('Data Belum Lengkap', 'Username dan Nama Lengkap guru wajib diisi.', 'warning');
+    return;
+  }
+
+  const existing = id ? (allGuru || []).find(item => String(item.id) === String(id)) : null;
 
   const btn = document.getElementById('btn-save-guru-crud');
   btn.disabled = true;
@@ -2825,10 +2809,11 @@ async function handleGuruCrudSubmit(e) {
     const saved = await DB.saveGuru(id, {
       username,
       nama_lengkap: nama,
-      mapel_diampu: mapel,
-      jurusan_diampu: checkedJurusans.join(', '),
-      kelas_diampu: checkedKelas.join(', '),
-      paket_ids: checkedPakets
+      mapel_diampu: existing ? (existing.mapel_diampu || '') : '',
+      jurusan_diampu: existing ? (existing.jurusan_diampu || '') : '',
+      kelas_diampu: existing ? (existing.kelas_diampu || '') : '',
+      paket_ids: existing ? (existing.paket_ids || []) : [],
+      penugasan_mapel: existing ? (existing.penugasan_mapel || []) : []
     }, pass);
 
     if (guruFormModalInstance) guruFormModalInstance.hide();
@@ -2836,19 +2821,20 @@ async function handleGuruCrudSubmit(e) {
 
     if (!id && saved && saved.id) {
       const ask = await Swal.fire({
-        title: 'Akun Guru Dibuat!',
-        text: `Akun untuk "${nama}" berhasil dibuat. Ingin langsung menambahkan mata pelajaran & tingkat kelas yang diampu?`,
+        title: 'Akun Guru Berhasil Dibuat!',
+        html: `Akun untuk <strong>${escapeHtml(nama)}</strong> telah aktif.<br><br>Apakah Anda ingin langsung menambahkan mata pelajaran yang diampu guru ini?`,
         icon: 'success',
         showCancelButton: true,
-        confirmButtonText: '<i class="bi bi-journal-plus me-1"></i> Ya, Tambah Mapel Sekarang',
-        cancelButtonText: 'Nanti Saja',
-        confirmButtonColor: '#0d6efd'
+        confirmButtonText: '<i class="bi bi-plus-circle me-1"></i> Ya, Tambah Mapel Sekarang',
+        cancelButtonText: 'Nanti Lewat Tabel',
+        confirmButtonColor: '#198754',
+        cancelButtonColor: '#6c757d'
       });
       if (ask.isConfirmed) {
         openPenugasanGuruModal(saved.id);
       }
     } else {
-      Swal.fire('Berhasil', `Akun guru "${nama}" berhasil disimpan.`, 'success');
+      Swal.fire('Berhasil Disimpan', `Data akun guru "${nama}" berhasil diperbarui.`, 'success');
     }
   } catch (err) {
     Swal.fire('Gagal Menyimpan', err.message || 'Terjadi kesalahan saat menyimpan akun guru.', 'error');
