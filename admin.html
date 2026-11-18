@@ -1204,11 +1204,21 @@
                 <small class="text-muted">Pilih tingkat angkatan (Tingkat X / XI / XII) atau rombel kelas spesifik yang diajar guru ini.</small>
               </div>
               <div class="col-12">
-                <label class="form-label fw-semibold mb-1">Akses Paket Soal Spesifik (Opsional)</label>
-                <div class="border rounded-3 p-2 bg-light" style="max-height: 150px; overflow-y: auto;" id="crud-guru-paket-checklist">
+                <div class="d-flex justify-content-between align-items-center mb-1">
+                  <label class="form-label fw-semibold mb-0"><i class="bi bi-journal-check text-primary me-1"></i>Akses Paket Soal Spesifik (Solusi Rekomendasi)</label>
+                  <div class="btn-group btn-group-sm">
+                    <button type="button" class="btn btn-outline-secondary btn-sm py-0 px-2" style="font-size: 0.72rem;" onclick="toggleAllGuruPakets(true)">Pilih Semua</button>
+                    <button type="button" class="btn btn-outline-secondary btn-sm py-0 px-2" style="font-size: 0.72rem;" onclick="toggleAllGuruPakets(false)">Kosongkan</button>
+                  </div>
+                </div>
+                <input type="text" id="filter-guru-paket-input" class="form-control form-control-sm mb-2" placeholder="Cari paket soal (misal: MTK, Koding, XI, TKJ)..." oninput="filterGuruPaketChecklist(this.value)">
+                <div class="border rounded-3 p-2 bg-light" style="max-height: 180px; overflow-y: auto;" id="crud-guru-paket-checklist">
                   <div class="text-muted small py-2 text-center">Memuat daftar paket soal...</div>
                 </div>
-                <small class="text-muted">Selain mencocokkan Mapel, Jurusan & Kelas secara otomatis, Anda juga dapat mencentang paket soal tertentu di atas agar bisa diakses oleh guru ini.</small>
+                <small class="text-muted d-block mt-1">
+                  <i class="bi bi-info-circle text-primary me-1"></i>
+                  <strong>Solusi Guru Lintas Mapel/Tingkat/Jurusan:</strong> Centang paket-paket soal yang menjadi tugas guru ini. Jika dicentang, guru <strong>hanya akan mengakses paket yang dipilih</strong> secara akurat tanpa tertukar.
+                </small>
               </div>
               <div class="col-12">
                 <label for="crud-guru-pass" class="form-label fw-semibold">Password Login Guru</label>
@@ -1433,6 +1443,13 @@
                 </button>
               </div>
               <small class="text-muted">Pilih <b>Semua Kelas</b> untuk semua angkatan, atau <b>Tingkat X</b> untuk seluruh rombel kelas 10 (X TKJ 1 & X TKJ 2 sama-sama dapat), atau pilih rombel tertentu.</small>
+            </div>
+            <div class="mb-3" id="crud-paket-guru-wrapper">
+              <label for="crud-paket-guru" class="form-label fw-semibold"><i class="bi bi-person-badge text-primary me-1"></i>Guru Pengampu / Pembuat Soal (Opsional)</label>
+              <select class="form-select" id="crud-paket-guru">
+                <option value="">-- Tanpa Penugasan Khusus (Otomatis Sesuai Mapel) --</option>
+              </select>
+              <small class="text-muted">Pilih guru yang bertugas mengelola butir soal paket ini. Paket ini akan langsung otomatis masuk ke akun guru tersebut.</small>
             </div>
             <div class="mb-3">
               <label for="crud-paket-mulai" class="form-label fw-semibold">Jadwal Mulai (Otomatis Terbuka)</label>
@@ -1661,13 +1678,13 @@
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   
   <!-- CBT Modules -->
-  <script src="js/config.js?v=44"></script>
-  <script src="js/supabase-config.js?v=44"></script>
-  <script src="js/db-adapter.js?v=44"></script>
-  <script src="js/auth.js?v=44"></script>
-  <script src="js/excel-helpers.js?v=44"></script>
-  <script src="js/templates.js?v=44"></script>
-  <script src="js/admin.js?v=44"></script>
+  <script src="js/config.js?v=46"></script>
+  <script src="js/supabase-config.js?v=46"></script>
+  <script src="js/db-adapter.js?v=46"></script>
+  <script src="js/auth.js?v=46"></script>
+  <script src="js/excel-helpers.js?v=46"></script>
+  <script src="js/templates.js?v=46"></script>
+  <script src="js/admin.js?v=46"></script>
   <script>
     // Dark mode logic
     const themeToggleBtn = document.getElementById('theme-toggle-admin');
