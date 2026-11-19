@@ -106,6 +106,37 @@ const ExcelTemplates = {
 
     XLSX.utils.book_append_sheet(wb, ws, "Template Soal");
     XLSX.writeFile(wb, "Template_Soal_CBT.xlsx");
+  },
+
+  // Download template for importing Akun Guru (3 Kolom Ringkas: Username, Password, Nama Lengkap)
+  downloadGuruTemplate() {
+    const headers = ['Username', 'Password', 'Nama Lengkap'];
+    const rows = [
+      headers,
+      ['guru_budi', '123456', 'Bpk. Budi Santoso, S.Pd'],
+      ['guru_siti', '123456', 'Ibu Siti Aminah, S.Pd, Gr'],
+      ['guru_noferson', '123456', 'Bpk. Noferson, S.Pd, M.Eng']
+    ];
+
+    const wb = XLSX.utils.book_new();
+    const ws = XLSX.utils.aoa_to_sheet(rows);
+
+    // Format kolom Username & Password sebagai Text ('@') agar angka 0 di depan (misal NIP) tidak hilang di Excel
+    ['A2', 'A3', 'A4', 'B2', 'B3', 'B4'].forEach(cellRef => {
+      if (ws[cellRef]) {
+        ws[cellRef].t = 's';
+        ws[cellRef].z = '@';
+      }
+    });
+
+    ws['!cols'] = [
+      { wch: 22 }, // Username
+      { wch: 18 }, // Password
+      { wch: 36 }  // Nama Lengkap
+    ];
+
+    XLSX.utils.book_append_sheet(wb, ws, "Template Guru");
+    XLSX.writeFile(wb, "Template_Akun_Guru_CBT.xlsx");
   }
 };
 

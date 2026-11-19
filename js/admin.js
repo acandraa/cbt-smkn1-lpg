@@ -5364,6 +5364,9 @@ function openImportModal(mode) {
   if (mode === 'peserta') {
     title.innerText = "Import Data Peserta dari Excel";
     btnTemplate.setAttribute('onclick', 'ExcelTemplates.downloadPesertaTemplate()');
+  } else if (mode === 'guru') {
+    title.innerText = "Import Akun Guru dari Excel";
+    btnTemplate.setAttribute('onclick', 'ExcelTemplates.downloadGuruTemplate()');
   } else {
     title.innerText = "Import Bank Soal dari Excel";
     btnTemplate.setAttribute('onclick', 'ExcelTemplates.downloadSoalTemplate()');
@@ -5387,6 +5390,9 @@ async function handleExcelUpload(input) {
     if (importMode === 'peserta') {
       importedDataCache = await ExcelHelpers.parsePesertaExcel(file);
       renderImportPreviewPeserta(importedDataCache);
+    } else if (importMode === 'guru') {
+      importedDataCache = await ExcelHelpers.parseGuruExcel(file);
+      renderImportPreviewGuru(importedDataCache);
     } else {
       importedDataCache = await ExcelHelpers.parseSoalExcel(file);
       renderImportPreviewSoal(importedDataCache);
@@ -5437,6 +5443,54 @@ function renderImportPreviewPeserta(data) {
 
   if (data.length > 10) {
     html += `<tr><td colspan="7" class="text-center text-muted">...dan ${data.length - 10} data lainnya...</td></tr>`;
+  }
+
+  html += '</tbody>';
+  table.innerHTML = html;
+}
+
+function renderImportPreviewGuru(data) {
+  const table = document.getElementById('excel-preview-table');
+  const existingUsers = new Set((allGuru || []).map(g => (g.username || '').trim().toLowerCase()));
+  const seenInFile = new Set();
+
+  let html = `
+    <thead>
+      <tr>
+        <th style="width: 45px;">No</th>
+        <th>Username</th>
+        <th>Nama Lengkap & Gelar</th>
+        <th>Password</th>
+        <th>Status</th>
+      </tr>
+    </thead>
+    <tbody>
+  `;
+
+  data.slice(0, 15).forEach((r, idx) => {
+    let statusBadge = `<span class="badge bg-success-subtle text-success border border-success-subtle">Siap Disimpan</span>`;
+    if (!r.username || !r.nama_lengkap || !r.password) {
+      statusBadge = `<span class="badge bg-danger-subtle text-danger border border-danger-subtle">Data Belum Lengkap</span>`;
+    } else if (existingUsers.has(r.username)) {
+      statusBadge = `<span class="badge bg-warning-subtle text-dark border border-warning-subtle">Sudah Terdaftar (Lewati)</span>`;
+    } else if (seenInFile.has(r.username)) {
+      statusBadge = `<span class="badge bg-warning-subtle text-dark border border-warning-subtle">Duplikat di Excel</span>`;
+    }
+    if (r.username) seenInFile.add(r.username);
+
+    html += `
+      <tr>
+        <td class="text-muted">${idx + 1}</td>
+        <td><code>${escapeHtml(r.username || '-')}</code></td>
+        <td class="fw-semibold">${escapeHtml(r.nama_lengkap || '-')}</td>
+        <td><code>${escapeHtml(r.password || '-')}</code></td>
+        <td>${statusBadge}</td>
+      </tr>
+    `;
+  });
+
+  if (data.length > 15) {
+    html += `<tr><td colspan="5" class="text-center text-muted">...dan ${data.length - 15} akun guru lainnya...</td></tr>`;
   }
 
   html += '</tbody>';
@@ -5544,6 +5598,53 @@ async function saveImportedData() {
       });
       await loadPeserta();
       await refreshJurusanDanKelas();
+    } else if (importMode === 'guru') {
+      let success = 0;
+      let fails = 0;
+      const failedDetails = [];
+
+      for (let i = 0; i < importedDataCache.length; i++) {
+        const item = importedDataCache[i];
+        Swal.update({
+          html: `Mengimpor akun guru ${i + 1} dari ${importedDataCache.length}...<br>Berhasil: <strong>${success}</strong>, Gagal/Dilewati: <strong>${fails}</strong>`
+        });
+
+        try {
+          if (!item.username || !item.nama_lengkap || !item.password) {
+            throw new Error('Username, Password, dan Nama Lengkap wajib diisi.');
+          }
+          await DB.saveGuru('', {
+            username: item.username,
+            nama_lengkap: item.nama_lengkap,
+            mapel_diampu: '',
+            jurusan_diampu: '',
+            kelas_diampu: '',
+            paket_ids: [],
+            penugasan_mapel: []
+          }, item.password);
+          success++;
+        } catch (err) {
+          console.error("Gagal mengimpor guru:", item.username, err);
+          fails++;
+          if (failedDetails.length < 15) {
+            failedDetails.push(`<li><code>${escapeHtml(item.username || '-')}</code> (${escapeHtml(item.nama_lengkap || '-')}): ${escapeHtml(err.message || 'Gagal disimpan')}</li>`);
+          }
+        }
+      }
+
+      let resultHtml = `Proses import akun guru selesai.<br>Berhasil: <strong>${success}</strong>, Gagal/Dilewati: <strong>${fails}</strong>`;
+      if (failedDetails.length > 0) {
+        resultHtml += `<div class="text-start small mt-3 p-2 bg-light border rounded" style="max-height:160px;overflow-y:auto;"><strong>Daftar baris yang gagal/dilewati:</strong><ul class="mb-0 ps-3 mt-1">${failedDetails.join('')}</ul></div>`;
+      } else if (success > 0) {
+        resultHtml += `<div class="small text-muted mt-2">Selanjutnya Anda atau Bapak/Ibu Guru dapat mengatur mata pelajaran melalui tombol <strong>+ Tambah Mapel</strong>.</div>`;
+      }
+
+      Swal.fire({
+        title: 'Import Akun Guru Selesai',
+        html: resultHtml,
+        icon: fails === 0 ? 'success' : 'warning'
+      });
+      await loadGuru();
     } else {
       if (!activePaketId) {
         Swal.fire('Pilih Paket', 'Silakan pilih atau buat paket soal terlebih dahulu sebelum import.', 'warning');

@@ -61,6 +61,79 @@ const ExcelHelpers = {
     });
   },
 
+  // Read Excel file containing Akun Guru data (3 Kolom: Username, Password, Nama Lengkap)
+  parseGuruExcel(file) {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = (e) => {
+        try {
+          const data = new Uint8Array(e.target.result);
+          const workbook = XLSX.read(data, { type: 'array', cellDates: true });
+          const firstSheet = workbook.Sheets[workbook.SheetNames[0]];
+
+          // raw: false menjaga angka '0' di depan (misal NIP/password) agar tidak terpotong oleh Excel
+          const rows = XLSX.utils.sheet_to_json(firstSheet, { header: 1, raw: false, defval: '' });
+          if (rows.length < 2) {
+            return reject(new Error("File Excel kosong atau tidak memiliki baris data."));
+          }
+
+          const headersLower = rows[0].map(h => h ? h.toString().trim().toLowerCase() : '');
+
+          const findCol = (aliases) => {
+            for (const a of aliases) {
+              const i = headersLower.indexOf(a);
+              if (i !== -1) return i;
+            }
+            return -1;
+          };
+
+          const idxUser = findCol(['username', 'username login', 'username login guru', 'user', 'nip']);
+          const idxPass = findCol(['password', 'password login', 'password login guru', 'pass', 'kata sandi', 'sandi']);
+          const idxNama = findCol(['nama lengkap', 'nama lengkap & gelar', 'nama lengkap guru', 'nama guru', 'nama']);
+
+          const missing = [];
+          if (idxUser === -1) missing.push('Username');
+          if (idxPass === -1) missing.push('Password');
+          if (idxNama === -1) missing.push('Nama Lengkap');
+
+          if (missing.length > 0) {
+            return reject(new Error("Format kolom Excel salah. Kolom yang kurang: " + missing.join(", ")));
+          }
+
+          const guruList = [];
+          for (let i = 1; i < rows.length; i++) {
+            const row = rows[i];
+            if (!row || row.length === 0) continue;
+
+            const rawUser = row[idxUser] !== undefined && row[idxUser] !== null ? row[idxUser].toString().trim() : '';
+            const rawPass = row[idxPass] !== undefined && row[idxPass] !== null ? row[idxPass].toString().trim() : '';
+            const rawNama = row[idxNama] !== undefined && row[idxNama] !== null ? row[idxNama].toString().trim() : '';
+
+            // Lewati baris kosong
+            if (!rawUser && !rawPass && !rawNama) continue;
+
+            const cleanUser = rawUser.replace(/\s+/g, '').toLowerCase();
+            guruList.push({
+              username: cleanUser,
+              password: rawPass,
+              nama_lengkap: rawNama
+            });
+          }
+
+          if (guruList.length === 0) {
+            return reject(new Error("Tidak ditemukan baris data guru yang valid di dalam file Excel."));
+          }
+
+          resolve(guruList);
+        } catch (err) {
+          reject(err);
+        }
+      };
+      reader.onerror = (err) => reject(err);
+      reader.readAsArrayBuffer(file);
+    });
+  },
+
   // Read Excel file containing Soal data
   parseSoalExcel(file) {
     return new Promise((resolve, reject) => {
