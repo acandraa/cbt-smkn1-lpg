@@ -58,7 +58,7 @@ window.CBT_SUPABASE_SHARDS = [
   {
     id: 5,
     name: "Server 5 (Akuntansi / Sesi 5)",
-    url: " ",
+    url: "https://yiiiynemqaosspxzbngd.supabase.co",
     key: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InlpaWl5bmVtcWFvc3NweHpibmdkIiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTQzNzcxNzEsImV4cCI6MjEwOTk1MzE3MX0.2oCkV30Xf4W99MRRucoMfLGxFLJRyMhLIGGHPeipGQw"
   }
 ];
