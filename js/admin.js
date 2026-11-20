@@ -2621,13 +2621,24 @@ function exportPesertaData() {
   ExcelHelpers.exportJSONToExcel(allPeserta, map, "Daftar_Peserta_CBT_PPDB", "Peserta");
 }
 
-function exportGuruData() {
+async function exportGuruData() {
   if (!allGuru || allGuru.length === 0) {
     Swal.fire('Ekspor Kosong', 'Tidak ada data guru mata pelajaran untuk diekspor.', 'warning');
     return;
   }
 
-  const sourcePakets = (allPaketUnfiltered && allPaketUnfiltered.length > 0) ? allPaketUnfiltered : (allPaket || []);
+  let sourcePakets = (allPaketUnfiltered && allPaketUnfiltered.length > 0) ? allPaketUnfiltered : (allPaket || []);
+  if (sourcePakets.length === 0) {
+    try {
+      const fetchedPakets = await DB.getPaketList();
+      if (Array.isArray(fetchedPakets) && fetchedPakets.length > 0) {
+        allPaketUnfiltered = fetchedPakets;
+        sourcePakets = fetchedPakets;
+      }
+    } catch (e) {
+      console.warn('Gagal memuat paket saat export guru:', e);
+    }
+  }
   const paketMap = new Map();
   sourcePakets.forEach(pk => paketMap.set(String(pk.id), pk));
 
@@ -5925,25 +5936,424 @@ async function deleteSoal(id, nomor) {
   }
 }
 
+function htmlToPlainTextForExport(rawHtml) {
+  if (rawHtml === null || rawHtml === undefined) return '';
+  let str = String(rawHtml);
+  // Ganti tag gambar menjadi label ringkas agar tidak melebihi batas sel Excel (32.767 karakter)
+  str = str.replace(/<img\b[^>]*>/gi, ' [Gambar] ');
+  // Pertahankan jeda baris dari tag blok/br
+  str = str
+    .replace(/<br\s*\/?>/gi, '\n')
+    .replace(/<\/(p|div|li|tr|h[1-6])>/gi, '\n');
+  const tmp = document.createElement('div');
+  tmp.innerHTML = str;
+  return (tmp.textContent || tmp.innerText || '')
+    .replace(/\u00a0/g, ' ')
+    .replace(/[ \t]+\n/g, '\n')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim();
+}
+
+function sanitizeFilenamePart(str) {
+  return String(str || 'Paket')
+    .replace(/[\\/:*?"<>|]+/g, ' ')
+    .replace(/\s+/g, '_')
+    .replace(/^_+|_+$/g, '')
+    .slice(0, 60) || 'Paket';
+}
+
+function formatKelasExportText(raw) {
+  if (!raw || String(raw).trim().toUpperCase() === 'SEMUA') return 'Semua Kelas';
+  return String(raw)
+    .split(',')
+    .map(s => {
+      const clean = s.trim();
+      if (!clean) return '';
+      return clean.toUpperCase().startsWith('TINGKAT:') ? `Tingkat ${clean.split(':')[1]}` : clean;
+    })
+    .filter(Boolean)
+    .join(', ') || 'Semua Kelas';
+}
+
+function getPaketOwnerNameMap() {
+  const map = new Map();
+  if (isGuruMode() && currentAdminUser) {
+    const guruName = currentAdminUser.nama_lengkap || currentAdminUser.username || 'Guru Mapel';
+    (allPaket || []).forEach(pk => { if (pk && pk.id) map.set(String(pk.id), guruName); });
+    return map;
+  }
+  (allGuru || []).forEach(g => {
+    const gName = g.nama_lengkap || g.username || '';
+    if (!gName) return;
+    let pids = [];
+    if (Array.isArray(g.paket_ids)) pids = g.paket_ids;
+    else if (typeof g.paket_ids === 'string' && g.paket_ids.trim()) {
+      try { const p = JSON.parse(g.paket_ids); if (Array.isArray(p)) pids = p; } catch (e) {}
+    }
+    pids.forEach(pid => {
+      if (pid && !map.has(String(pid))) map.set(String(pid), gName);
+    });
+  });
+  return map;
+}
+
 function exportSoalData() {
-  if (allSoal.length === 0) {
-    Swal.fire('Ekspor Kosong', 'Tidak ada data soal untuk diekspor.', 'warning');
+  if (!activePaketId) {
+    Swal.fire('Pilih Paket Dulu', 'Silakan pilih paket soal terlebih dahulu untuk mengunduh soalnya.', 'info');
+    return;
+  }
+  if (!allSoal || allSoal.length === 0) {
+    Swal.fire('Ekspor Kosong', 'Paket ini belum memiliki butir soal untuk diunduh.', 'warning');
     return;
   }
 
-  const map = {
-    nomor: 'Nomor',
-    pertanyaan: 'Pertanyaan',
-    opsi_a: 'Opsi A',
-    opsi_b: 'Opsi B',
-    opsi_c: 'Opsi C',
-    opsi_d: 'Opsi D',
-    opsi_e: 'Opsi E',
-    jawaban_benar: 'Jawaban Benar',
-    bobot: 'Bobot'
-  };
+  const pk = (allPaket || []).find(p => String(p.id) === String(activePaketId))
+    || (allPaketUnfiltered || []).find(p => String(p.id) === String(activePaketId));
+  const paketName = pk ? getCleanPaketName(pk.nama_paket, pk.kelas, pk.jurusan) : 'Paket_Soal';
+  const todayStr = new Date().toISOString().split('T')[0];
 
-  ExcelHelpers.exportJSONToExcel(allSoal, map, "Bank_Soal_CBT_SMKN1Lempuing", "Soal");
+  const headers = ['Nomor', 'Pertanyaan', 'Opsi A', 'Opsi B', 'Opsi C', 'Opsi D', 'Opsi E', 'Jawaban Benar', 'Bobot'];
+  const sorted = [...allSoal].sort((a, b) => (Number(a.nomor) || 0) - (Number(b.nomor) || 0));
+  const rows = [headers];
+
+  sorted.forEach((s, idx) => {
+    rows.push([
+      s.nomor || (idx + 1),
+      htmlToPlainTextForExport(s.pertanyaan),
+      htmlToPlainTextForExport(s.opsi_a),
+      htmlToPlainTextForExport(s.opsi_b),
+      htmlToPlainTextForExport(s.opsi_c),
+      htmlToPlainTextForExport(s.opsi_d),
+      htmlToPlainTextForExport(s.opsi_e),
+      String(s.jawaban_benar || '').toUpperCase().trim(),
+      Number(s.bobot) || 1
+    ]);
+  });
+
+  const wb = XLSX.utils.book_new();
+  const ws = XLSX.utils.aoa_to_sheet(rows);
+  ws['!cols'] = [
+    { wch: 8 },  // Nomor
+    { wch: 55 }, // Pertanyaan
+    { wch: 28 }, // Opsi A
+    { wch: 28 }, // Opsi B
+    { wch: 28 }, // Opsi C
+    { wch: 28 }, // Opsi D
+    { wch: 28 }, // Opsi E
+    { wch: 15 }, // Jawaban Benar
+    { wch: 8 }   // Bobot
+  ];
+  XLSX.utils.book_append_sheet(wb, ws, 'Soal');
+
+  const safeName = sanitizeFilenamePart(paketName);
+  XLSX.writeFile(wb, `Soal_${safeName}_${todayStr}.xlsx`);
+}
+
+function exportPaketSoalWord() {
+  if (!activePaketId) {
+    Swal.fire('Pilih Paket Dulu', 'Silakan pilih paket soal terlebih dahulu untuk mengunduh naskah soal.', 'info');
+    return;
+  }
+  if (!allSoal || allSoal.length === 0) {
+    Swal.fire('Naskah Kosong', 'Paket ini belum memiliki butir soal untuk diunduh.', 'warning');
+    return;
+  }
+
+  const pk = (allPaket || []).find(p => String(p.id) === String(activePaketId))
+    || (allPaketUnfiltered || []).find(p => String(p.id) === String(activePaketId));
+  const paketName = pk ? getCleanPaketName(pk.nama_paket, pk.kelas, pk.jurusan) : 'Paket Soal';
+  const ownerMap = getPaketOwnerNameMap();
+  const guruName = ownerMap.get(String(activePaketId)) || (isGuruMode() && currentAdminUser ? (currentAdminUser.nama_lengkap || '-') : '-');
+  const kelasText = pk ? formatKelasExportText(pk.kelas) : 'Semua Kelas';
+  const jurusanText = (pk && pk.jurusan && String(pk.jurusan).trim().toUpperCase() !== 'SEMUA') ? pk.jurusan : 'Semua Jurusan';
+  const sorted = [...allSoal].sort((a, b) => (Number(a.nomor) || 0) - (Number(b.nomor) || 0));
+
+  const soalBlocks = sorted.map((s, idx) => {
+    const no = s.nomor || (idx + 1);
+    const opts = [
+      { key: 'A', val: s.opsi_a },
+      { key: 'B', val: s.opsi_b },
+      { key: 'C', val: s.opsi_c },
+      { key: 'D', val: s.opsi_d },
+      { key: 'E', val: s.opsi_e }
+    ].filter(o => o.val !== null && o.val !== undefined && String(o.val).trim() !== '');
+
+    const optsHtml = opts.map(o => `
+      <tr>
+        <td style="width: 24px; vertical-align: top; font-weight: bold;">${o.key}.</td>
+        <td style="vertical-align: top;">${o.val}</td>
+      </tr>
+    `).join('');
+
+    return `
+      <div style="margin-bottom: 14px; page-break-inside: avoid;">
+        <table style="width: 100%; border-collapse: collapse;">
+          <tr>
+            <td style="width: 28px; vertical-align: top; font-weight: bold;">${no}.</td>
+            <td style="vertical-align: top;">
+              <div style="margin-bottom: 6px;">${s.pertanyaan || ''}</div>
+              <table style="width: 100%; border-collapse: collapse; margin-left: 4px;">
+                ${optsHtml}
+              </table>
+            </td>
+          </tr>
+        </table>
+      </div>
+    `;
+  }).join('');
+
+  const keyCells = sorted.map((s, idx) =>
+    `<td style="border: 1px solid #333; padding: 4px 8px; text-align: center;"><strong>${s.nomor || (idx + 1)}.</strong> ${escapeHtml(String(s.jawaban_benar || '-').toUpperCase())}</td>`
+  );
+  const keyRows = [];
+  for (let i = 0; i < keyCells.length; i += 10) {
+    keyRows.push(`<tr>${keyCells.slice(i, i + 10).join('')}</tr>`);
+  }
+
+  const docHtml = `
+    <html xmlns:o="urn:schemas-microsoft-com:office:office"
+          xmlns:w="urn:schemas-microsoft-com:office:word"
+          xmlns="http://www.w3.org/TR/REC-html40">
+    <head>
+      <meta charset="utf-8">
+      <title>${escapeHtml(paketName)}</title>
+      <style>
+        body { font-family: "Times New Roman", Times, serif; font-size: 12pt; line-height: 1.45; color: #111; }
+        img { max-width: 480px; height: auto; }
+        .kop { border-bottom: 2px solid #000; padding-bottom: 8px; margin-bottom: 16px; }
+        .meta td { padding: 2px 6px; font-size: 11pt; }
+      </style>
+    </head>
+    <body>
+      <div class="kop">
+        <h2 style="margin: 0 0 6px 0; text-align: center;">NASKAH BANK SOAL CBT</h2>
+        <table class="meta" style="width: 100%; border-collapse: collapse;">
+          <tr><td style="width: 140px;"><strong>Paket / Mapel</strong></td><td>: ${escapeHtml(paketName)}</td></tr>
+          <tr><td><strong>Guru Pengampu</strong></td><td>: ${escapeHtml(guruName)}</td></tr>
+          <tr><td><strong>Tingkat / Kelas</strong></td><td>: ${escapeHtml(kelasText)}</td></tr>
+          <tr><td><strong>Jurusan</strong></td><td>: ${escapeHtml(jurusanText)}</td></tr>
+          <tr><td><strong>Jumlah Soal</strong></td><td>: ${sorted.length} butir</td></tr>
+        </table>
+      </div>
+      ${soalBlocks}
+      <div style="margin-top: 24px; border-top: 1px dashed #666; padding-top: 12px; page-break-before: auto;">
+        <h4 style="margin: 0 0 8px 0;">KUNCI JAWABAN</h4>
+        <table style="border-collapse: collapse; font-size: 10.5pt;">
+          ${keyRows.join('')}
+        </table>
+      </div>
+    </body>
+    </html>
+  `;
+
+  const blob = new Blob(['\ufeff', docHtml], { type: 'application/msword;charset=utf-8' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  const todayStr = new Date().toISOString().split('T')[0];
+  a.href = url;
+  a.download = `Naskah_Soal_${sanitizeFilenamePart(paketName)}_${todayStr}.doc`;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
+async function exportAllBankSoalExcel() {
+  // Pastikan daftar paket sudah termuat
+  let targetPakets = isGuruMode()
+    ? (allPaket || [])
+    : ((allPaketUnfiltered && allPaketUnfiltered.length > 0) ? allPaketUnfiltered : (allPaket || []));
+
+  if (targetPakets.length === 0) {
+    try {
+      const fetched = await DB.getPaketList();
+      if (Array.isArray(fetched)) {
+        allPaketUnfiltered = fetched;
+        targetPakets = isGuruMode() ? fetched.filter(pk => isPaketAllowedForGuru(pk)) : fetched;
+      }
+    } catch (e) {
+      Swal.fire('Gagal Memuat', e.message || 'Tidak dapat memuat daftar paket ujian.', 'error');
+      return;
+    }
+  }
+
+  if (targetPakets.length === 0) {
+    Swal.fire('Ekspor Kosong', 'Belum ada paket ujian di Bank Soal untuk diekspor.', 'warning');
+    return;
+  }
+
+  // Pastikan daftar guru termuat (mode Admin) untuk melengkapi kolom Guru Pengampu
+  if (!isGuruMode() && (!allGuru || allGuru.length === 0)) {
+    try { allGuru = await DB.getGuruList() || []; } catch (e) {}
+  }
+
+  Swal.fire({
+    title: 'Menyiapkan Export Bank Soal...',
+    html: `Mengambil data soal dari <strong>0 / ${targetPakets.length}</strong> paket ujian...`,
+    allowOutsideClick: false,
+    didOpen: () => Swal.showLoading()
+  });
+
+  try {
+    const ownerMap = getPaketOwnerNameMap();
+    const soalByPaket = new Map();
+    let doneCount = 0;
+
+    // Ambil soal per paket secara paralel (batch 5) agar terhindar dari limit 1000 baris Supabase
+    const BATCH_SIZE = 5;
+    for (let i = 0; i < targetPakets.length; i += BATCH_SIZE) {
+      const batch = targetPakets.slice(i, i + BATCH_SIZE);
+      const results = await Promise.all(batch.map(async (pk) => {
+        try {
+          const list = await DB.getSoalByPaket(pk.id);
+          return { id: String(pk.id), list: Array.isArray(list) ? list : [] };
+        } catch (err) {
+          console.warn(`Gagal ambil soal paket ${pk.nama_paket}:`, err);
+          return { id: String(pk.id), list: [] };
+        }
+      }));
+      results.forEach(r => soalByPaket.set(r.id, r.list));
+      doneCount += batch.length;
+      const htmlEl = Swal.getHtmlContainer();
+      if (htmlEl) {
+        htmlEl.innerHTML = `Mengambil data soal dari <strong>${Math.min(doneCount, targetPakets.length)} / ${targetPakets.length}</strong> paket ujian...`;
+      }
+    }
+
+    const formatJadwal = (iso) => {
+      if (!iso) return '-';
+      const d = new Date(iso);
+      return isNaN(d.getTime()) ? String(iso) : d.toLocaleString('id-ID');
+    };
+
+    const rekapHeaders = [
+      'No',
+      'Guru Pengampu',
+      'Nama Paket Ujian',
+      'Tingkat / Kelas',
+      'Jurusan',
+      'Jumlah Soal',
+      'Jadwal Mulai',
+      'Jadwal Selesai'
+    ];
+    const rekapRows = [rekapHeaders];
+
+    const soalHeaders = [
+      'No',
+      'Guru Pengampu',
+      'Nama Paket Ujian',
+      'Tingkat / Kelas',
+      'Jurusan',
+      'Nomor Soal',
+      'Pertanyaan',
+      'Opsi A',
+      'Opsi B',
+      'Opsi C',
+      'Opsi D',
+      'Opsi E',
+      'Jawaban Benar',
+      'Bobot'
+    ];
+    const soalRows = [soalHeaders];
+    let globalSoalNo = 1;
+
+    // Urutkan paket berdasarkan nama guru lalu nama paket agar rapi saat dibuka di Excel
+    const sortedPakets = [...targetPakets].sort((a, b) => {
+      const gA = (ownerMap.get(String(a.id)) || 'ZZZ').toLowerCase();
+      const gB = (ownerMap.get(String(b.id)) || 'ZZZ').toLowerCase();
+      if (gA !== gB) return gA.localeCompare(gB);
+      return String(a.nama_paket || '').localeCompare(String(b.nama_paket || ''));
+    });
+
+    sortedPakets.forEach((pk, idx) => {
+      const guruName = ownerMap.get(String(pk.id)) || '-';
+      const paketName = getCleanPaketName(pk.nama_paket, pk.kelas, pk.jurusan);
+      const kelasText = formatKelasExportText(pk.kelas);
+      const jurText = (pk.jurusan && String(pk.jurusan).trim().toUpperCase() !== 'SEMUA') ? pk.jurusan : 'Semua Jurusan';
+      const questions = (soalByPaket.get(String(pk.id)) || []).sort((a, b) => (Number(a.nomor) || 0) - (Number(b.nomor) || 0));
+
+      rekapRows.push([
+        idx + 1,
+        guruName,
+        paketName,
+        kelasText,
+        jurText,
+        questions.length,
+        formatJadwal(pk.jadwal_mulai),
+        formatJadwal(pk.jadwal_selesai)
+      ]);
+
+      questions.forEach((s, qIdx) => {
+        soalRows.push([
+          globalSoalNo++,
+          guruName,
+          paketName,
+          kelasText,
+          jurText,
+          s.nomor || (qIdx + 1),
+          htmlToPlainTextForExport(s.pertanyaan),
+          htmlToPlainTextForExport(s.opsi_a),
+          htmlToPlainTextForExport(s.opsi_b),
+          htmlToPlainTextForExport(s.opsi_c),
+          htmlToPlainTextForExport(s.opsi_d),
+          htmlToPlainTextForExport(s.opsi_e),
+          String(s.jawaban_benar || '').toUpperCase().trim(),
+          Number(s.bobot) || 1
+        ]);
+      });
+    });
+
+    const wb = XLSX.utils.book_new();
+
+    const wsRekap = XLSX.utils.aoa_to_sheet(rekapRows);
+    wsRekap['!cols'] = [
+      { wch: 5 },  // No
+      { wch: 28 }, // Guru Pengampu
+      { wch: 38 }, // Nama Paket Ujian
+      { wch: 26 }, // Tingkat / Kelas
+      { wch: 18 }, // Jurusan
+      { wch: 13 }, // Jumlah Soal
+      { wch: 20 }, // Jadwal Mulai
+      { wch: 20 }  // Jadwal Selesai
+    ];
+    XLSX.utils.book_append_sheet(wb, wsRekap, 'Rekap Paket Ujian');
+
+    const wsSoal = XLSX.utils.aoa_to_sheet(soalRows);
+    wsSoal['!cols'] = [
+      { wch: 6 },  // No
+      { wch: 26 }, // Guru Pengampu
+      { wch: 34 }, // Nama Paket
+      { wch: 22 }, // Kelas
+      { wch: 16 }, // Jurusan
+      { wch: 11 }, // Nomor Soal
+      { wch: 52 }, // Pertanyaan
+      { wch: 26 }, // Opsi A
+      { wch: 26 }, // Opsi B
+      { wch: 26 }, // Opsi C
+      { wch: 26 }, // Opsi D
+      { wch: 26 }, // Opsi E
+      { wch: 14 }, // Jawaban Benar
+      { wch: 8 }   // Bobot
+    ];
+    XLSX.utils.book_append_sheet(wb, wsSoal, 'Bank Soal');
+
+    const todayStr = new Date().toISOString().split('T')[0];
+    const suffix = isGuruMode() && currentAdminUser
+      ? `_${sanitizeFilenamePart(currentAdminUser.nama_lengkap || currentAdminUser.username)}`
+      : '';
+    const fileName = `Bank_Soal_dan_Paket_Ujian${suffix}_${todayStr}.xlsx`;
+    XLSX.writeFile(wb, fileName);
+
+    Swal.fire({
+      icon: 'success',
+      title: 'Export Berhasil!',
+      html: `Berhasil mengunduh <strong>${sortedPakets.length} paket ujian</strong> dengan total <strong>${globalSoalNo - 1} butir soal</strong> ke file <code>${escapeHtml(fileName)}</code>.`,
+      confirmButtonColor: '#198754'
+    });
+  } catch (err) {
+    console.error('Export semua bank soal gagal:', err);
+    Swal.fire('Gagal Export', err.message || 'Terjadi kesalahan saat mengekspor Bank Soal.', 'error');
+  }
 }
 
 // -------------------------------------------------------------
@@ -7768,6 +8178,8 @@ window.loadDashboardStats = loadDashboardStats;
 window.exportPesertaData = exportPesertaData;
 window.exportGuruData = exportGuruData;
 window.exportSoalData = exportSoalData;
+window.exportPaketSoalWord = exportPaketSoalWord;
+window.exportAllBankSoalExcel = exportAllBankSoalExcel;
 window.exportHasilUjian = exportHasilUjian;
 window.openPesertaForm = openPesertaForm;
 window.openSoalForm = openSoalForm;
