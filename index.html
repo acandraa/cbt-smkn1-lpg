@@ -80,7 +80,19 @@
           </div>
         </form>
 
-        
+        <div class="text-center pt-3 border-top mt-4 d-flex justify-content-center align-items-center flex-wrap gap-2">
+          <a href="daftar-guru.html" class="text-decoration-none small text-muted">
+            <i class="bi bi-journal-bookmark me-1"></i>Daftar Guru & Mapel
+          </a>
+          <span class="text-muted opacity-50">&bull;</span>
+          <a href="login-admin.html?role=guru" class="text-decoration-none small text-muted">
+            <i class="bi bi-person-workspace me-1"></i>Login Guru Mapel
+          </a>
+          <span class="text-muted opacity-50">&bull;</span>
+          <a href="login-admin.html" class="text-decoration-none small text-muted">
+            <i class="bi bi-shield-lock me-1"></i>Portal Admin
+          </a>
+        </div>
 
       </div>
 
@@ -96,10 +108,10 @@
   <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
   <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-  <script src="js/config.js?v=32"></script>
-  <script src="js/supabase-config.js?v=32"></script>
-  <script src="js/db-adapter.js?v=32"></script>
-  <script src="js/auth.js?v=32"></script>
+  <script src="js/config.js?v=57"></script>
+  <script src="js/supabase-config.js?v=57"></script>
+  <script src="js/db-adapter.js?v=57"></script>
+  <script src="js/auth.js?v=57"></script>
 
   <script>
     // Toggle Password Visibility
@@ -113,6 +125,79 @@
         field.type = 'password';
         eye.classList.replace('bi-eye-slash', 'bi-eye');
       }
+    }
+
+    async function handleMultiDeviceTakeoverModal(num, pass, err) {
+      const result = await Swal.fire({
+        icon: 'warning',
+        title: 'Akun Sedang Aktif di HP Lain',
+        html: `
+          <div class="text-start small">
+            <p class="mb-2">${err.message || 'Akun ini sedang digunakan di perangkat lain.'}</p>
+            <div class="alert alert-light border py-2 px-3 mb-3">
+              <strong>Ingin pindah ke HP ini (HP lama mati/error)?</strong><br>
+              Minta <strong>Token Pembebas</strong> dari Pengawas lalu ketik di bawah ini, atau minta Pengawas klik <em>Reset Login</em> di panel Monitoring.
+            </div>
+          </div>
+        `,
+        input: 'text',
+        inputPlaceholder: 'Masukkan Token Pembebas dari Pengawas...',
+        inputAttributes: {
+          autocapitalize: 'characters',
+          autocomplete: 'off',
+          style: 'text-align: center; font-weight: bold; letter-spacing: 3px; text-transform: uppercase;'
+        },
+        showCancelButton: true,
+        confirmButtonText: '<i class="bi bi-phone-flip me-1"></i> Pindah ke HP Ini',
+        cancelButtonText: 'Tutup',
+        confirmButtonColor: '#0d6efd',
+        cancelButtonColor: '#6c757d',
+        preConfirm: async (val) => {
+          const cleanToken = String(val || '').trim().toUpperCase();
+          if (!cleanToken) {
+            Swal.showValidationMessage('Masukkan Token Pembebas dari Pengawas terlebih dahulu.');
+            return false;
+          }
+          let settings = null;
+          try {
+            if (typeof DB.getSettings === 'function') {
+              settings = await DB.getSettings();
+            }
+          } catch (e) {}
+          const valid = typeof DB.isValidExamToken === 'function'
+            ? DB.isValidExamToken(cleanToken, settings)
+            : false;
+          if (!valid) {
+            Swal.showValidationMessage('Token Pembebas tidak valid atau sudah kadaluarsa. Cek kembali token terbaru di layar Pengawas.');
+            return false;
+          }
+          return cleanToken;
+        }
+      });
+
+      if (result.isConfirmed && result.value) {
+        Swal.fire({
+          title: 'Memindahkan Sesi ke HP Ini...',
+          allowOutsideClick: false,
+          didOpen: () => { Swal.showLoading(); }
+        });
+        try {
+          const data = await DB.loginPeserta(num, pass, { forceTakeover: true, takeoverToken: result.value });
+          Swal.fire({
+            icon: 'success',
+            title: 'Berhasil Pindah Perangkat!',
+            text: `Selamat datang kembali, ${data.profile.nama_lengkap}! Perangkat lama telah dikeluarkan secara otomatis.`,
+            timer: 1800,
+            showConfirmButton: false
+          }).then(() => {
+            window.location.href = 'ujian.html';
+          });
+          return true;
+        } catch (takeoverErr) {
+          Swal.fire('Gagal Pindah Perangkat', takeoverErr.message || 'Silakan coba lagi atau hubungi Pengawas.', 'error');
+        }
+      }
+      return false;
     }
 
     // Handle Peserta Login
@@ -137,6 +222,14 @@
           window.location.href = 'ujian.html';
         });
       } catch (err) {
+        if (err && err.code === 'MULTI_DEVICE_ACTIVE') {
+          const moved = await handleMultiDeviceTakeoverModal(num, pass, err);
+          if (!moved) {
+            btn.innerHTML = `Masuk Ujian <i class="bi bi-box-arrow-in-right ms-1"></i>`;
+            btn.disabled = false;
+          }
+          return;
+        }
         Swal.fire('Login Gagal', err.message || 'Username atau password salah.', 'error');
         btn.innerHTML = `Masuk Ujian <i class="bi bi-box-arrow-in-right ms-1"></i>`;
         btn.disabled = false;

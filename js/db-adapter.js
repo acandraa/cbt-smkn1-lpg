@@ -1436,21 +1436,147 @@ const DB = {
     }
   },
 
+  _isMissingSessionColError(err) {
+    if (!err) return false;
+    const code = String(err.code || '');
+    const msg = String(err.message || '') + ' ' + String(err.details || '');
+    return code === '42703' || code === 'PGRST204' || msg.toLowerCase().includes('active_session_token');
+  },
+
   // Update status (e.g. 'Sedang Ujian', 'Sudah Ujian')
   async updateStatusUjian(pesertaId, status) {
+    const shouldClearSession = (status === 'Sudah Ujian' || status === 'Belum Ujian');
     if (this.isLocal()) {
       const list = JSON.parse(localStorage.getItem('CBT_LOCAL_PESERTA')) || [];
       const idx = list.findIndex(p => p.id === pesertaId);
       if (idx !== -1) {
         list[idx].status_ujian = status;
+        if (shouldClearSession) list[idx].active_session_token = null;
         localStorage.setItem('CBT_LOCAL_PESERTA', JSON.stringify(list));
       }
     } else {
+      const payload = shouldClearSession
+        ? { status_ujian: status, active_session_token: null }
+        : { status_ujian: status };
       const { error } = await window.supabaseClient
         .from('peserta')
-        .update({ status_ujian: status })
+        .update(payload)
         .eq('id', pesertaId);
-      if (error) throw error;
+      if (error) {
+        if (shouldClearSession && this._isMissingSessionColError(error)) {
+          const { error: err2 } = await window.supabaseClient
+            .from('peserta')
+            .update({ status_ujian: status })
+            .eq('id', pesertaId);
+          if (err2) throw err2;
+          return;
+        }
+        throw error;
+      }
+    }
+  },
+
+  // Simpan / bersihkan token sesi aktif perangkat siswa (Single-Device Lock)
+  async setPesertaSessionToken(pesertaId, token, clientOverride = null) {
+    if (!pesertaId) return { supported: false };
+    if (this.isLocal()) {
+      const list = JSON.parse(localStorage.getItem('CBT_LOCAL_PESERTA')) || [];
+      const idx = list.findIndex(p => p.id === pesertaId);
+      if (idx !== -1) {
+        list[idx].active_session_token = token || null;
+        localStorage.setItem('CBT_LOCAL_PESERTA', JSON.stringify(list));
+      }
+      return { supported: true, token: token || null };
+    }
+
+    const target = clientOverride || window.supabaseClient;
+    if (!target) return { supported: false };
+
+    try {
+      const { error } = await target
+        .from('peserta')
+        .update({ active_session_token: token || null })
+        .eq('id', pesertaId);
+      if (error) {
+        if (this._isMissingSessionColError(error)) {
+          return { supported: false };
+        }
+        // Coba sekali lagi dengan admin auth jika terkena RLS pada fallback session
+        const msg = (error.message || '') + ' ' + (error.details || '');
+        if (error.code === '42501' || msg.toLowerCase().includes('row-level security')) {
+          await this.executeWithAdminAuth(target, async (c) => {
+            const { error: e2 } = await c
+              .from('peserta')
+              .update({ active_session_token: token || null })
+              .eq('id', pesertaId);
+            if (e2 && !this._isMissingSessionColError(e2)) throw e2;
+          });
+          return { supported: true, token: token || null };
+        }
+        console.warn('[CBT Session] Gagal set active_session_token:', error.message);
+        return { supported: false };
+      }
+      return { supported: true, token: token || null };
+    } catch (e) {
+      if (this._isMissingSessionColError(e)) return { supported: false };
+      console.warn('[CBT Session] Error set active_session_token:', e.message);
+      return { supported: false };
+    }
+  },
+
+  // Ambil hanya kolom active_session_token (< 100 byte) untuk verifikasi sesi ganda super ringan
+  async getPesertaSessionToken(pesertaId, clientOverride = null) {
+    if (!pesertaId) return { supported: false, token: null };
+    if (this.isLocal()) {
+      const list = JSON.parse(localStorage.getItem('CBT_LOCAL_PESERTA')) || [];
+      const found = list.find(p => p.id === pesertaId);
+      return { supported: true, token: found ? (found.active_session_token || null) : null };
+    }
+
+    const target = clientOverride || window.supabaseClient;
+    if (!target) return { supported: false, token: null };
+
+    try {
+      const { data, error } = await target
+        .from('peserta')
+        .select('active_session_token')
+        .eq('id', pesertaId)
+        .maybeSingle();
+      if (error) {
+        if (this._isMissingSessionColError(error)) {
+          return { supported: false, token: null };
+        }
+        return { supported: false, token: null };
+      }
+      if (!data) return { supported: false, token: null };
+      return { supported: true, token: data.active_session_token || null };
+    } catch (e) {
+      return { supported: false, token: null };
+    }
+  },
+
+  // Reset Login Perangkat (khusus Proktor/Admin: melepas kunci HP lama TANPA menghapus jawaban ujian siswa)
+  async resetPesertaLoginSession(pesertaId, shardId = null) {
+    if (!pesertaId) return;
+    if (this.isLocal()) {
+      const list = JSON.parse(localStorage.getItem('CBT_LOCAL_PESERTA')) || [];
+      const idx = list.findIndex(p => p.id === pesertaId);
+      if (idx !== -1) {
+        list[idx].active_session_token = null;
+        localStorage.setItem('CBT_LOCAL_PESERTA', JSON.stringify(list));
+      }
+      return;
+    }
+
+    const shards = (window.getSupabaseShards && window.getSupabaseShards()) || [];
+    const targetShards = shardId
+      ? shards.filter(s => String(s.id) === String(shardId))
+      : (shards.length > 0 ? shards : [{ client: window.supabaseClient }]);
+
+    for (const shard of targetShards) {
+      const client = shard.client || window.supabaseClient;
+      if (!client) continue;
+      await this.setPesertaSessionToken(pesertaId, null, client);
     }
   },
 
@@ -2041,6 +2167,7 @@ const DB = {
         list[idx].status_ujian = 'Belum Ujian';
         list[idx].pelanggaran = 0;
         list[idx].is_locked = false;
+        list[idx].active_session_token = null;
         localStorage.setItem('CBT_LOCAL_PESERTA', JSON.stringify(list));
       }
     } else {
@@ -2052,6 +2179,7 @@ const DB = {
         await client.from('jawaban_peserta').delete().eq('peserta_id', pesertaId);
         await client.from('hasil_ujian').delete().eq('peserta_id', pesertaId);
         await client.from('peserta').update({ status_ujian: 'Belum Ujian', pelanggaran: 0, is_locked: false }).eq('id', pesertaId);
+        await this.setPesertaSessionToken(pesertaId, null, client);
       }
     }
   },
@@ -2063,6 +2191,7 @@ const DB = {
         p.status_ujian = 'Belum Ujian';
         p.pelanggaran = 0;
         p.is_locked = false;
+        p.active_session_token = null;
       });
       localStorage.setItem('CBT_LOCAL_PESERTA', JSON.stringify(list));
       localStorage.setItem('CBT_LOCAL_JAWABAN', JSON.stringify([]));
@@ -2089,11 +2218,19 @@ const DB = {
       // 2. Kembalikan status seluruh peserta ke 'Belum Ujian' & buka kuncinya (0 pelanggaran)
       // PENTING: Tabel hasil_ujian TIDAK DIHAPUS, nilai mapel sebelumnya tetap aman!
       try {
-        await client.from('peserta').update({
+        const { error: uErr } = await client.from('peserta').update({
           status_ujian: 'Belum Ujian',
           pelanggaran: 0,
-          is_locked: false
+          is_locked: false,
+          active_session_token: null
         }).neq('id', '00000000-0000-0000-0000-000000000000');
+        if (uErr && this._isMissingSessionColError(uErr)) {
+          await client.from('peserta').update({
+            status_ujian: 'Belum Ujian',
+            pelanggaran: 0,
+            is_locked: false
+          }).neq('id', '00000000-0000-0000-0000-000000000000');
+        }
       } catch (err) {
         console.warn("Gagal update status peserta di shard Supabase:", err);
       }
@@ -2329,7 +2466,7 @@ const DB = {
     }
   },
 
-  async loginPeserta(username, password) {
+  async loginPeserta(username, password, options = {}) {
     if (this.isLocal()) {
       this.initLocalData();
       const cleanUser = String(username || '').trim().replace(/\s+/g, '').toLowerCase();
@@ -2346,11 +2483,22 @@ const DB = {
         throw new Error("Password Peserta salah (Demo mode password: '123456').");
       }
 
+      // Cek Single-Device Session Lock (Mode Lokal)
+      if (typeof Auth !== 'undefined' && typeof Auth.validateSingleDeviceLock === 'function') {
+        const lockCheck = Auth.validateSingleDeviceLock(student, options);
+        if (lockCheck.blocked) {
+          throw lockCheck.error;
+        }
+        student.active_session_token = lockCheck.newToken;
+        localStorage.setItem('CBT_LOCAL_PESERTA', JSON.stringify(list));
+        sessionStorage.setItem('CBT_ACTIVE_SESSION_TOKEN', lockCheck.newToken);
+      }
+
       const sessionObj = { id: student.id, email: `${cleanUser}@cbt.smkn1lempuing.sch.id`, role: 'peserta', profile: student };
       sessionStorage.setItem('CBT_SESSION', JSON.stringify(sessionObj));
       return sessionObj;
     } else {
-      return await Auth.loginPeserta(username, password);
+      return await Auth.loginPeserta(username, password, options);
     }
   },
 
@@ -2543,6 +2691,18 @@ const DB_PHP = {
     return DB.api('toggleLockPeserta', { peserta_id: pesertaId, is_locked: isLocked });
   },
 
+  setPesertaSessionToken(pesertaId, token) {
+    return DB.api('setPesertaSessionToken', { peserta_id: pesertaId, token: token || '' });
+  },
+
+  getPesertaSessionToken(pesertaId) {
+    return DB.api('getPesertaSessionToken', { peserta_id: pesertaId });
+  },
+
+  resetPesertaLoginSession(pesertaId) {
+    return DB.api('resetPesertaLoginSession', { peserta_id: pesertaId });
+  },
+
   getJurusanList() { return DB.api('getJurusanList'); },
 
   saveJurusan(id, namaJurusan) {
@@ -2664,8 +2824,25 @@ const DB_PHP = {
     return user;
   },
 
-  async loginPeserta(username, password) {
-    return await DB.api('loginPeserta', { username: username.trim(), password });
+  async loginPeserta(username, password, options = {}) {
+    const deviceId = (typeof Auth !== 'undefined' && Auth.getOrCreateDeviceId) ? Auth.getOrCreateDeviceId() : '';
+    try {
+      const res = await DB.api('loginPeserta', {
+        username: username.trim(),
+        password,
+        device_id: deviceId,
+        force_takeover: Boolean(options && options.forceTakeover)
+      });
+      if (res && res.session_token) {
+        sessionStorage.setItem('CBT_ACTIVE_SESSION_TOKEN', res.session_token);
+      }
+      return res;
+    } catch (err) {
+      if (err && err.status === 409) {
+        err.code = 'MULTI_DEVICE_ACTIVE';
+      }
+      throw err;
+    }
   },
 
   async checkSession(role) {

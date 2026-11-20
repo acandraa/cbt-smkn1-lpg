@@ -400,8 +400,67 @@ const Auth = {
     }
   },
 
-  // Login peserta using Nomor Peserta and Password (mendukung Multi-Shard Auto-Routing & Anti-Gagal Login)
-  async loginPeserta(nomorPeserta, password) {
+  // Helper: ID Perangkat Persisten per Browser/HP (untuk Single-Device Lock & Auto-Resume di HP yang sama)
+  getOrCreateDeviceId() {
+    try {
+      let devId = localStorage.getItem('CBT_DEVICE_ID');
+      if (!devId) {
+        devId = 'dev_' + Date.now().toString(36) + '_' + Math.random().toString(36).slice(2, 10);
+        localStorage.setItem('CBT_DEVICE_ID', devId);
+      }
+      return devId;
+    } catch (e) {
+      return 'dev_mem_' + Math.random().toString(36).slice(2, 10);
+    }
+  },
+
+  // Helper: Validasi apakah akun siswa sedang terkunci aktif di perangkat lain
+  validateSingleDeviceLock(profile, options = {}) {
+    const myDeviceId = this.getOrCreateDeviceId();
+    const newToken = `${myDeviceId}|${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+
+    if (!profile || !profile.active_session_token) {
+      return { blocked: false, newToken };
+    }
+
+    const rawToken = String(profile.active_session_token || '').trim();
+    if (!rawToken) {
+      return { blocked: false, newToken };
+    }
+
+    const parts = rawToken.split('|');
+    const remoteDeviceId = parts[0] || '';
+    const tsPart = parts[1] ? parseInt(parts[1].split('_')[0], 10) : 0;
+    const isSameDevice = remoteDeviceId && remoteDeviceId === myDeviceId;
+    const forceTakeover = Boolean(options && options.forceTakeover);
+
+    // 1. Jika perangkat yang SAMA (HP A refresh / buka ulang browser) -> izinkan Auto-Resume langsung
+    if (isSameDevice || forceTakeover) {
+      return { blocked: false, newToken };
+    }
+
+    // 2. Cek apakah sesi HP lama masih aktif:
+    //    - Jika status 'Sedang Ujian' -> SELALU blokir HP kedua
+    //    - Jika di dashboard ('Belum Ujian'/'Sudah Ujian') -> blokir bila login HP lama < 3 jam terakhir
+    const isExamActiveRemote = profile.status_ujian === 'Sedang Ujian';
+    const isRecentSession = tsPart > 0 ? ((Date.now() - tsPart) < (3 * 60 * 60 * 1000)) : true;
+
+    if (isExamActiveRemote || isRecentSession) {
+      const err = new Error(
+        `Akun "${profile.nama_lengkap || profile.username}" sedang aktif digunakan di perangkat lain.`
+      );
+      err.code = 'MULTI_DEVICE_ACTIVE';
+      err.pesertaName = profile.nama_lengkap || profile.username || '';
+      err.username = profile.username || '';
+      return { blocked: true, error: err };
+    }
+
+    // Sesi lama sudah kadaluarsa (> 3 jam & tidak sedang ujian) -> izinkan masuk
+    return { blocked: false, newToken };
+  },
+
+  // Login peserta using Nomor Peserta and Password (mendukung Multi-Shard Auto-Routing, Anti-Gagal Login & Single-Device Lock)
+  async loginPeserta(nomorPeserta, password, options = {}) {
     const shards = (window.getSupabaseShards && window.getSupabaseShards()) || [];
     const rawNomor = String(nomorPeserta || '').trim();
     const cleanNomor = this._normalizeUsername(rawNomor);
@@ -475,19 +534,10 @@ const Auth = {
         throw new Error("Nomor Peserta atau Password salah, atau akun belum terdaftar. Pastikan Nomor Peserta sesuai kartu ujian.");
       }
 
-      // Kunci sesi siswa ke server yang memenangkan login & simpan cache profil
-      window.setActiveSupabaseShard(winner.shardId);
-      sessionStorage.setItem('CBT_ACTIVE_SHARD_NAME', winner.shardName || '');
-      try {
-        localStorage.setItem('CBT_LAST_PESERTA_SHARD_ID', String(winner.shardId));
-        sessionStorage.setItem('CBT_PESERTA_PROFILE_CACHE', JSON.stringify({
-          user: winner.user,
-          profile: winner.profile,
-          shardId: winner.shardId
-        }));
-      } catch (e) {}
-
-      return { user: winner.user, profile: winner.profile };
+      // Kunci sesi & validasi Single-Device Lock pada server yang memenangkan login
+      const winningShardObj = shards.find(s => String(s.id) === String(winner.shardId));
+      const winningClient = (winningShardObj && winningShardObj.client) || window.supabaseClient;
+      return await this._finalizePesertaLogin(winner, winningClient, options, true);
     }
 
     // 2. Single-Shard / Default Supabase fallback
@@ -498,26 +548,12 @@ const Auth = {
     const singleShardObj = { id: '1', name: 'Server Utama', client: window.supabaseClient };
     const directRes = await this._tryDirectLoginOnShard(singleShardObj, email, cleanPass, rawPass, cleanNomor);
     if (directRes.winner) {
-      try {
-        sessionStorage.setItem('CBT_PESERTA_PROFILE_CACHE', JSON.stringify({
-          user: directRes.winner.user,
-          profile: directRes.winner.profile,
-          shardId: '1'
-        }));
-      } catch (e) {}
-      return { user: directRes.winner.user, profile: directRes.winner.profile };
+      return await this._finalizePesertaLogin(directRes.winner, window.supabaseClient, options, false);
     }
 
     const healRes = await this._trySelfHealLoginOnShard(singleShardObj, rawNomor, cleanNomor, rawPass);
     if (healRes && healRes.winner) {
-      try {
-        sessionStorage.setItem('CBT_PESERTA_PROFILE_CACHE', JSON.stringify({
-          user: healRes.winner.user,
-          profile: healRes.winner.profile,
-          shardId: '1'
-        }));
-      } catch (e) {}
-      return { user: healRes.winner.user, profile: healRes.winner.profile };
+      return await this._finalizePesertaLogin(healRes.winner, window.supabaseClient, options, false);
     }
 
     if (healRes && healRes.userFoundButWrongPassword) {
@@ -529,15 +565,85 @@ const Auth = {
     throw new Error("Nomor Peserta atau Password salah.");
   },
 
+  async _finalizePesertaLogin(winner, winningClient, options = {}, isMultiShard = false) {
+    const lockCheck = this.validateSingleDeviceLock(winner.profile, options);
+    if (lockCheck.blocked) {
+      // Batalkan sesi sementara di HP kedua agar tidak bisa masuk
+      try {
+        if (winningClient && winningClient.auth) {
+          await winningClient.auth.signOut();
+        }
+      } catch (e) {}
+      sessionStorage.removeItem('CBT_PESERTA_FALLBACK_SESSION');
+      sessionStorage.removeItem('CBT_PESERTA_PROFILE_CACHE');
+      sessionStorage.removeItem('CBT_ACTIVE_SESSION_TOKEN');
+      throw lockCheck.error;
+    }
+
+    if (isMultiShard && window.setActiveSupabaseShard) {
+      window.setActiveSupabaseShard(winner.shardId);
+      sessionStorage.setItem('CBT_ACTIVE_SHARD_NAME', winner.shardName || '');
+    }
+
+    // Simpan token sesi baru ke DB (1 UPDATE ringan < 5ms, fail-safe jika kolom belum dimigrasi)
+    if (typeof DB !== 'undefined' && typeof DB.setPesertaSessionToken === 'function' && winner.profile && winner.profile.id) {
+      await DB.setPesertaSessionToken(winner.profile.id, lockCheck.newToken, winningClient);
+    }
+
+    if (winner.profile) {
+      winner.profile.active_session_token = lockCheck.newToken;
+    }
+
+    try {
+      sessionStorage.setItem('CBT_ACTIVE_SESSION_TOKEN', lockCheck.newToken);
+      if (isMultiShard) {
+        localStorage.setItem('CBT_LAST_PESERTA_SHARD_ID', String(winner.shardId));
+      }
+      sessionStorage.setItem('CBT_PESERTA_PROFILE_CACHE', JSON.stringify({
+        user: winner.user,
+        profile: winner.profile,
+        shardId: winner.shardId || '1'
+      }));
+    } catch (e) {}
+
+    return { user: winner.user, profile: winner.profile };
+  },
+
   // Logout from current session
-  async logout() {
+  async logout(options = {}) {
+    const isAdminOrGuruPage = /(admin|login-admin)\.html/i.test(window.location.pathname || '');
+    const localToken = sessionStorage.getItem('CBT_ACTIVE_SESSION_TOKEN') || '';
+
+    // Jika siswa klik Keluar secara normal (bukan ditendang perangkat baru), bersihkan kunci sesi di server
+    if (!isAdminOrGuruPage && !options.skipClearRemoteToken && localToken && typeof DB !== 'undefined') {
+      try {
+        let pesertaId = null;
+        try {
+          const cached = JSON.parse(sessionStorage.getItem('CBT_PESERTA_PROFILE_CACHE') || 'null');
+          if (cached && cached.profile && cached.profile.id) pesertaId = cached.profile.id;
+        } catch (e) {}
+        if (!pesertaId) {
+          try {
+            const loc = JSON.parse(sessionStorage.getItem('CBT_SESSION') || 'null');
+            if (loc && loc.id) pesertaId = loc.id;
+          } catch (e) {}
+        }
+        if (pesertaId && typeof DB.getPesertaSessionToken === 'function' && typeof DB.setPesertaSessionToken === 'function') {
+          const cur = await DB.getPesertaSessionToken(pesertaId);
+          if (cur && cur.supported && cur.token === localToken) {
+            await DB.setPesertaSessionToken(pesertaId, null);
+          }
+        }
+      } catch (e) {}
+    }
+
     if (window.CBT_CONFIG && window.CBT_CONFIG.backend === 'php') {
       try {
         await fetch(window.CBT_CONFIG.apiUrl || 'api/index.php', {
           method: 'POST',
           credentials: 'same-origin',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ action: 'logout' })
+          body: JSON.stringify({ action: 'logout', local_token: localToken, skip_clear: Boolean(options.skipClearRemoteToken) })
         });
       } catch (e) {
         console.error("Gagal logout dari server:", e);
@@ -554,11 +660,13 @@ const Auth = {
     sessionStorage.removeItem('CBT_GURU_SESSION');
     sessionStorage.removeItem('CBT_PESERTA_FALLBACK_SESSION');
     sessionStorage.removeItem('CBT_PESERTA_PROFILE_CACHE');
+    sessionStorage.removeItem('CBT_ACTIVE_SESSION_TOKEN');
+    sessionStorage.removeItem('CBT_ACTIVE_SESSION_TOKEN');
     sessionStorage.removeItem('CBT_ACTIVE_SHARD_ID');
     sessionStorage.removeItem('CBT_ACTIVE_SHARD_NAME');
     sessionStorage.removeItem('CBT_PESERTA_ACTIVE_SHARD_ID');
     sessionStorage.removeItem('CBT_PESERTA_ACTIVE_SHARD_NAME');
-    if (/(admin|login-admin)\.html/i.test(window.location.pathname || '')) {
+    if (isAdminOrGuruPage) {
       sessionStorage.removeItem('CBT_ADMIN_ACTIVE_SHARD_ID');
       sessionStorage.removeItem('CBT_ADMIN_ACTIVE_SHARD_NAME');
     }
@@ -786,6 +894,7 @@ const Auth = {
     sessionStorage.removeItem('CBT_GURU_SESSION');
     sessionStorage.removeItem('CBT_PESERTA_FALLBACK_SESSION');
     sessionStorage.removeItem('CBT_PESERTA_PROFILE_CACHE');
+    sessionStorage.removeItem('CBT_ACTIVE_SESSION_TOKEN');
   },
 
   // Automatic logout on inactivity

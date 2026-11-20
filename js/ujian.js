@@ -10,6 +10,8 @@ let hasPendingSync = false;
 let isSyncingInProgress = false;
 let batchSyncInterval = null;
 let debouncedSyncTimer = null;
+let sessionWatchdogInterval = null;
+let sessionKickedOut = false;
 
 let timerInterval = null;
 let examTimerEndTimestamp = null;
@@ -60,9 +62,77 @@ document.addEventListener("DOMContentLoaded", async () => {
   // Load Exam stats and existing results
   await loadExamSetupAndVerify();
 
+  // Sinkronkan token sesi lokal jika halaman direfresh pada perangkat yang sama, lalu aktifkan pengawas sesi tunggal ringan
+  initSingleDeviceSessionGuard();
+
   // Hide loading spinner
   document.getElementById('loading-overlay').classList.add('d-none');
 });
+
+// Pengawas Sesi Tunggal (Single-Device Watchdog): Super Ringan (~1 SELECT <100 byte tiap 45-65 detik acak)
+function initSingleDeviceSessionGuard() {
+  if (!studentProfile || !studentProfile.id) return;
+
+  // Jika halaman direfresh di perangkat yang sama, pulihkan token dari profil jika cocok dengan ID perangkat lokal
+  let localToken = sessionStorage.getItem('CBT_ACTIVE_SESSION_TOKEN') || '';
+  if (!localToken && studentProfile.active_session_token && typeof Auth !== 'undefined' && Auth.getOrCreateDeviceId) {
+    const myDevId = Auth.getOrCreateDeviceId();
+    const remoteDevId = String(studentProfile.active_session_token).split('|')[0];
+    if (remoteDevId && remoteDevId === myDevId) {
+      localToken = String(studentProfile.active_session_token);
+      sessionStorage.setItem('CBT_ACTIVE_SESSION_TOKEN', localToken);
+    }
+  }
+
+  if (sessionWatchdogInterval) clearInterval(sessionWatchdogInterval);
+
+  // Jeda acak 45–65 detik agar ratusan siswa tidak menembak server pada detik yang bersamaan (jitter)
+  const intervalMs = 45000 + Math.floor(Math.random() * 20000);
+  sessionWatchdogInterval = setInterval(checkSingleDeviceSession, intervalMs);
+}
+
+async function checkSingleDeviceSession() {
+  if (!studentProfile || !studentProfile.id || sessionKickedOut) return;
+  if (!navigator.onLine) return; // Fail-open saat sinyal lemah/putus agar tidak salah tendang
+
+  const localToken = sessionStorage.getItem('CBT_ACTIVE_SESSION_TOKEN') || '';
+  if (!localToken) return;
+  if (typeof DB === 'undefined' || typeof DB.getPesertaSessionToken !== 'function') return;
+
+  try {
+    const res = await DB.getPesertaSessionToken(studentProfile.id);
+    if (!res || res.supported !== true) return;
+
+    // Hanya keluarkan perangkat lama jika server benar-benar mengonfirmasi token berubah / di-reset Proktor
+    if (res.token !== localToken) {
+      sessionKickedOut = true;
+      isExamActive = false;
+
+      if (timerInterval) clearInterval(timerInterval);
+      if (batchSyncInterval) clearInterval(batchSyncInterval);
+      if (typeof securityWatchdogInterval !== 'undefined' && securityWatchdogInterval) {
+        clearInterval(securityWatchdogInterval);
+      }
+      if (sessionWatchdogInterval) clearInterval(sessionWatchdogInterval);
+
+      saveAnswersToLocalStorage();
+
+      await Swal.fire({
+        icon: 'warning',
+        title: 'Sesi Perangkat Dihentikan',
+        html: `Akun Anda telah <strong>dibuka di perangkat lain</strong> atau <strong>di-reset oleh Pengawas</strong>.<br><br>Tenang, jawaban yang sudah Anda pilih tetap tersimpan aman.`,
+        allowOutsideClick: false,
+        confirmButtonText: 'Kembali ke Halaman Login',
+        confirmButtonColor: '#0d6efd'
+      });
+
+      // PENTING: skipClearRemoteToken = true agar tidak menghapus token milik HP baru!
+      await Auth.logout({ skipClearRemoteToken: true });
+    }
+  } catch (e) {
+    // Abaikan error jaringan sesaat agar kelancaran ujian tidak terganggu
+  }
+}
 
 // Helper: Mengecek apakah paket kelas cocok dengan kelas siswa (mendukung Tingkat X, XI, XII, daftar kelas, atau rombel spesifik)
 function checkKelasMatch(pKelas, studentKelas) {

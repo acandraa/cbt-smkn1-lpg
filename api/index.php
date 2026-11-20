@@ -395,17 +395,57 @@ try {
                 fail('Nomor Peserta atau Password salah.', 401);
             }
 
+            // Pastikan kolom active_session_token tersedia
+            try { db()->query("SELECT active_session_token FROM peserta LIMIT 1"); }
+            catch (Throwable $e) { db()->exec("ALTER TABLE peserta ADD COLUMN active_session_token VARCHAR(120) DEFAULT NULL"); }
+
+            $deviceId = trim((string)($req['device_id'] ?? ''));
+            if ($deviceId === '') $deviceId = 'dev_' . bin2hex(random_bytes(6));
+            $forceTakeover = !empty($req['force_takeover']);
+            $existingToken = trim((string)($p['active_session_token'] ?? ''));
+
+            if ($existingToken !== '' && !$forceTakeover) {
+                $parts = explode('|', $existingToken);
+                $remoteDev = $parts[0] ?? '';
+                $tsRaw = isset($parts[1]) ? explode('_', $parts[1])[0] : '0';
+                $tokenTsMs = is_numeric($tsRaw) ? (float)$tsRaw : 0;
+                $isSameDev = ($remoteDev !== '' && $remoteDev === $deviceId);
+                $isExamActive = (($p['status_ujian'] ?? '') === 'Sedang Ujian');
+                $isRecent = ($tokenTsMs > 0) ? ((microtime(true) * 1000 - $tokenTsMs) < (3 * 60 * 60 * 1000)) : true;
+
+                if (!$isSameDev && ($isExamActive || $isRecent)) {
+                    $namaDisp = $p['nama_lengkap'] ?: $p['username'];
+                    fail("Akun \"{$namaDisp}\" sedang aktif digunakan di perangkat lain.", 409);
+                }
+            }
+
+            $newToken = $deviceId . '|' . (string)round(microtime(true) * 1000) . '_' . bin2hex(random_bytes(3));
+            exec_sql('UPDATE peserta SET active_session_token = ? WHERE id = ?', [$newToken, $p['id']]);
+            $p['active_session_token'] = $newToken;
+
             session_regenerate_id(true);
             $_SESSION['peserta_id'] = $p['id'];
             unset($p['password_hash']);
             $profile = normalizeRow($p);
             respond([
-                'user'    => ['id' => $p['id'], 'email' => strtolower(trim((string)$p['username'])) . '@cbt.smkn1lempuing.sch.id', 'role' => 'peserta'],
-                'profile' => $profile,
+                'user'          => ['id' => $p['id'], 'email' => strtolower(trim((string)$p['username'])) . '@cbt.smkn1lempuing.sch.id', 'role' => 'peserta'],
+                'profile'       => $profile,
+                'session_token' => $newToken,
             ]);
         }
 
-        case 'logout':
+        case 'logout': {
+            $skipClear = !empty($req['skip_clear']);
+            $localToken = trim((string)($req['local_token'] ?? ''));
+            if (!$skipClear && !empty($_SESSION['peserta_id'])) {
+                try {
+                    if ($localToken !== '') {
+                        exec_sql('UPDATE peserta SET active_session_token = NULL WHERE id = ? AND active_session_token = ?', [$_SESSION['peserta_id'], $localToken]);
+                    } else {
+                        exec_sql('UPDATE peserta SET active_session_token = NULL WHERE id = ?', [$_SESSION['peserta_id']]);
+                    }
+                } catch (Throwable $e) {}
+            }
             $_SESSION = [];
             if (ini_get('session.use_cookies')) {
                 $params = session_get_cookie_params();
@@ -413,6 +453,7 @@ try {
             }
             session_destroy();
             respond(['ok' => true]);
+        }
 
         case 'session': {
             $role = (string)($req['role'] ?? '');
@@ -687,7 +728,15 @@ try {
                 $cur = fetchOne('SELECT status_ujian FROM peserta WHERE id = ?', [$pid]);
                 if ($cur && $cur['status_ujian'] === 'Sudah Ujian' && $status !== 'Sudah Ujian') fail('Ujian sudah selesai.', 403);
             }
-            exec_sql('UPDATE peserta SET status_ujian = ? WHERE id = ?', [$status, $pid]);
+            if ($status === 'Sudah Ujian' || $status === 'Belum Ujian') {
+                try {
+                    exec_sql('UPDATE peserta SET status_ujian = ?, active_session_token = NULL WHERE id = ?', [$status, $pid]);
+                } catch (Throwable $e) {
+                    exec_sql('UPDATE peserta SET status_ujian = ? WHERE id = ?', [$status, $pid]);
+                }
+            } else {
+                exec_sql('UPDATE peserta SET status_ujian = ? WHERE id = ?', [$status, $pid]);
+            }
             respond(['ok' => true]);
         }
 
@@ -715,6 +764,34 @@ try {
             $locked = toBit($req['is_locked'] ?? false);
             $pid = (string)($req['peserta_id'] ?? '');
             exec_sql('UPDATE peserta SET is_locked = ? WHERE id = ?', [$locked, $pid]);
+            respond(['ok' => true]);
+        }
+
+        case 'setPesertaSessionToken': {
+            $pid = resolvePesertaId($req['peserta_id'] ?? null);
+            $token = trim((string)($req['token'] ?? ''));
+            try { db()->query("SELECT active_session_token FROM peserta LIMIT 1"); }
+            catch (Throwable $e) { db()->exec("ALTER TABLE peserta ADD COLUMN active_session_token VARCHAR(120) DEFAULT NULL"); }
+            exec_sql('UPDATE peserta SET active_session_token = ? WHERE id = ?', [$token !== '' ? $token : null, $pid]);
+            respond(['supported' => true, 'token' => $token !== '' ? $token : null]);
+        }
+
+        case 'getPesertaSessionToken': {
+            $pid = resolvePesertaId($req['peserta_id'] ?? null);
+            try {
+                $row = fetchOne('SELECT active_session_token FROM peserta WHERE id = ?', [$pid]);
+                respond(['supported' => true, 'token' => $row ? ($row['active_session_token'] ?? null) : null]);
+            } catch (Throwable $e) {
+                respond(['supported' => false, 'token' => null]);
+            }
+        }
+
+        case 'resetPesertaLoginSession': {
+            requireAdmin();
+            $pid = (string)($req['peserta_id'] ?? '');
+            try {
+                exec_sql('UPDATE peserta SET active_session_token = NULL WHERE id = ?', [$pid]);
+            } catch (Throwable $e) {}
             respond(['ok' => true]);
         }
 

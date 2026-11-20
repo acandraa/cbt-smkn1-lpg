@@ -406,8 +406,9 @@ function applyGuruRoleUI() {
   const btnCreatePaket = document.getElementById('btn-create-paket');
   if (btnCreatePaket) btnCreatePaket.classList.add('d-none');
 
+  // Guru diizinkan menghapus paket soal miliknya sendiri
   const btnDeletePaket = document.getElementById('btn-delete-paket');
-  if (btnDeletePaket) btnDeletePaket.classList.add('d-none');
+  if (btnDeletePaket) btnDeletePaket.classList.remove('d-none');
 
   const emptyHelp = document.getElementById('paket-empty-help');
   if (emptyHelp) emptyHelp.innerText = 'Silakan pilih paket soal di samping kiri untuk mengelola butir soal ujian.';
@@ -1254,9 +1255,21 @@ function filterMonitoringTable() {
 
     // Proctor Actions
     const isExamRunning = p.status_ujian === 'Sedang Ujian';
+    const hasActiveDevice = Boolean(p.active_session_token);
+
+    if (hasActiveDevice) {
+      statusBadge += ` <span class="badge bg-info-subtle text-info border border-info-subtle" title="Sedang login aktif terkunci di 1 perangkat"><i class="bi bi-phone-fill"></i></span>`;
+    }
+
     const forceFinishBtn = isExamRunning ? `
       <button class="btn btn-outline-danger btn-sm py-0 px-2" title="Paksa Selesaikan Ujian" onclick="paksaSelesaiUjian('${p.id}', '${escapeAttr(p.nama_lengkap)}')">
         <i class="bi bi-stop-circle me-1"></i>Selesai
+      </button>
+    ` : '';
+
+    const resetLoginBtn = hasActiveDevice ? `
+      <button class="btn btn-outline-info btn-sm py-0 px-2" title="Reset Login Perangkat (Izinkan Pindah HP tanpa menghapus jawaban)" onclick="handleProctorResetLogin('${p.id}', '${escapeAttr(p.nama_lengkap)}', '${escapeAttr(p._shard_id || '')}')">
+        <i class="bi bi-phone-flip"></i>
       </button>
     ` : '';
 
@@ -1267,7 +1280,7 @@ function filterMonitoringTable() {
     `;
 
     const resetBtn = `
-      <button class="btn btn-outline-secondary btn-sm py-0 px-2" title="Reset Sesi Ujian" onclick="handleProctorResetSesi('${p.id}', '${escapeAttr(p.nama_lengkap)}')">
+      <button class="btn btn-outline-secondary btn-sm py-0 px-2" title="Reset Sesi Ujian (Hapus Jawaban)" onclick="handleProctorResetSesi('${p.id}', '${escapeAttr(p.nama_lengkap)}')">
         <i class="bi bi-arrow-counterclockwise"></i>
       </button>
     `;
@@ -1292,6 +1305,7 @@ function filterMonitoringTable() {
         <td class="text-center">
           <div class="btn-group btn-group-sm" role="group">
             ${forceFinishBtn}
+            ${resetLoginBtn}
             ${lockBtn}
             ${resetBtn}
           </div>
@@ -1299,6 +1313,29 @@ function filterMonitoringTable() {
       </tr>
     `;
   }).join('');
+}
+
+async function handleProctorResetLogin(pesertaId, nama, shardId = '') {
+  const result = await Swal.fire({
+    title: 'Reset Login Perangkat?',
+    html: `Kunci perangkat HP lama atas nama <strong>${escapeHtml(nama)}</strong> akan dilepas agar siswa bisa login di HP baru.<br><br><span class="text-success fw-semibold">Tenang: Semua jawaban yang sudah dikerjakan TIDAK akan terhapus.</span>`,
+    icon: 'question',
+    showCancelButton: true,
+    confirmButtonColor: '#0d6efd',
+    cancelButtonColor: '#6c757d',
+    confirmButtonText: '<i class="bi bi-phone-flip me-1"></i> Ya, Izinkan Pindah HP',
+    cancelButtonText: 'Batal'
+  });
+
+  if (result.isConfirmed) {
+    try {
+      await DB.resetPesertaLoginSession(pesertaId, shardId || null);
+      Swal.fire('Berhasil!', `Kunci login perangkat "${nama}" telah dilepas. Siswa kini dapat masuk dari HP baru dan melanjutkan ujiannya.`, 'success');
+      await loadDashboardStats();
+    } catch (err) {
+      Swal.fire('Gagal Reset Login', err.message || 'Terjadi kesalahan.', 'error');
+    }
+  }
 }
 
 async function handleProctorResetSesi(pesertaId, nama) {
@@ -4560,20 +4597,24 @@ async function handlePaketCrudSubmit(e) {
 }
 
 async function deletePaket() {
-  if (isGuruMode()) {
+  if (!activePaketId) return;
+  const p = (allPaket || []).find(item => String(item.id) === String(activePaketId));
+  if (!p) return;
+
+  // Pengaman: Guru hanya boleh menghapus paket soal yang termasuk dalam cakupan akunnya sendiri
+  if (isGuruMode() && !isPaketAllowedForGuru(p)) {
     Swal.fire({
       icon: 'warning',
       title: 'Akses Dibatasi',
-      text: 'Wadah paket soal dikelola oleh Admin CBT dan tidak dapat dihapus oleh akun Guru.'
+      text: 'Anda hanya dapat menghapus paket soal milik mata pelajaran/akun Anda sendiri.'
     });
     return;
   }
-  if (!activePaketId) return;
-  const p = allPaket.find(item => item.id === activePaketId);
 
+  const displayName = getCleanPaketName(p.nama_paket, p.kelas, p.jurusan);
   const result = await Swal.fire({
     title: 'Hapus Paket Soal?',
-    text: `Anda akan menghapus paket "${p.nama_paket}". Semua pertanyaan di dalamnya akan ikut terhapus.`,
+    html: `Anda akan menghapus paket <strong>"${escapeHtml(displayName)}"</strong>.<br><small class="text-danger">Semua butir pertanyaan di dalam paket ini akan ikut terhapus secara permanen.</small>`,
     icon: 'warning',
     showCancelButton: true,
     confirmButtonColor: '#dc3545',
@@ -4583,12 +4624,46 @@ async function deletePaket() {
   });
 
   if (result.isConfirmed) {
+    const deletedId = String(activePaketId);
     try {
-      await DB.deletePaket(activePaketId);
+      await DB.deletePaket(deletedId);
+
+      // Bersihkan referensi paket_ids pada akun guru yang sedang login agar tidak ada badge paket yatim di daftar-guru.html
+      if (isGuruMode() && currentAdminUser && currentAdminUser.id) {
+        try {
+          const curIds = getGuruAllowedPaketIds();
+          if (curIds.includes(deletedId)) {
+            const nextIds = curIds.filter(pid => String(pid) !== deletedId);
+            currentAdminUser.paket_ids = nextIds;
+            try {
+              sessionStorage.setItem('CBT_GURU_SESSION', JSON.stringify(currentAdminUser));
+            } catch (e) {}
+            await DB.saveGuru(currentAdminUser.id, {
+              username: currentAdminUser.username,
+              nama_lengkap: currentAdminUser.nama_lengkap,
+              mapel_diampu: currentAdminUser.mapel_diampu || '',
+              jurusan_diampu: currentAdminUser.jurusan_diampu || '',
+              kelas_diampu: currentAdminUser.kelas_diampu || '',
+              paket_ids: nextIds,
+              penugasan_mapel: currentAdminUser.penugasan_mapel || []
+            });
+          }
+        } catch (syncErr) {
+          console.warn('Gagal membersihkan referensi paket_ids guru:', syncErr);
+        }
+      }
+
       Swal.fire('Dihapus!', 'Paket Soal telah berhasil dihapus.', 'success');
       activePaketId = null;
+      const detailEl = document.getElementById('paket-detail-container');
+      const emptyEl = document.getElementById('paket-empty-state');
+      if (detailEl) detailEl.classList.add('d-none');
+      if (emptyEl) emptyEl.classList.remove('d-none');
+
       await loadPaket();
-      await refreshJurusanDanKelas();
+      if (!isGuruMode()) {
+        await refreshJurusanDanKelas();
+      }
     } catch (err) {
       Swal.fire('Gagal Menghapus', err.message || 'Terjadi kesalahan.', 'error');
     }
@@ -4635,8 +4710,11 @@ async function selectPaket(id) {
 
   const btnDelete = document.getElementById('btn-delete-paket');
   if (btnDelete) {
-    if (isGuruMode()) btnDelete.classList.add('d-none');
-    else btnDelete.classList.remove('d-none');
+    if (!isGuruMode() || isPaketAllowedForGuru(p)) {
+      btnDelete.classList.remove('d-none');
+    } else {
+      btnDelete.classList.add('d-none');
+    }
   }
   
   let jadwalStr = 'Jadwal belum diatur (Peserta tidak bisa mengakses)';
@@ -6788,6 +6866,7 @@ window.filterMonitoringTable = filterMonitoringTable;
 window.onMonitorFilterJurusanChange = onMonitorFilterJurusanChange;
 window.resetMonitoringFullFilter = resetMonitoringFullFilter;
 window.handleProctorResetSesi = handleProctorResetSesi;
+window.handleProctorResetLogin = handleProctorResetLogin;
 window.bukaSesiMapelBaruModal = bukaSesiMapelBaruModal;
 window.openCetakKartuModal = openCetakKartuModal;
 window.onCetakPasswordModeChange = onCetakPasswordModeChange;

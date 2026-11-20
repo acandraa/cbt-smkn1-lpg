@@ -68,6 +68,7 @@ CREATE TABLE public.peserta (
   status_ujian VARCHAR(25) DEFAULT 'Belum Ujian' CHECK (status_ujian IN ('Belum Ujian', 'Sedang Ujian', 'Sudah Ujian')),
   pelanggaran INTEGER DEFAULT 0,
   is_locked BOOLEAN DEFAULT FALSE,
+  active_session_token TEXT DEFAULT NULL,
   created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
 
