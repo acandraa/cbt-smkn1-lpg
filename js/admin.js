@@ -451,6 +451,12 @@ function applyGuruRoleUI() {
   const btnDeletePaket = document.getElementById('btn-delete-paket');
   if (btnDeletePaket) btnDeletePaket.classList.remove('d-none');
 
+  const groupToolbar = document.getElementById('paket-guru-group-toolbar');
+  if (groupToolbar) groupToolbar.classList.add('d-none');
+
+  const searchPaketInput = document.getElementById('filter-search-paket');
+  if (searchPaketInput) searchPaketInput.placeholder = 'Cari nama mapel / paket...';
+
   const emptyHelp = document.getElementById('paket-empty-help');
   if (emptyHelp) emptyHelp.innerText = 'Silakan pilih paket soal di samping kiri untuk mengelola butir soal ujian.';
 
@@ -4311,8 +4317,74 @@ function formatJurusanBadge(rawJurusan) {
   return `<span class="badge bg-info-subtle text-dark border ms-1" title="${escapeAttr(rawJurusan)}" data-bs-toggle="tooltip"><i class="bi bi-diagram-3 me-1"></i>${list.length} Jurusan (${list.join(', ')})</span>`;
 }
 
+let expandedGuruPaketGroups = new Set();
+let lastRenderedGuruGroupKeys = [];
+
+function toggleGuruPaketGroup(groupKey) {
+  if (!groupKey) return;
+  if (expandedGuruPaketGroups.has(groupKey)) {
+    expandedGuruPaketGroups.delete(groupKey);
+  } else {
+    expandedGuruPaketGroups.add(groupKey);
+  }
+  renderPaketList(allPaket);
+}
+
+function toggleAllGuruPaketGroups(expandAll) {
+  if (expandAll) {
+    lastRenderedGuruGroupKeys.forEach(k => expandedGuruPaketGroups.add(k));
+  } else {
+    expandedGuruPaketGroups.clear();
+  }
+  renderPaketList(allPaket);
+}
+
+function renderSinglePaketItemHtml(p, isIndented = false) {
+  const isActive = String(p.id) === String(activePaketId);
+  const cleanTitle = getCleanPaketName(p.nama_paket, p.kelas, p.jurusan);
+  const jurusanBadge = formatJurusanBadge(p.jurusan);
+  const kelasBadge = formatKelasBadge(p.kelas);
+  const soalCount = p.total_soal !== undefined ? p.total_soal : (p.soal_count || 0);
+  const soalBadge = `<span class="badge ${soalCount > 0 ? (isActive ? 'bg-light text-primary' : 'bg-primary text-white') : 'bg-warning text-dark'} ms-1 flex-shrink-0" style="font-size: 0.7rem;"><i class="bi bi-question-circle me-1"></i>${soalCount} Soal</span>`;
+
+  if (isIndented) {
+    const activeStyle = isActive
+      ? 'bg-primary text-white border-primary shadow-sm'
+      : 'bg-white text-dark border-light-subtle';
+    const subTextClass = isActive ? 'text-white-50' : 'text-muted';
+    return `
+      <a href="#" class="d-block text-decoration-none p-2 rounded-2 border mb-1 ${activeStyle}" onclick="selectPaket('${escapeAttr(p.id)}'); return false;" style="transition: all 0.15s ease;">
+        <div class="d-flex justify-content-between align-items-start gap-1 mb-1">
+          <div class="fw-semibold small text-break" style="line-height: 1.25;">
+            <i class="bi bi-journal-text me-1 ${isActive ? 'text-white' : 'text-primary'}"></i>${escapeHtml(cleanTitle)}
+          </div>
+          ${soalBadge}
+        </div>
+        <div class="d-flex flex-wrap gap-1 align-items-center" style="font-size: 0.72rem;">
+          ${jurusanBadge} ${kelasBadge}
+        </div>
+        <div class="${subTextClass} mt-1" style="font-size: 0.7rem;">
+          <i class="bi bi-calendar-event me-1"></i>${p.jadwal_mulai ? new Date(p.jadwal_mulai).toLocaleString() : 'Jadwal belum diatur'}
+        </div>
+      </a>
+    `;
+  }
+
+  return `
+    <a href="#" class="list-group-item list-group-item-action ${isActive ? 'active' : ''}" onclick="selectPaket('${escapeAttr(p.id)}'); return false;">
+      <div class="d-flex justify-content-between align-items-center mb-1">
+        <h6 class="mb-0 fw-bold">${escapeHtml(cleanTitle)}</h6>
+        ${soalBadge}
+      </div>
+      <div class="mb-1">${jurusanBadge} ${kelasBadge}</div>
+      <small class="mb-0 d-block ${isActive ? 'text-white-50' : 'text-muted'}"><i class="bi bi-calendar-event me-1"></i>${p.jadwal_mulai ? new Date(p.jadwal_mulai).toLocaleString() : 'Belum diatur'}</small>
+    </a>
+  `;
+}
+
 function renderPaketList(list) {
   const container = document.getElementById('paket-list-container');
+  if (!container) return;
   container.innerHTML = '';
 
   const filterJurusanEl = document.getElementById('filter-jurusan-paket');
@@ -4321,11 +4393,15 @@ function renderPaketList(list) {
   const filterKelasEl = document.getElementById('filter-kelas-paket');
   const selKelas = filterKelasEl ? filterKelasEl.value.toUpperCase().trim() : '';
 
+  const filterSearchEl = document.getElementById('filter-search-paket');
+  const searchQ = filterSearchEl ? filterSearchEl.value.toLowerCase().trim() : '';
+
   let filtered = list || allPaket || [];
   if (selJurusan) {
     filtered = filtered.filter(p => {
       const pj = (p.jurusan || '').toUpperCase().trim();
-      return pj === selJurusan || pj === '' || pj === 'SEMUA';
+      if (!pj || pj === 'SEMUA') return true;
+      return pj.split(',').map(s => s.trim()).includes(selJurusan);
     });
   }
   if (selKelas) {
@@ -4341,47 +4417,182 @@ function renderPaketList(list) {
     });
   }
 
-  if (filtered.length === 0) {
-    container.innerHTML = `<div class="text-center py-4 text-muted">Belum ada paket soal yang cocok dengan filter.</div>`;
+  // MODE GURU: tampilkan langsung paket milik guru sendiri tanpa folder tambahan
+  if (isGuruMode()) {
+    if (searchQ) {
+      filtered = filtered.filter(p => {
+        const hay = `${p.nama_paket || ''} ${p.kelas || ''} ${p.jurusan || ''}`.toLowerCase();
+        return hay.includes(searchQ);
+      });
+    }
+    if (filtered.length === 0) {
+      container.innerHTML = `<div class="text-center py-4 text-muted small">Belum ada paket soal yang cocok dengan filter.</div>`;
+      return;
+    }
+    container.innerHTML = filtered.map(p => renderSinglePaketItemHtml(p, false)).join('');
     return;
   }
 
-  const items = filtered.map(p => {
-    const isActive = p.id === activePaketId ? 'active' : '';
-    const cleanTitle = getCleanPaketName(p.nama_paket, p.kelas, p.jurusan);
-    const jurusanBadge = formatJurusanBadge(p.jurusan);
-    const kelasBadge = formatKelasBadge(p.kelas);
-    const soalCount = p.total_soal !== undefined ? p.total_soal : (p.soal_count || 0);
-    const soalBadge = `<span class="badge ${soalCount > 0 ? 'bg-primary text-white' : 'bg-warning text-dark'} ms-1"><i class="bi bi-question-circle me-1"></i>${soalCount} Soal</span>`;
+  // MODE ADMIN: Kelompokkan Paket Soal sebagai Folder Accordion berdasarkan Nama Guru
+  const guruList = Array.isArray(allGuru) ? allGuru : [];
+  const paketById = new Map();
+  filtered.forEach(p => paketById.set(String(p.id), p));
 
-    let guruBadge = '';
-    if (!isGuruMode() && allGuru && allGuru.length > 0) {
-      const assignedGuru = allGuru.find(g => {
-        let pids = [];
-        if (Array.isArray(g.paket_ids)) pids = g.paket_ids;
-        else if (typeof g.paket_ids === 'string' && g.paket_ids.trim()) {
-          try { pids = JSON.parse(g.paket_ids); } catch(e){}
-        }
-        return Array.isArray(pids) && pids.map(String).includes(String(p.id));
-      });
-      if (assignedGuru) {
-        guruBadge = `<span class="badge bg-success-subtle text-success border border-success-subtle ms-1" style="font-size: 0.7rem;"><i class="bi bi-person-badge me-1"></i>${escapeHtml(assignedGuru.nama_lengkap || assignedGuru.username)}</span>`;
-      }
+  const assignedPaketIds = new Set();
+  const groups = [];
+
+  // 1. Bangun grup untuk setiap guru terdaftar
+  guruList.forEach(g => {
+    let pids = [];
+    if (Array.isArray(g.paket_ids)) pids = g.paket_ids;
+    else if (typeof g.paket_ids === 'string' && g.paket_ids.trim()) {
+      try { pids = JSON.parse(g.paket_ids) || []; } catch (e) {}
     }
 
-    return `
-      <a href="#" class="list-group-item list-group-item-action ${isActive}" onclick="selectPaket('${p.id}'); return false;">
-        <div class="d-flex justify-content-between align-items-center mb-1">
-          <h6 class="mb-0 fw-bold">${escapeHtml(cleanTitle)}</h6>
-          ${soalBadge}
-        </div>
-        <div class="mb-1">${jurusanBadge} ${kelasBadge} ${guruBadge}</div>
-        <small class="mb-0 d-block text-muted"><i class="bi bi-calendar-event me-1"></i>${p.jadwal_mulai ? new Date(p.jadwal_mulai).toLocaleString() : 'Belum diatur'}</small>
-      </a>
-    `;
+    const guruPakets = [];
+    pids.forEach(pid => {
+      const pk = paketById.get(String(pid));
+      if (pk) {
+        guruPakets.push(pk);
+        assignedPaketIds.add(String(pid));
+      }
+    });
+
+    const namaGuru = g.nama_lengkap || g.username || 'Guru';
+    const usernameGuru = g.username || '';
+
+    // Pencarian cepat: cocokkan nama guru/username ATAU nama mapel/paket di dalamnya
+    const teacherMatchesSearch = !searchQ ||
+      namaGuru.toLowerCase().includes(searchQ) ||
+      usernameGuru.toLowerCase().includes(searchQ) ||
+      String(g.mapel_diampu || '').toLowerCase().includes(searchQ);
+
+    let visiblePakets = guruPakets;
+    if (searchQ && !teacherMatchesSearch) {
+      visiblePakets = guruPakets.filter(p => {
+        const hay = `${p.nama_paket || ''} ${p.kelas || ''} ${p.jurusan || ''}`.toLowerCase();
+        return hay.includes(searchQ);
+      });
+    }
+
+    // Tampilkan folder guru jika punya paket yg cocok, ATAU jika admin secara spesifik mengetik nama guru tsb
+    if (visiblePakets.length > 0 || (searchQ && teacherMatchesSearch && !selJurusan && !selKelas)) {
+      const mapelNames = Array.from(new Set(
+        visiblePakets.map(p => {
+          const clean = getCleanPaketName(p.nama_paket, p.kelas, p.jurusan);
+          return clean.split(' - ')[0].trim();
+        }).filter(Boolean)
+      ));
+      const fallbackMapel = String(g.mapel_diampu || '').trim();
+      const mapelPreview = mapelNames.length > 0 ? mapelNames.join(', ') : (fallbackMapel || 'Belum ada mapel');
+
+      groups.push({
+        key: `guru_${g.id || usernameGuru}`,
+        isUnassigned: false,
+        nama: namaGuru,
+        username: usernameGuru,
+        mapelPreview,
+        pakets: visiblePakets
+      });
+    }
   });
 
-  container.innerHTML = items.join('');
+  // Urutkan folder guru berdasarkan abjad nama
+  groups.sort((a, b) => a.nama.localeCompare(b.nama, 'id', { sensitivity: 'base' }));
+
+  // 2. Paket yang belum tertaut ke guru manapun (Paket Umum / Buatan Admin langsung)
+  let unassignedPakets = filtered.filter(p => !assignedPaketIds.has(String(p.id)));
+  if (searchQ) {
+    const labelMatch = 'paket umum tanpa guru admin'.includes(searchQ);
+    if (!labelMatch) {
+      unassignedPakets = unassignedPakets.filter(p => {
+        const hay = `${p.nama_paket || ''} ${p.kelas || ''} ${p.jurusan || ''}`.toLowerCase();
+        return hay.includes(searchQ);
+      });
+    }
+  }
+  if (unassignedPakets.length > 0) {
+    groups.push({
+      key: 'guru_unassigned',
+      isUnassigned: true,
+      nama: 'Paket Umum / Tanpa Guru',
+      username: 'Admin CBT',
+      mapelPreview: `${unassignedPakets.length} paket belum ditautkan ke guru`,
+      pakets: unassignedPakets
+    });
+  }
+
+  lastRenderedGuruGroupKeys = groups.map(g => g.key);
+
+  // Perbarui ringkasan jumlah guru & paket
+  const summaryEl = document.getElementById('paket-guru-group-summary');
+  if (summaryEl) {
+    const guruCount = groups.filter(g => !g.isUnassigned).length;
+    const totalVisiblePakets = groups.reduce((acc, g) => acc + g.pakets.length, 0);
+    summaryEl.innerHTML = `<i class="bi bi-people-fill text-primary me-1"></i><strong>${guruCount}</strong> Guru &bull; <strong>${totalVisiblePakets}</strong> Paket`;
+  }
+
+  if (groups.length === 0) {
+    container.innerHTML = `<div class="text-center py-4 text-muted small"><i class="bi bi-search d-block fs-4 mb-1"></i>Tidak ada guru atau paket soal yang cocok dengan filter.</div>`;
+    return;
+  }
+
+  // Render Folder Accordion per Nama Guru
+  const html = groups.map(grp => {
+    const hasActiveChild = grp.pakets.some(p => String(p.id) === String(activePaketId));
+    if (hasActiveChild) {
+      expandedGuruPaketGroups.add(grp.key);
+    }
+    const isExpanded = Boolean(searchQ) || expandedGuruPaketGroups.has(grp.key);
+
+    const totalSoal = grp.pakets.reduce((sum, p) => sum + (Number(p.total_soal !== undefined ? p.total_soal : (p.soal_count || 0)) || 0), 0);
+    const soalBadgeClass = totalSoal > 0
+      ? 'bg-success-subtle text-success border border-success-subtle'
+      : 'bg-warning-subtle text-dark border border-warning-subtle';
+
+    const iconClass = grp.isUnassigned ? 'bi-folder2-open text-secondary' : 'bi-person-circle text-primary';
+    const headerBg = hasActiveChild
+      ? 'bg-primary-subtle border-primary'
+      : (isExpanded ? 'bg-light border-secondary-subtle' : 'bg-white');
+
+    const bodyHtml = isExpanded
+      ? `
+        <div class="p-2 pt-1 bg-light bg-opacity-50 border-top">
+          ${grp.pakets.length > 0
+            ? grp.pakets.map(p => renderSinglePaketItemHtml(p, true)).join('')
+            : `<div class="text-muted small fst-italic py-2 px-2">Guru ini belum memiliki paket soal.</div>`
+          }
+        </div>
+      `
+      : '';
+
+    return `
+      <div class="border rounded-3 mb-2 overflow-hidden shadow-sm ${hasActiveChild ? 'border-primary' : 'border-light-subtle'}">
+        <button type="button"
+          class="w-100 text-start border-0 p-2 px-3 d-flex align-items-center justify-content-between gap-2 ${headerBg}"
+          onclick="toggleGuruPaketGroup('${escapeAttr(grp.key)}')"
+          style="cursor: pointer;">
+          <div class="d-flex align-items-center gap-2 overflow-hidden" style="min-width: 0;">
+            <i class="bi ${isExpanded ? 'bi-chevron-down text-primary' : 'bi-chevron-right text-muted'} flex-shrink-0" style="font-size: 0.78rem;"></i>
+            <i class="bi ${iconClass} fs-5 flex-shrink-0"></i>
+            <div class="overflow-hidden" style="min-width: 0;">
+              <div class="fw-bold text-dark text-truncate" style="font-size: 0.86rem;" title="${escapeAttr(grp.nama)}">${escapeHtml(grp.nama)}</div>
+              <div class="text-muted text-truncate" style="font-size: 0.72rem;" title="${escapeAttr(grp.mapelPreview)}">
+                <i class="bi bi-book me-1"></i>${escapeHtml(grp.mapelPreview)}
+              </div>
+            </div>
+          </div>
+          <div class="d-flex flex-column align-items-end gap-1 flex-shrink-0">
+            <span class="badge bg-primary-subtle text-primary border border-primary-subtle" style="font-size: 0.68rem;">${grp.pakets.length} Paket</span>
+            <span class="badge ${soalBadgeClass}" style="font-size: 0.68rem;">${totalSoal} Soal</span>
+          </div>
+        </button>
+        ${bodyHtml}
+      </div>
+    `;
+  }).join('');
+
+  container.innerHTML = html;
 }
 
 function filterPaketList() {
@@ -6930,6 +7141,8 @@ window.triggerRestoreUpload = triggerRestoreUpload;
 window.restoreDatabaseData = restoreDatabaseData;
 window.filterPesertaList = filterPesertaList;
 window.filterPaketList = filterPaketList;
+window.toggleGuruPaketGroup = toggleGuruPaketGroup;
+window.toggleAllGuruPaketGroups = toggleAllGuruPaketGroups;
 window.openJurusanModal = openJurusanModal;
 window.loadJurusan = loadJurusan;
 window.deleteJurusan = deleteJurusan;

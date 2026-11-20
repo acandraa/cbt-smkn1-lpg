@@ -629,6 +629,11 @@
                     </button>
                   </div>
                 </div>
+                <div class="input-group input-group-sm mb-2">
+                  <span class="input-group-text bg-white border-end-0 text-muted"><i class="bi bi-search"></i></span>
+                  <input type="text" class="form-control border-start-0" id="filter-search-paket"
+                    placeholder="Cari nama guru atau mapel..." oninput="filterPaketList()">
+                </div>
                 <div class="row g-1 mb-2">
                   <div class="col-6">
                     <select class="form-select form-select-sm" id="filter-jurusan-paket" onchange="filterPaketList()">
@@ -641,10 +646,17 @@
                     </select>
                   </div>
                 </div>
-                <button class="btn btn-primary btn-sm w-100 mb-3" id="btn-create-paket" onclick="openPaketForm()">
+                <button class="btn btn-primary btn-sm w-100 mb-2" id="btn-create-paket" onclick="openPaketForm()">
                   <i class="bi bi-plus-circle me-1"></i> Buat Paket Baru
                 </button>
-                <div class="list-group" id="paket-list-container">
+                <div class="d-flex justify-content-between align-items-center mb-2 small text-muted" id="paket-guru-group-toolbar">
+                  <span id="paket-guru-group-summary"><i class="bi bi-people me-1"></i>Dikelompokkan per Guru</span>
+                  <div class="btn-group btn-group-sm">
+                    <button type="button" class="btn btn-link btn-sm text-decoration-none p-0 me-2" style="font-size: 0.74rem;" onclick="toggleAllGuruPaketGroups(true)">Buka Semua</button>
+                    <button type="button" class="btn btn-link btn-sm text-decoration-none text-secondary p-0" style="font-size: 0.74rem;" onclick="toggleAllGuruPaketGroups(false)">Tutup Semua</button>
+                  </div>
+                </div>
+                <div class="list-group" id="paket-list-container" style="max-height: 600px; overflow-y: auto;">
                   <div class="text-center py-4 text-muted"><span class="spinner-border spinner-border-sm me-1"></span>
                     Memuat paket...</div>
                 </div>
@@ -2037,13 +2049,13 @@ Jawaban: B"></textarea>
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 
   <!-- CBT Modules -->
-  <script src="js/config.js?v=59"></script>
-  <script src="js/supabase-config.js?v=59"></script>
-  <script src="js/db-adapter.js?v=59"></script>
-  <script src="js/auth.js?v=59"></script>
-  <script src="js/excel-helpers.js?v=59"></script>
-  <script src="js/templates.js?v=59"></script>
-  <script src="js/admin.js?v=59"></script>
+  <script src="js/config.js?v=60"></script>
+  <script src="js/supabase-config.js?v=60"></script>
+  <script src="js/db-adapter.js?v=60"></script>
+  <script src="js/auth.js?v=60"></script>
+  <script src="js/excel-helpers.js?v=60"></script>
+  <script src="js/templates.js?v=60"></script>
+  <script src="js/admin.js?v=60"></script>
   <script>
     // Dark mode logic
     const themeToggleBtn = document.getElementById('theme-toggle-admin');
