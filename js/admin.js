@@ -3234,22 +3234,97 @@ async function handleGuruCrudSubmit(e) {
 }
 
 async function deleteGuru(id, name) {
+  const g = (allGuru || []).find(item => String(item.id) === String(id));
+  const sourcePakets = (allPaketUnfiltered && allPaketUnfiltered.length > 0) ? allPaketUnfiltered : (allPaket || []);
+  const paketLookup = new Map(sourcePakets.map(p => [String(p.id), p]));
+
+  // Kumpulkan seluruh paket_ids milik guru ini
+  let guruPaketIds = [];
+  if (g) {
+    if (Array.isArray(g.paket_ids)) guruPaketIds = g.paket_ids.map(String).filter(Boolean);
+    else if (typeof g.paket_ids === 'string' && g.paket_ids.trim()) {
+      try {
+        const parsed = JSON.parse(g.paket_ids);
+        if (Array.isArray(parsed)) guruPaketIds = parsed.map(String).filter(Boolean);
+      } catch (e) {}
+    }
+  }
+  guruPaketIds = Array.from(new Set(guruPaketIds));
+
+  // Pastikan hanya paket eksklusif milik guru ini yang ikut dihapus (bukan yang terikat guru lain)
+  const otherGuruPaketIds = getOtherGuruOwnedPaketIds(id);
+  const ownedPaketIds = guruPaketIds.filter(pid => !otherGuruPaketIds.has(String(pid)));
+
+  let totalSoal = 0;
+  const paketLabels = ownedPaketIds.map(pid => {
+    const pk = paketLookup.get(String(pid));
+    const cnt = pk ? (Number(pk.total_soal !== undefined ? pk.total_soal : (pk.soal_count || 0)) || 0) : 0;
+    totalSoal += cnt;
+    const pName = pk ? pk.nama_paket : `Paket (${pid.slice(0, 8)})`;
+    return cnt > 0 ? `${pName} (${cnt} soal)` : pName;
+  });
+
+  let detailHtml = `<div class="small text-muted mt-2">Akun guru ini belum memiliki paket soal terkait.</div>`;
+  if (ownedPaketIds.length > 0) {
+    const previewItems = paketLabels.slice(0, 6).map(lbl => `<li>${escapeHtml(lbl)}</li>`).join('');
+    const moreItem = paketLabels.length > 6 ? `<li class="text-muted">...dan ${paketLabels.length - 6} paket lainnya</li>` : '';
+    const soalNote = totalSoal > 0 ? ` (termasuk <strong>${totalSoal} butir soal</strong>)` : '';
+    detailHtml = `
+      <div class="alert alert-danger text-start py-2 px-3 small mt-3 mb-0">
+        <div class="fw-bold mb-1"><i class="bi bi-exclamation-triangle-fill me-1"></i>${ownedPaketIds.length} Paket Soal Ikut Dihapus Permanen${soalNote}:</div>
+        <ul class="mb-0 ps-3">${previewItems}${moreItem}</ul>
+      </div>
+    `;
+  }
+
   const res = await Swal.fire({
-    title: 'Hapus Akun Guru?',
-    text: `Anda yakin ingin menghapus akun guru "${name}"? Paket soal yang sudah dibuat tidak akan ikut terhapus.`,
+    title: 'Hapus Akun Guru & Paket Soalnya?',
+    html: `Anda yakin ingin menghapus akun guru <strong>"${escapeHtml(name)}"</strong>?${detailHtml}`,
     icon: 'warning',
     showCancelButton: true,
     confirmButtonColor: '#dc3545',
     cancelButtonColor: '#6c757d',
-    confirmButtonText: 'Ya, Hapus Akun',
+    confirmButtonText: ownedPaketIds.length > 0 ? 'Ya, Hapus Akun & Paket Soal' : 'Ya, Hapus Akun',
     cancelButtonText: 'Batal'
   });
 
   if (res.isConfirmed) {
     try {
+      Swal.fire({
+        title: 'Menghapus...',
+        text: ownedPaketIds.length > 0
+          ? `Menghapus akun guru dan ${ownedPaketIds.length} paket soal terkait...`
+          : 'Menghapus akun guru...',
+        allowOutsideClick: false,
+        didOpen: () => Swal.showLoading()
+      });
+
+      // Hapus seluruh paket soal milik guru ini terlebih dahulu (beserta soal-soal di dalamnya)
+      let deletedPaketCount = 0;
+      for (const pid of ownedPaketIds) {
+        try {
+          await DB.deletePaket(String(pid));
+          deletedPaketCount++;
+          if (String(activePaketId) === String(pid)) {
+            activePaketId = null;
+            const d = document.getElementById('soal-detail-panel');
+            const e = document.getElementById('soal-empty-state');
+            if (d) d.classList.add('d-none');
+            if (e) e.classList.remove('d-none');
+          }
+        } catch (delErr) {
+          console.warn(`Gagal menghapus paket ${pid} milik guru ${name}:`, delErr);
+        }
+      }
+
       await DB.deleteGuru(id);
-      Swal.fire('Dihapus!', 'Akun guru berhasil dihapus.', 'success');
+
+      const doneMsg = deletedPaketCount > 0
+        ? `Akun guru "${name}" beserta ${deletedPaketCount} paket soal terkait berhasil dihapus.`
+        : `Akun guru "${name}" berhasil dihapus.`;
+      Swal.fire('Dihapus!', doneMsg, 'success');
       await loadGuru();
+      await loadPaket();
     } catch (err) {
       Swal.fire('Gagal Menghapus', err.message || 'Terjadi kesalahan.', 'error');
     }
