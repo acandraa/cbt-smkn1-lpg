@@ -1976,6 +1976,17 @@ function checkKelasMatch(pKelas, studentKelas) {
   // 1. Cocok persis (cth: "x tkj 1" === "x tkj 1" atau ada dalam daftar rombel)
   if (parts.includes(s)) return { match: true, specificity: 3 };
 
+  // Pengaman Anti-Bocor: Jika suatu tingkat sudah memiliki rombel spesifik di daftar `parts`, abaikan TINGKAT:<g>
+  const specificGrades = new Set();
+  for (const part of parts) {
+    if (part.startsWith("tingkat:") || part.startsWith("tingkat ")) continue;
+    if (['x', 'xi', 'xii', '10', '11', '12'].includes(part)) continue;
+    const pTokens = part.split(/[\s\-_]+/);
+    let g = pTokens[0] || "";
+    if (g === "kelas" && pTokens.length > 1) g = pTokens[1];
+    if (['x', 'xi', 'xii', '10', '11', '12'].includes(g)) specificGrades.add(g);
+  }
+
   // 2. Cocok per Tingkat / Jenjang Angkatan pada setiap token (cth: "tingkat:x", "tingkat:xi", "tingkat:xii", atau "x", "xi", "xii")
   const sTokens = s.split(/[\s\-_]+/);
   let sTingkat = sTokens[0] || "";
@@ -1985,9 +1996,13 @@ function checkKelasMatch(pKelas, studentKelas) {
     let targetTingkat = "";
     if (part.startsWith("tingkat:")) {
       targetTingkat = part.replace("tingkat:", "").trim();
+    } else if (part.startsWith("tingkat ")) {
+      targetTingkat = part.replace("tingkat ", "").trim();
     } else if (['x', 'xi', 'xii', '10', '11', '12'].includes(part)) {
       targetTingkat = part;
     }
+
+    if (targetTingkat && specificGrades.has(targetTingkat)) continue;
 
     if (targetTingkat && sTingkat === targetTingkat) {
       return { match: true, specificity: 2 };
@@ -2878,7 +2893,15 @@ function renderGuruTable(list) {
       ? paketIds.map(pid => {
           const pkObj = paketLookup.get(String(pid));
           const pName = pkObj ? pkObj.nama_paket : 'Paket Terkait';
-          return `<span class="badge bg-primary-subtle text-primary border border-primary-subtle me-1 mb-1" style="font-size: 0.72rem;"><i class="bi bi-journal-check me-1"></i>${escapeHtml(pName)}</span>`;
+          return `
+            <span class="badge bg-primary-subtle text-primary border border-primary-subtle me-1 mb-1 d-inline-flex align-items-center gap-1" style="font-size: 0.72rem;">
+              <i class="bi bi-journal-check"></i>
+              <span>${escapeHtml(pName)}</span>
+              <button type="button" class="btn-close" style="font-size: 0.48rem; width: 0.5rem; height: 0.5rem;"
+                onclick="quickDeleteGuruPaket('${escapeAttr(g.id)}', '${escapeAttr(pid)}', '${escapeAttr(pName)}')"
+                title="Hapus paket soal ini"></button>
+            </span>
+          `;
         }).join('')
       : `<span class="text-muted small"><i class="bi bi-magic me-1"></i>Otomatis</span>`;
 
@@ -3279,6 +3302,8 @@ function openPenugasanGuruModal(id) {
     addPenugasanRow(); // buat 1 baris kosong siap diisi
   }
 
+  updatePenugasanConflictWarning();
+
   if (penugasanGuruModalInstance) {
     penugasanGuruModalInstance.show();
   }
@@ -3417,7 +3442,7 @@ function addPenugasanRow(data = {}) {
   tr.id = rowId;
   tr.innerHTML = `
     <td>
-      <input type="text" class="form-control form-control-sm penugasan-mapel-input" placeholder="Nama mapel (cth: Matematika, Koding)" value="${escapeAttr(currentMapel)}" required>
+      <input type="text" class="form-control form-control-sm penugasan-mapel-input" placeholder="Nama mapel (cth: Matematika, Koding)" value="${escapeAttr(currentMapel)}" oninput="updatePenugasanConflictWarning()" required>
     </td>
     <td>
       <div class="dropdown penugasan-dropdown-kelas">
@@ -3470,7 +3495,7 @@ function addPenugasanRow(data = {}) {
       </div>
     </td>
     <td class="text-center">
-      <button type="button" class="btn btn-outline-danger btn-sm p-1" onclick="this.closest('tr').remove()" title="Hapus baris mapel ini">
+      <button type="button" class="btn btn-outline-danger btn-sm p-1" onclick="this.closest('tr').remove(); updatePenugasanConflictWarning();" title="Hapus baris mapel ini">
         <i class="bi bi-trash"></i>
       </button>
     </td>
@@ -3487,13 +3512,35 @@ function addPenugasanRow(data = {}) {
         chkKelasItems.forEach(c => { c.checked = false; });
       }
       updatePenugasanKelasLabel(tr);
+      updatePenugasanConflictWarning();
     });
   }
+  const parseKelasTokenInfo = (val) => {
+    const v = String(val || '').trim().toUpperCase();
+    if (v.startsWith('TINGKAT:')) return { isTingkat: true, grade: v.replace('TINGKAT:', '').trim() };
+    const tok = v.split(/[\s\-_]+/)[0] || '';
+    return { isTingkat: false, grade: ['X', 'XI', 'XII', '10', '11', '12'].includes(tok) ? tok : '' };
+  };
+
   chkKelasItems.forEach(c => {
     c.addEventListener('change', () => {
+      // Pengaman Centang Ganda: Jika mencentang TINGKAT:X, lepas rombel spesifik X; jika mencentang rombel spesifik X, lepas TINGKAT:X
+      if (c.checked) {
+        const cur = parseKelasTokenInfo(c.value);
+        if (cur.grade) {
+          chkKelasItems.forEach(other => {
+            if (other === c || !other.checked) return;
+            const oInfo = parseKelasTokenInfo(other.value);
+            if (oInfo.grade === cur.grade && oInfo.isTingkat !== cur.isTingkat) {
+              other.checked = false;
+            }
+          });
+        }
+      }
       const anyChecked = Array.from(chkKelasItems).some(x => x.checked);
       if (chkKelasAll) chkKelasAll.checked = !anyChecked;
       updatePenugasanKelasLabel(tr);
+      updatePenugasanConflictWarning();
     });
   });
 
@@ -3506,6 +3553,7 @@ function addPenugasanRow(data = {}) {
         chkJurusanItems.forEach(c => { c.checked = false; });
       }
       updatePenugasanJurusanLabel(tr);
+      updatePenugasanConflictWarning();
     });
   }
   chkJurusanItems.forEach(c => {
@@ -3513,6 +3561,7 @@ function addPenugasanRow(data = {}) {
       const anyChecked = Array.from(chkJurusanItems).some(x => x.checked);
       if (chkJurusanAll) chkJurusanAll.checked = !anyChecked;
       updatePenugasanJurusanLabel(tr);
+      updatePenugasanConflictWarning();
     });
   });
 
@@ -3532,11 +3581,24 @@ async function savePenugasanGuru() {
     const mapel = (tr.querySelector('.penugasan-mapel-input')?.value || '').trim();
     if (!mapel) return;
 
-    // Tingkat / Kelas
+    // Tingkat / Kelas (otomatis bersihkan TINGKAT:G jika rombel spesifik tingkat G juga tercentang)
     const chkKelasAll = tr.querySelector('.chk-kelas-all');
     let tingkat = '';
     if (!chkKelasAll || !chkKelasAll.checked) {
-      const checkedKelas = Array.from(tr.querySelectorAll('.chk-kelas-item:checked')).map(c => c.value);
+      let checkedKelas = Array.from(tr.querySelectorAll('.chk-kelas-item:checked')).map(c => c.value);
+      const specGrades = new Set(
+        checkedKelas
+          .filter(v => !String(v).toUpperCase().startsWith('TINGKAT:'))
+          .map(v => String(v).trim().toUpperCase().split(/[\s\-_]+/)[0])
+          .filter(g => ['X', 'XI', 'XII', '10', '11', '12'].includes(g))
+      );
+      checkedKelas = checkedKelas.filter(v => {
+        const up = String(v).trim().toUpperCase();
+        if (up.startsWith('TINGKAT:')) {
+          return !specGrades.has(up.replace('TINGKAT:', '').trim());
+        }
+        return true;
+      });
       if (checkedKelas.length > 0) {
         tingkat = checkedKelas.join(', ');
       }
@@ -3554,6 +3616,27 @@ async function savePenugasanGuru() {
 
     penugasanList.push({ mapel, tingkat, jurusan });
   });
+
+  // Cek Warning Tabrakan Mapel & Kelas dengan Guru Lain sebelum menyimpan
+  const conflictPakets = (allPaketUnfiltered && allPaketUnfiltered.length > 0) ? allPaketUnfiltered : (allPaket || []);
+  const conflicts = detectMapelKelasConflicts(g.id, penugasanList, allGuru, conflictPakets);
+  if (conflicts.length > 0) {
+    const listHtml = conflicts.slice(0, 8).map(c =>
+      `<li class="mb-1">Mapel <strong>${escapeHtml(c.mapel)}</strong> pada kelas <span class="badge bg-warning text-dark">${escapeHtml(c.overlapText)}</span> sudah dibuat paket soalnya oleh <strong>${escapeHtml(c.otherGuruName)}</strong></li>`
+    ).join('');
+    const warnRes = await Swal.fire({
+      icon: 'warning',
+      title: 'Peringatan: Kelas Sudah Ada Paket Soal!',
+      html: `<div class="text-start small">Terdeteksi kelas/mapel yang sudah dibuatkan paket soal oleh guru lain:<ul class="mt-2 mb-2 ps-3">${listHtml}</ul><div class="text-muted">Pastikan kelas yang dipilih tidak bentrok dengan guru lain pada jam ujian yang sama.</div></div>`,
+      showCancelButton: true,
+      confirmButtonText: '<i class="bi bi-check-lg me-1"></i> Tetap Simpan',
+      cancelButtonText: 'Periksa & Ubah Kelas',
+      confirmButtonColor: '#f59e0b',
+      cancelButtonColor: '#0d6efd',
+      reverseButtons: true
+    });
+    if (!warnRes.isConfirmed) return;
+  }
 
   const btn = document.getElementById('btn-save-penugasan-guru');
   btn.disabled = true;
@@ -3674,6 +3757,282 @@ async function savePenugasanGuru() {
   } finally {
     btn.disabled = false;
   }
+}
+
+// -------------------------------------------------------------
+// HAPUS PAKET CEPAT DI TABEL GURU & DETEKSI TABRAKAN MAPEL-KELAS
+// -------------------------------------------------------------
+
+async function quickDeleteGuruPaket(guruId, paketId, paketName) {
+  const g = (allGuru || []).find(item => String(item.id) === String(guruId));
+  const sourcePakets = (allPaketUnfiltered && allPaketUnfiltered.length > 0) ? allPaketUnfiltered : (allPaket || []);
+  const pk = sourcePakets.find(p => String(p.id) === String(paketId));
+  const soalCount = pk ? (Number(pk.total_soal !== undefined ? pk.total_soal : (pk.soal_count || 0)) || 0) : 0;
+
+  const warnExtra = soalCount > 0
+    ? `<div class="alert alert-danger py-2 px-3 small mt-2 mb-0"><i class="bi bi-exclamation-triangle-fill me-1"></i><strong>Perhatian:</strong> Paket ini sudah berisi <strong>${soalCount} butir soal</strong>! Semua soal di dalamnya akan ikut terhapus.</div>`
+    : `<div class="small text-muted mt-2">Paket soal ini akan dihapus permanen dan dilepas dari daftar guru <strong>${escapeHtml(g ? g.nama_lengkap : '')}</strong>.</div>`;
+
+  const res = await Swal.fire({
+    icon: 'warning',
+    title: 'Hapus Paket Soal?',
+    html: `Anda yakin ingin menghapus paket <strong>"${escapeHtml(paketName)}"</strong>?${warnExtra}`,
+    showCancelButton: true,
+    confirmButtonColor: '#dc3545',
+    cancelButtonColor: '#6c757d',
+    confirmButtonText: '<i class="bi bi-trash me-1"></i> Ya, Hapus Paket',
+    cancelButtonText: 'Batal'
+  });
+
+  if (!res.isConfirmed) return;
+
+  try {
+    await DB.deletePaket(String(paketId));
+    if (g) {
+      let curIds = [];
+      if (Array.isArray(g.paket_ids)) curIds = g.paket_ids.map(String);
+      else if (typeof g.paket_ids === 'string' && g.paket_ids.trim()) {
+        try { curIds = (JSON.parse(g.paket_ids) || []).map(String); } catch (e) {}
+      }
+      const nextIds = curIds.filter(id => id !== String(paketId));
+      await DB.saveGuru(g.id, {
+        username: g.username,
+        nama_lengkap: g.nama_lengkap,
+        mapel_diampu: g.mapel_diampu || '',
+        jurusan_diampu: g.jurusan_diampu || '',
+        kelas_diampu: g.kelas_diampu || '',
+        paket_ids: nextIds,
+        penugasan_mapel: g.penugasan_mapel || []
+      });
+    }
+    if (String(activePaketId) === String(paketId)) {
+      activePaketId = null;
+      const d = document.getElementById('soal-detail-panel');
+      const e = document.getElementById('soal-empty-state');
+      if (d) d.classList.add('d-none');
+      if (e) e.classList.remove('d-none');
+    }
+    Swal.fire({ icon: 'success', title: 'Paket Dihapus', text: `Paket "${paketName}" berhasil dihapus.`, timer: 1600, showConfirmButton: false });
+    await loadGuru();
+    await loadPaket();
+  } catch (err) {
+    Swal.fire('Gagal Menghapus', err.message || 'Terjadi kesalahan saat menghapus paket.', 'error');
+  }
+}
+
+function normalizeMapelFamily(name) {
+  const s = String(name || '').toLowerCase().trim();
+  if (!s) return '';
+  if (s.includes('agama islam') || s.includes('agma islam') || /\bpai(bp)?\b/.test(s)) return 'pendidikan agama islam';
+  if (s.includes('kristen') && (s.includes('protestan') || s.includes('potestan'))) return 'agama kristen protestan';
+  if (s.includes('katolik') || s.includes('katholik')) return 'agama katolik';
+  if (s.includes('hindu')) return 'agama hindu';
+  if (s.includes('budha') || s.includes('buddha')) return 'agama buddha';
+  if (s.includes('indonesia') || s.includes('ainonesia')) return 'bahasa indonesia';
+  if (s.includes('inggris')) return 'bahasa inggris';
+  if (s.includes('matematika') || s === 'mtk') return 'matematika';
+  if (s.includes('jasmani') || s.includes('pjok') || s.includes('olahrga')) return 'pjok';
+  if (s.includes('kewirausahaan') || s.includes('kewirauusahaan') || s.includes('kreativ') || s.includes('kreatv') || s === 'pkk') return 'pkk / kewirausahaan';
+  if (s.includes('ipas') || s.includes('ilmu pengeahuan alam') || s.includes('ilmu pengetahuan alam')) return 'projek ipas';
+  if (s.includes('koding') || s.includes('coding') || s.includes('kka')) return 'koding / kka';
+  if (s.includes('informatika')) return 'informatika';
+  if (s.includes('sejarah')) return 'sejarah';
+  if (s.includes('pancasila') || s === 'pkn' || s === 'ppkn') return 'pendidikan pancasila';
+  if (s.includes('seni')) return 'seni budaya / musik';
+  if (s.includes('dasar-dasar kejuruan teknik jaringan') || s.includes('tjkt')) return 'ddk tjkt';
+  if (s.includes('kejuruan akuntansi')) return 'kejuruan akuntansi';
+  return s.replace(/\s+/g, ' ');
+}
+
+function normalizeJurAlias(raw) {
+  const s = String(raw || '').toLowerCase().trim();
+  if (!s || s === 'semua' || s === 'semua jurusan') return 'semua';
+  if (s === 'akl' || s === 'akuntansi' || s.startsWith('akuntansi ')) return 'akl';
+  if (s === 'tkj' || s === 'tjkt') return 'tkj';
+  if (s === 'tkro' || s === 'tkr') return 'tkro';
+  if (s === 'tbsm' || s === 'tsm') return 'tbsm';
+  return s;
+}
+
+function parseCleanKelasTokens(rawKelas) {
+  const raw = String(rawKelas || '').trim();
+  if (!raw || raw.toUpperCase() === 'SEMUA' || raw.toUpperCase() === 'SEMUA KELAS') {
+    return { isAll: true, rombels: [], grades: [] };
+  }
+  const parts = raw.split(',').map(s => s.trim().toUpperCase()).filter(s => s && s !== 'SEMUA');
+  const rombels = [];
+  const rawGrades = [];
+  const specGrades = new Set();
+  parts.forEach(p => {
+    if (p.startsWith('TINGKAT:')) {
+      rawGrades.push(p.replace('TINGKAT:', '').trim());
+    } else if (p.startsWith('TINGKAT ')) {
+      rawGrades.push(p.replace('TINGKAT ', '').trim());
+    } else if (['X', 'XI', 'XII', '10', '11', '12'].includes(p)) {
+      rawGrades.push(p);
+    } else {
+      rombels.push(p);
+      const g = p.split(/[\s\-_]+/)[0];
+      if (['X', 'XI', 'XII', '10', '11', '12'].includes(g)) specGrades.add(g);
+    }
+  });
+  const grades = rawGrades.filter(g => !specGrades.has(g));
+  return { isAll: (rombels.length === 0 && grades.length === 0), rombels, grades };
+}
+
+function getOverlappingClasses(kelasA, kelasB) {
+  const a = parseCleanKelasTokens(kelasA);
+  const b = parseCleanKelasTokens(kelasB);
+  if (a.isAll && b.isAll) return ['Semua Kelas'];
+  if (a.isAll) return [...b.rombels, ...b.grades.map(g => `Tingkat ${g}`)];
+  if (b.isAll) return [...a.rombels, ...a.grades.map(g => `Tingkat ${g}`)];
+
+  const overlaps = new Set();
+  a.rombels.forEach(r => {
+    const g = r.split(/[\s\-_]+/)[0];
+    if (b.rombels.includes(r) || b.grades.includes(g)) overlaps.add(r);
+  });
+  b.rombels.forEach(r => {
+    const g = r.split(/[\s\-_]+/)[0];
+    if (a.grades.includes(g)) overlaps.add(r);
+  });
+  a.grades.forEach(g => {
+    if (b.grades.includes(g)) overlaps.add(`Tingkat ${g}`);
+  });
+  return Array.from(overlaps);
+}
+
+function hasJurusanOverlap(jurA, jurB) {
+  const parseJ = (raw) => {
+    const parts = String(raw || '').split(',').map(normalizeJurAlias).filter(Boolean);
+    return parts.length === 0 || parts.includes('semua') ? null : new Set(parts);
+  };
+  const setA = parseJ(jurA);
+  const setB = parseJ(jurB);
+  if (!setA || !setB) return true;
+  for (const x of setA) {
+    if (setB.has(x)) return true;
+  }
+  return false;
+}
+
+function detectMapelKelasConflicts(currentGuruId, rowsToCheck, guruList, paketList, excludePaketId = '') {
+  const conflicts = [];
+  const seenKey = new Set();
+  const pkMap = new Map();
+  (paketList || []).forEach(p => {
+    if (p && p.id && String(p.id) !== String(excludePaketId)) pkMap.set(String(p.id), p);
+  });
+
+  (rowsToCheck || []).forEach(item => {
+    const famA = normalizeMapelFamily(item.mapel);
+    if (!famA) return;
+
+    (guruList || []).forEach(other => {
+      if (!other || (currentGuruId && String(other.id) === String(currentGuruId))) return;
+      const otherName = other.nama_lengkap || other.username || 'Guru Lain';
+
+      const otherEntries = [];
+      let pList = [];
+      if (Array.isArray(other.penugasan_mapel)) pList = other.penugasan_mapel;
+      else if (typeof other.penugasan_mapel === 'string' && other.penugasan_mapel.trim()) {
+        try { const dec = JSON.parse(other.penugasan_mapel); if (Array.isArray(dec)) pList = dec; } catch (e) {}
+      }
+      pList.forEach(pe => {
+        if (pe && pe.mapel) otherEntries.push({ mapel: pe.mapel, kelas: pe.tingkat || '', jurusan: pe.jurusan || '' });
+      });
+
+      let pids = [];
+      if (Array.isArray(other.paket_ids)) pids = other.paket_ids;
+      else if (typeof other.paket_ids === 'string' && other.paket_ids.trim()) {
+        try { const dec = JSON.parse(other.paket_ids); if (Array.isArray(dec)) pids = dec; } catch (e) {}
+      }
+      pids.forEach(pid => {
+        const pk = pkMap.get(String(pid));
+        if (pk && pk.nama_paket) {
+          const baseMapel = pk.nama_paket.split(' - ')[0].split(' (')[0].trim();
+          otherEntries.push({ mapel: baseMapel, kelas: pk.kelas || '', jurusan: pk.jurusan || '' });
+        }
+      });
+
+      otherEntries.forEach(oe => {
+        const famB = normalizeMapelFamily(oe.mapel);
+        if (!famB) return;
+        const sameMapel = (famA === famB) || (famA.length >= 6 && famB.length >= 6 && (famA.includes(famB) || famB.includes(famA)));
+        if (!sameMapel) return;
+        if (!hasJurusanOverlap(item.jurusan, oe.jurusan)) return;
+
+        const ov = getOverlappingClasses(item.tingkat, oe.kelas);
+        if (ov.length > 0) {
+          const overlapText = ov.join(', ');
+          const dedup = `${famA}|${other.id}|${overlapText}`;
+          if (!seenKey.has(dedup)) {
+            seenKey.add(dedup);
+            conflicts.push({
+              mapel: item.mapel,
+              overlapText,
+              otherGuruName: otherName,
+              otherMapel: oe.mapel
+            });
+          }
+        }
+      });
+    });
+  });
+
+  return conflicts;
+}
+
+function collectCurrentPenugasanRows() {
+  const rows = document.querySelectorAll('#tbody-penugasan-mapel tr');
+  const list = [];
+  rows.forEach(tr => {
+    const mapel = (tr.querySelector('.penugasan-mapel-input')?.value || '').trim();
+    if (!mapel) return;
+    const chkKelasAll = tr.querySelector('.chk-kelas-all');
+    let tingkat = '';
+    if (!chkKelasAll || !chkKelasAll.checked) {
+      tingkat = Array.from(tr.querySelectorAll('.chk-kelas-item:checked')).map(c => c.value).join(', ');
+    }
+    const chkJurusanAll = tr.querySelector('.chk-jurusan-all');
+    let jurusan = '';
+    if (!chkJurusanAll || !chkJurusanAll.checked) {
+      jurusan = Array.from(tr.querySelectorAll('.chk-jurusan-item:checked')).map(c => c.value).join(', ');
+    }
+    list.push({ mapel, tingkat, jurusan });
+  });
+  return list;
+}
+
+function updatePenugasanConflictWarning() {
+  const box = document.getElementById('penugasan-conflict-warning');
+  if (!box) return;
+  const guruId = document.getElementById('penugasan-guru-id')?.value || '';
+  const rows = collectCurrentPenugasanRows();
+  const conflictPakets = (allPaketUnfiltered && allPaketUnfiltered.length > 0) ? allPaketUnfiltered : (allPaket || []);
+  const conflicts = detectMapelKelasConflicts(guruId, rows, allGuru, conflictPakets);
+
+  if (conflicts.length === 0) {
+    box.classList.add('d-none');
+    box.innerHTML = '';
+    return;
+  }
+
+  const itemsHtml = conflicts.slice(0, 6).map(c =>
+    `<li>Mapel <strong>${escapeHtml(c.mapel)}</strong> pada kelas <span class="badge bg-danger text-white">${escapeHtml(c.overlapText)}</span> sudah dibuat paket soalnya oleh <strong>${escapeHtml(c.otherGuruName)}</strong></li>`
+  ).join('');
+  const moreHtml = conflicts.length > 6 ? `<li class="text-muted">...dan ${conflicts.length - 6} peringatan lainnya.</li>` : '';
+
+  box.innerHTML = `
+    <div class="d-flex align-items-start gap-2">
+      <i class="bi bi-exclamation-triangle-fill text-danger fs-5 flex-shrink-0 mt-1"></i>
+      <div>
+        <div class="fw-bold text-danger mb-1">Peringatan! Kelas Sudah Dibuat Paket Soalnya oleh Guru Lain:</div>
+        <ul class="mb-0 ps-3">${itemsHtml}${moreHtml}</ul>
+      </div>
+    </div>
+  `;
+  box.classList.remove('d-none');
 }
 
 // -------------------------------------------------------------
@@ -4979,6 +5338,38 @@ async function handlePaketCrudSubmit(e) {
     jadwal_mulai: start ? new Date(start).toISOString() : null,
     jadwal_selesai: end ? new Date(end).toISOString() : null
   };
+
+  // Cek Warning Tabrakan Paket Soal dengan Guru Lain sebelum menyimpan paket
+  const selGuruElCheck = document.getElementById('crud-paket-guru');
+  const targetGuruIdCheck = isGuruMode()
+    ? String(currentAdminUser?.id || '')
+    : (selGuruElCheck ? String(selGuruElCheck.value || '') : '');
+  const baseMapelCheck = nama.split(' - ')[0].split(' (')[0].trim();
+  const conflictPaketsCheck = (allPaketUnfiltered && allPaketUnfiltered.length > 0) ? allPaketUnfiltered : (allPaket || []);
+  const paketConflicts = detectMapelKelasConflicts(
+    targetGuruIdCheck,
+    [{ mapel: baseMapelCheck, tingkat: kelas, jurusan: jurusan }],
+    allGuru,
+    conflictPaketsCheck,
+    id
+  );
+  if (paketConflicts.length > 0) {
+    const listHtml = paketConflicts.slice(0, 6).map(c =>
+      `<li class="mb-1">Mapel <strong>${escapeHtml(c.mapel)}</strong> pada kelas <span class="badge bg-warning text-dark">${escapeHtml(c.overlapText)}</span> sudah dibuat paket soalnya oleh <strong>${escapeHtml(c.otherGuruName)}</strong></li>`
+    ).join('');
+    const warnRes = await Swal.fire({
+      icon: 'warning',
+      title: 'Peringatan: Kelas Sudah Ada Paket Soal!',
+      html: `<div class="text-start small">Terdeteksi kelas/mapel yang sudah dibuatkan paket soal oleh guru lain:<ul class="mt-2 mb-2 ps-3">${listHtml}</ul><div class="text-muted">Pastikan kelas yang dipilih tidak bentrok dengan paket guru lain.</div></div>`,
+      showCancelButton: true,
+      confirmButtonText: '<i class="bi bi-check-lg me-1"></i> Tetap Simpan',
+      cancelButtonText: 'Periksa & Ubah Kelas',
+      confirmButtonColor: '#f59e0b',
+      cancelButtonColor: '#0d6efd',
+      reverseButtons: true
+    });
+    if (!warnRes.isConfirmed) return;
+  }
 
   const btn = document.getElementById('btn-save-paket');
   btn.disabled = true;
@@ -7376,3 +7767,5 @@ window.triggerParseWordText = triggerParseWordText;
 window.setWordQuestionKey = setWordQuestionKey;
 window.deleteWordQuestion = deleteWordQuestion;
 window.saveWordImportedData = saveWordImportedData;
+window.quickDeleteGuruPaket = quickDeleteGuruPaket;
+window.updatePenugasanConflictWarning = updatePenugasanConflictWarning;

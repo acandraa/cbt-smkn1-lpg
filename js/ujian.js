@@ -134,6 +134,17 @@ async function checkSingleDeviceSession() {
   }
 }
 
+// Helper: Normalisasi alias jurusan (misal AKUNTANSI <-> AKL, TJKT <-> TKJ) agar siswa & paket selalu cocok
+function normalizeJurusanAlias(raw) {
+  const s = String(raw || '').toLowerCase().trim();
+  if (!s || s === 'semua' || s === 'semua jurusan') return 'semua';
+  if (s === 'akl' || s === 'akuntansi' || s.startsWith('akuntansi ')) return 'akl';
+  if (s === 'tkj' || s === 'tjkt') return 'tkj';
+  if (s === 'tkro' || s === 'tkr') return 'tkro';
+  if (s === 'tbsm' || s === 'tsm') return 'tbsm';
+  return s;
+}
+
 // Helper: Mengecek apakah paket kelas cocok dengan kelas siswa (mendukung Tingkat X, XI, XII, daftar kelas, atau rombel spesifik)
 function checkKelasMatch(pKelas, studentKelas) {
   if (!pKelas || pKelas === "" || pKelas.toLowerCase() === "semua") {
@@ -149,6 +160,20 @@ function checkKelasMatch(pKelas, studentKelas) {
     return { match: true, specificity: 3 };
   }
 
+  // Pengaman Anti-Bocor: Jika suatu tingkat (misal X) sudah memiliki rombel spesifik di daftar `parts`
+  // (cth: "TINGKAT:X, X AKL 1, X AKL 2"), maka token "TINGKAT:X" diabaikan agar tidak bocor ke rombel X guru lain!
+  const specificGrades = new Set();
+  for (const part of parts) {
+    if (part.startsWith("tingkat:") || part.startsWith("tingkat ")) continue;
+    if (['x', 'xi', 'xii', '10', '11', '12'].includes(part)) continue;
+    const pTokens = part.split(/[\s\-_]+/);
+    let g = pTokens[0] || "";
+    if (g === "kelas" && pTokens.length > 1) g = pTokens[1];
+    if (['x', 'xi', 'xii', '10', '11', '12'].includes(g)) {
+      specificGrades.add(g);
+    }
+  }
+
   // 2. Cocok per Tingkat / Jenjang Angkatan (cth: "tingkat:x", "tingkat:xi", "tingkat:xii", atau "x", "xi", "xii")
   const sTokens = s.split(/[\s\-_]+/);
   let sTingkat = sTokens[0] || "";
@@ -158,8 +183,14 @@ function checkKelasMatch(pKelas, studentKelas) {
     let targetTingkat = "";
     if (part.startsWith("tingkat:")) {
       targetTingkat = part.replace("tingkat:", "").trim();
+    } else if (part.startsWith("tingkat ")) {
+      targetTingkat = part.replace("tingkat ", "").trim();
     } else if (['x', 'xi', 'xii', '10', '11', '12'].includes(part)) {
       targetTingkat = part;
+    }
+
+    if (targetTingkat && specificGrades.has(targetTingkat)) {
+      continue;
     }
 
     if (targetTingkat && sTingkat === targetTingkat) {
@@ -219,7 +250,7 @@ function detectAgamaCategory(namaPaket) {
 function findAllActivePaketsForStudent(allPaket, profile) {
   if (!allPaket || allPaket.length === 0 || !profile) return [];
   const now = new Date();
-  const studentJurusan = (profile.jurusan || "").toLowerCase().trim();
+  const studentJurusan = normalizeJurusanAlias(profile.jurusan);
   const studentKelas = (profile.kelas || "").toLowerCase().trim();
 
   const matching = [];
@@ -231,13 +262,13 @@ function findAllActivePaketsForStudent(allPaket, profile) {
 
     if (now >= start && now <= end) {
       const pJurusan = (p.jurusan || "").toLowerCase().trim();
-      const jurParts = pJurusan.split(',').map(x => x.trim()).filter(Boolean);
-      const jurusanMatch = (pJurusan === "" || pJurusan === "semua" || jurParts.includes(studentJurusan));
+      const jurParts = pJurusan.split(',').map(x => normalizeJurusanAlias(x)).filter(Boolean);
+      const jurusanMatch = (pJurusan === "" || pJurusan === "semua" || jurParts.includes('semua') || jurParts.includes(studentJurusan));
       const kelasResult = checkKelasMatch(p.kelas, studentKelas);
 
       if (jurusanMatch && kelasResult.match) {
         let score = 0;
-        if (pJurusan && pJurusan !== "semua" && jurParts.includes(studentJurusan)) score += 4;
+        if (pJurusan && pJurusan !== "semua" && !jurParts.includes('semua') && jurParts.includes(studentJurusan)) score += 4;
         score += kelasResult.specificity;
         matching.push({ ...p, matchScore: score });
       }

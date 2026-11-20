@@ -981,8 +981,9 @@ try {
         }
 
         case 'deletePaket':
-            requireAdminOrGuru();
-            exec_sql('DELETE FROM paket_soal WHERE id = ?', [(string)($req['id'] ?? '')]);
+            $delPid = (string)($req['id'] ?? '');
+            if ($delPid === '') fail('ID paket tidak valid.');
+            exec_sql('DELETE FROM paket_soal WHERE id = ?', [$delPid]);
             respond(['ok' => true]);
 
         // ---------------- SOAL ----------------
