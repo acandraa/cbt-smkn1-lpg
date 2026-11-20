@@ -4429,7 +4429,7 @@ function renderPaketList(list) {
       container.innerHTML = `<div class="text-center py-4 text-muted small">Belum ada paket soal yang cocok dengan filter.</div>`;
       return;
     }
-    container.innerHTML = filtered.map(p => renderSinglePaketItemHtml(p, false)).join('');
+    container.innerHTML = `<div class="list-group">${filtered.map(p => renderSinglePaketItemHtml(p, false)).join('')}</div>`;
     return;
   }
 
@@ -4567,7 +4567,7 @@ function renderPaketList(list) {
       : '';
 
     return `
-      <div class="border rounded-3 mb-2 overflow-hidden shadow-sm ${hasActiveChild ? 'border-primary' : 'border-light-subtle'}">
+      <div class="border rounded-3 mb-2 overflow-hidden shadow-sm flex-shrink-0 ${hasActiveChild ? 'border-primary' : 'border-light-subtle'}">
         <button type="button"
           class="w-100 text-start border-0 p-2 px-3 d-flex align-items-center justify-content-between gap-2 ${headerBg}"
           onclick="toggleGuruPaketGroup('${escapeAttr(grp.key)}')"
