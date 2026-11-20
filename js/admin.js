@@ -162,17 +162,52 @@ function getGuruPenugasanList() {
   return [];
 }
 
+function getOtherGuruOwnedPaketIds(excludeGuruId = null) {
+  const ownedByOthers = new Set();
+  const myId = excludeGuruId !== null
+    ? String(excludeGuruId)
+    : (currentAdminUser && currentAdminUser.id ? String(currentAdminUser.id) : '');
+  const myUser = (!excludeGuruId && currentAdminUser && currentAdminUser.username)
+    ? String(currentAdminUser.username).toLowerCase()
+    : '';
+
+  (allGuru || []).forEach(g => {
+    if (!g) return;
+    const gId = g.id ? String(g.id) : '';
+    const gUser = g.username ? String(g.username).toLowerCase() : '';
+    if ((myId && gId === myId) || (myUser && gUser === myUser)) return;
+
+    let pids = [];
+    if (Array.isArray(g.paket_ids)) pids = g.paket_ids;
+    else if (typeof g.paket_ids === 'string' && g.paket_ids.trim()) {
+      try { pids = JSON.parse(g.paket_ids) || []; } catch (e) {}
+    }
+    pids.forEach(pid => { if (pid) ownedByOthers.add(String(pid)); });
+  });
+  return ownedByOthers;
+}
+
 function isPaketAllowedForGuru(paket) {
   if (!isGuruMode()) return true;
   if (!paket) return false;
 
-  // 1. Jika paket soal secara spesifik diberikan via paket_ids, langsung lolos!
+  const pkId = String(paket.id || '');
   const allowedIds = getGuruAllowedPaketIds();
-  if (allowedIds.length > 0 && allowedIds.includes(String(paket.id))) {
-    return true;
+
+  // 1. ISOLASI KETAT PER AKUN GURU:
+  //    Jika guru sudah memiliki daftar paket_ids khusus miliknya, HANYA paket tersebut yang ditampilkan.
+  //    Mencegah soal bercampur dengan guru lain yang mengampu mata pelajaran sama (misal sama-sama Bahasa Indonesia).
+  if (allowedIds.length > 0) {
+    return allowedIds.includes(pkId);
   }
 
-  // 2. Cek apakah cocok dengan salah satu Penugasan Mapel (Multi-Mapel & Tingkat)
+  // 2. Untuk akun lama (belum memiliki paket_ids), tetap TOLAK paket yang sudah dimiliki guru lain
+  const otherOwned = getOtherGuruOwnedPaketIds();
+  if (otherOwned.has(pkId)) {
+    return false;
+  }
+
+  // 3. Cek apakah cocok dengan salah satu Penugasan Mapel (Multi-Mapel & Tingkat)
   const penugasanList = getGuruPenugasanList();
   if (penugasanList.length > 0) {
     const pkNama = String(paket.nama_paket || '').toLowerCase().trim();
@@ -260,10 +295,16 @@ function isHasilAllowedForGuru(hasil) {
   if (!isGuruMode()) return true;
   if (!hasil) return false;
 
-  // 1. Cek paket_ids spesifik
+  // 1. ISOLASI KETAT: Jika guru sudah memiliki paket_ids khusus miliknya, hanya nilai dari paket tersebut yang tampil
   const allowedIds = getGuruAllowedPaketIds();
-  if (hasil.paket_soal_id && allowedIds.includes(String(hasil.paket_soal_id))) {
-    return true;
+  if (allowedIds.length > 0) {
+    return Boolean(hasil.paket_soal_id && allowedIds.includes(String(hasil.paket_soal_id)));
+  }
+
+  // Tolak nilai yang berasal dari paket milik guru lain
+  const otherOwned = getOtherGuruOwnedPaketIds();
+  if (hasil.paket_soal_id && otherOwned.has(String(hasil.paket_soal_id))) {
+    return false;
   }
 
   // 2. Cek apakah paket soal hasil ujian cocok dengan penugasan_mapel guru
@@ -442,6 +483,33 @@ function applyGuruRoleUI() {
 // Refresh all database cache (dioptimasi: 1 batch paralel tanpa duplikasi request)
 async function refreshAllData() {
   if (isGuruMode()) {
+    try {
+      const guruRes = await DB.getGuruList();
+      allGuru = Array.isArray(guruRes) ? guruRes : [];
+      // Sinkronkan profil & paket_ids terbaru guru yang sedang login dari database
+      const freshMe = allGuru.find(g =>
+        (currentAdminUser.id && String(g.id) === String(currentAdminUser.id)) ||
+        (currentAdminUser.username && String(g.username || '').toLowerCase() === String(currentAdminUser.username).toLowerCase())
+      );
+      if (freshMe) {
+        currentAdminUser = {
+          ...currentAdminUser,
+          id: freshMe.id || currentAdminUser.id,
+          nama_lengkap: freshMe.nama_lengkap || currentAdminUser.nama_lengkap,
+          mapel_diampu: freshMe.mapel_diampu ?? currentAdminUser.mapel_diampu,
+          jurusan_diampu: freshMe.jurusan_diampu ?? currentAdminUser.jurusan_diampu,
+          kelas_diampu: freshMe.kelas_diampu ?? currentAdminUser.kelas_diampu,
+          paket_ids: freshMe.paket_ids ?? currentAdminUser.paket_ids,
+          penugasan_mapel: freshMe.penugasan_mapel ?? currentAdminUser.penugasan_mapel
+        };
+        try {
+          sessionStorage.setItem('CBT_GURU_SESSION', JSON.stringify(currentAdminUser));
+        } catch (e) {}
+      }
+    } catch (e) {
+      console.warn('Gagal menyegarkan daftar guru:', e);
+    }
+
     await Promise.all([
       loadPaket(),
       loadJurusan(),
@@ -3310,23 +3378,26 @@ async function savePenugasanGuru() {
     }
     updatedPaketIds = updatedPaketIds.map(String);
 
+    // Kumpulkan seluruh paket_ids yang sudah dimiliki oleh GURU LAIN agar paket soal tidak pernah bercampur/terpakai bersama
+    const otherGuruPaketIds = getOtherGuruOwnedPaketIds(g.id);
+    // Lepaskan paket yang sebelumnya tidak sengaja terikat bersama guru lain
+    updatedPaketIds = updatedPaketIds.filter(pid => !otherGuruPaketIds.has(String(pid)));
+
     if (autoCreatePaket && penugasanList.length > 0) {
       const sourcePakets = (allPaketUnfiltered && allPaketUnfiltered.length > 0) ? allPaketUnfiltered : (allPaket || []);
-      
+      const shortGuruName = String(g.nama_lengkap || g.username || '')
+        .replace(/^(bpk\.?|ibu\.?|drs\.?|dr\.?|ir\.?|hj\.?|h\.?)\s+/i, '')
+        .split(/[,\s]+/)[0]
+        .trim();
+
       for (const item of penugasanList) {
-        const tVal = item.tingkat
-          ? item.tingkat
-              .split(',')
-              .map(k => {
-                const clean = k.trim();
-                return clean.toUpperCase().startsWith('TINGKAT:') ? `Tingkat ${clean.split(':')[1]}` : clean;
-              })
-              .filter(Boolean)
-              .join(', ')
-          : '';
         const jVal = item.jurusan || '';
-        
-        const existingPaket = sourcePakets.find(p => {
+
+        // HANYA cari kecocokan di paket MILIK GURU INI SENDIRI (tidak boleh memakai ulang paket milik guru lain!)
+        const myOwnPakets = sourcePakets.filter(p =>
+          updatedPaketIds.includes(String(p.id)) && !otherGuruPaketIds.has(String(p.id))
+        );
+        const existingPaket = myOwnPakets.find(p => {
           const pName = String(p.nama_paket || '').toLowerCase();
           const mName = item.mapel.toLowerCase();
           const pJ = String(p.jurusan || '').toUpperCase();
@@ -3359,6 +3430,14 @@ async function savePenugasanGuru() {
             newName += ` (${jParts.join(', ')})`;
           }
 
+          // Jika sudah ada paket guru lain dengan nama yang sama persis, tambahkan penanda nama guru agar mudah dibedakan
+          const duplicateNameExists = sourcePakets.some(p =>
+            String(p.nama_paket || '').trim().toLowerCase() === newName.trim().toLowerCase()
+          );
+          if (duplicateNameExists && shortGuruName) {
+            newName += ` [${shortGuruName}]`;
+          }
+
           const created = await DB.savePaket('', {
             nama_paket: newName,
             jurusan: jVal || null,
@@ -3371,6 +3450,7 @@ async function savePenugasanGuru() {
             if (!updatedPaketIds.includes(String(created.id))) {
               updatedPaketIds.push(String(created.id));
             }
+            sourcePakets.push(created);
           }
         } else {
           if (!updatedPaketIds.includes(String(existingPaket.id))) {

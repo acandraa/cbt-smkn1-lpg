@@ -328,9 +328,9 @@
   <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   
-  <script src="js/config.js?v=56"></script>
-  <script src="js/supabase-config.js?v=56"></script>
-  <script src="js/db-adapter.js?v=56"></script>
+  <script src="js/config.js?v=59"></script>
+  <script src="js/supabase-config.js?v=59"></script>
+  <script src="js/db-adapter.js?v=59"></script>
 
   <script>
     let allGuruList = [];
@@ -969,13 +969,35 @@
         }
         updatedPaketIds = updatedPaketIds.map(String);
 
+        // Kumpulkan seluruh paket_ids yang sudah dimiliki oleh GURU LAIN agar paket soal tidak pernah bercampur/terpakai bersama
+        const otherGuruPaketIds = new Set();
+        (allGuruList || []).forEach(other => {
+          if (!other || String(other.id) === String(g.id)) return;
+          let pids = [];
+          if (Array.isArray(other.paket_ids)) pids = other.paket_ids;
+          else if (typeof other.paket_ids === 'string' && other.paket_ids.trim()) {
+            try { pids = JSON.parse(other.paket_ids) || []; } catch (e) {}
+          }
+          pids.forEach(pid => { if (pid) otherGuruPaketIds.add(String(pid)); });
+        });
+        // Lepaskan paket yang sebelumnya tidak sengaja terikat bersama guru lain
+        updatedPaketIds = updatedPaketIds.filter(pid => !otherGuruPaketIds.has(String(pid)));
+
         if (autoCreatePaket && penugasanList.length > 0) {
           const sourcePakets = allPaketList || [];
+          const shortGuruName = String(g.nama_lengkap || g.username || '')
+            .replace(/^(bpk\.?|ibu\.?|drs\.?|dr\.?|ir\.?|hj\.?|h\.?)\s+/i, '')
+            .split(/[,\s]+/)[0]
+            .trim();
           
           for (const item of penugasanList) {
             const jVal = item.jurusan || '';
             
-            const existingPaket = sourcePakets.find(p => {
+            // HANYA cari kecocokan di paket MILIK GURU INI SENDIRI (jangan pernah pakai ulang paket guru lain!)
+            const myOwnPakets = sourcePakets.filter(p =>
+              updatedPaketIds.includes(String(p.id)) && !otherGuruPaketIds.has(String(p.id))
+            );
+            const existingPaket = myOwnPakets.find(p => {
               const pName = String(p.nama_paket || '').toLowerCase();
               const mName = item.mapel.toLowerCase();
               const pJ = String(p.jurusan || '').toUpperCase();
@@ -1006,6 +1028,14 @@
                 newName += ` (${jParts[0]})`;
               } else if (jParts.length === 2) {
                 newName += ` (${jParts.join(', ')})`;
+              }
+
+              // Jika sudah ada paket guru lain dengan nama yang sama persis, tambahkan penanda nama guru agar mudah dibedakan
+              const duplicateNameExists = sourcePakets.some(p =>
+                String(p.nama_paket || '').trim().toLowerCase() === newName.trim().toLowerCase()
+              );
+              if (duplicateNameExists && shortGuruName) {
+                newName += ` [${shortGuruName}]`;
               }
 
               const created = await DB.savePaket('', {
