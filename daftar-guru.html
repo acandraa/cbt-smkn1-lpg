@@ -328,9 +328,9 @@
   <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   
-  <script src="js/config.js?v=53"></script>
-  <script src="js/supabase-config.js?v=53"></script>
-  <script src="js/db-adapter.js?v=53"></script>
+  <script src="js/config.js?v=56"></script>
+  <script src="js/supabase-config.js?v=56"></script>
+  <script src="js/db-adapter.js?v=56"></script>
 
   <script>
     let allGuruList = [];
@@ -338,6 +338,8 @@
     let allPaketList = [];
     let allKelasList = [];
     let allJurusanList = [];
+    let masterCatalog = { kelas: [], jurusan: [] };
+    let pesertaCatalog = { kelas: [], jurusan: [] };
 
     let guruFormModalInstance = null;
     let penugasanGuruModalInstance = null;
@@ -356,17 +358,21 @@
     async function loadDataPublic() {
       const tbody = document.getElementById('tbody-guru-rekap');
       try {
-        const [guruRes, paketRes, kelasRes, jurusanRes] = await Promise.all([
+        const [guruRes, paketRes, kelasRes, jurusanRes, masterRes, pesertaRes] = await Promise.all([
           DB.getGuruList(),
           DB.getPaketList(),
           (typeof DB.getKelasList === 'function') ? DB.getKelasList() : [],
-          (typeof DB.getJurusanList === 'function') ? DB.getJurusanList() : []
+          (typeof DB.getJurusanList === 'function') ? DB.getJurusanList() : [],
+          (typeof DB.getMasterCatalog === 'function') ? DB.getMasterCatalog() : { kelas: [], jurusan: [] },
+          (typeof DB.getPublicKelasJurusanFromPeserta === 'function') ? DB.getPublicKelasJurusanFromPeserta() : { kelas: [], jurusan: [] }
         ]);
 
         allGuruList = Array.isArray(guruRes) ? guruRes : [];
         allPaketList = Array.isArray(paketRes) ? paketRes : [];
         allKelasList = Array.isArray(kelasRes) ? kelasRes : [];
         allJurusanList = Array.isArray(jurusanRes) ? jurusanRes : [];
+        masterCatalog = (masterRes && typeof masterRes === 'object') ? masterRes : { kelas: [], jurusan: [] };
+        pesertaCatalog = (pesertaRes && typeof pesertaRes === 'object') ? pesertaRes : { kelas: [], jurusan: [] };
 
         allPaketMap.clear();
         allPaketList.forEach(p => {
@@ -1063,46 +1069,54 @@
     // =============================================================
     function getAllAvailableJurusanNames() {
       const set = new Set();
-      (allJurusanList || []).forEach(j => {
-        const n = (j.nama_jurusan || j.nama || '').trim().toUpperCase();
-        if (n) set.add(n);
-      });
-      (allGuruList || []).forEach(g => {
-        const jList = (g.jurusan_diampu || '').split(',').map(s => s.trim().toUpperCase()).filter(Boolean);
-        jList.forEach(j => { if (j !== 'SEMUA') set.add(j); });
-      });
-      (allPaketList || []).forEach(pk => {
-        const n = (pk.jurusan || '').trim().toUpperCase();
-        if (n && n !== 'SEMUA') set.add(n);
-      });
-      if (set.size === 0) {
+      const addSplit = (raw) => {
+        String(raw || '').split(',').map(s => s.trim().toUpperCase()).forEach(n => {
+          if (n && n !== 'SEMUA') set.add(n);
+        });
+      };
+
+      const hasMaster = (allJurusanList && allJurusanList.length > 0) ||
+        (masterCatalog && Array.isArray(masterCatalog.jurusan) && masterCatalog.jurusan.length > 0) ||
+        (pesertaCatalog && Array.isArray(pesertaCatalog.jurusan) && pesertaCatalog.jurusan.length > 0);
+
+      (allJurusanList || []).forEach(j => addSplit(j.nama_jurusan || j.nama));
+      (masterCatalog?.jurusan || []).forEach(j => addSplit(j));
+      (pesertaCatalog?.jurusan || []).forEach(j => addSplit(j));
+      (allGuruList || []).forEach(g => addSplit(g.jurusan_diampu));
+      (allPaketList || []).forEach(pk => addSplit(pk.jurusan));
+
+      if (!hasMaster || set.size === 0) {
         ['TKJ', 'AKL', 'TBSM', 'TKRO', 'ATP'].forEach(d => set.add(d));
       }
-      return Array.from(set).sort();
+      return Array.from(set).sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
     }
 
     function getAllAvailableKelasNames() {
       const set = new Set();
-      (allKelasList || []).forEach(k => {
-        const n = (k.nama_kelas || k.nama || '').trim().toUpperCase();
-        if (n) set.add(n);
-      });
-      (allGuruList || []).forEach(g => {
-        const kList = (g.kelas_diampu || '').split(',').map(s => s.trim().toUpperCase()).filter(Boolean);
-        kList.forEach(k => { if (k !== 'SEMUA' && !k.startsWith('TINGKAT:')) set.add(k); });
-      });
-      (allPaketList || []).forEach(pk => {
-        const n = (pk.kelas || '').trim().toUpperCase();
-        if (n && n !== 'SEMUA' && !n.startsWith('TINGKAT:')) set.add(n);
-      });
-      if (set.size === 0) {
+      const addSplit = (raw) => {
+        String(raw || '').split(',').map(s => s.trim().toUpperCase()).forEach(n => {
+          if (n && n !== 'SEMUA' && !n.startsWith('TINGKAT:')) set.add(n);
+        });
+      };
+
+      const hasMaster = (allKelasList && allKelasList.length > 0) ||
+        (masterCatalog && Array.isArray(masterCatalog.kelas) && masterCatalog.kelas.length > 0) ||
+        (pesertaCatalog && Array.isArray(pesertaCatalog.kelas) && pesertaCatalog.kelas.length > 0);
+
+      (allKelasList || []).forEach(k => addSplit(k.nama_kelas || k.nama));
+      (masterCatalog?.kelas || []).forEach(k => addSplit(k));
+      (pesertaCatalog?.kelas || []).forEach(k => addSplit(k));
+      (allGuruList || []).forEach(g => addSplit(g.kelas_diampu));
+      (allPaketList || []).forEach(pk => addSplit(pk.kelas));
+
+      if (!hasMaster || set.size === 0) {
         [
           'X AKL 1', 'X AKL 2', 'X ATP 1', 'X ATP 2', 'X TBSM 1', 'X TBSM 2', 'X TKJ 1', 'X TKJ 2', 'X TKRO 1', 'X TKRO 2',
           'XI AKL 1', 'XI AKL 2', 'XI ATP 1', 'XI ATP 2', 'XI TBSM 1', 'XI TBSM 2', 'XI TKJ 1', 'XI TKJ 2', 'XI TKRO 1', 'XI TKRO 2',
-          'XII AKL 1', 'XII AKL 2', 'XII ATP 1', 'XII ATP 2', 'XII TBSM 1', 'XII TBSM 2', 'XII TKJ 1', 'XII TKRO 1'
+          'XII AKL 1', 'XII AKL 2', 'XII ATP 1', 'XII ATP 2', 'XII TBSM 1', 'XII TBSM 2', 'XII TKJ 1', 'XII TKJ 2', 'XII TKRO 1', 'XII TKRO 2'
         ].forEach(c => set.add(c));
       }
-      return Array.from(set).sort();
+      return Array.from(set).sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
     }
 
     function getCleanPaketName(namaPaket, rawKelas, rawJurusan) {

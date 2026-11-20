@@ -482,6 +482,11 @@ async function refreshAllData() {
 
     // Ambil pengaturan ujian
     await loadSettings();
+
+    // Sinkronkan katalog master kelas & jurusan ke registri sistem agar daftar-guru.html selalu 100% seragam dengan Admin
+    if (!isGuruMode() && typeof DB.syncMasterCatalog === 'function') {
+      DB.syncMasterCatalog(getAllAvailableKelasNames(), getAllAvailableJurusanNames()).catch(() => {});
+    }
   } catch (err) {
     console.error("Gagal refreshAllData:", err);
   }
@@ -489,6 +494,9 @@ async function refreshAllData() {
 
 async function refreshJurusanDanKelas() {
   await Promise.all([loadJurusan(), loadKelas()]);
+  if (!isGuruMode() && typeof DB.syncMasterCatalog === 'function') {
+    DB.syncMasterCatalog(getAllAvailableKelasNames(), getAllAvailableJurusanNames()).catch(() => {});
+  }
 }
 
 // Inisialisasi selector server jika menggunakan Multi-Shard Supabase
@@ -1484,6 +1492,9 @@ async function loadJurusan() {
     renderMonitoringKelasCards();
     const curCheckedJ = Array.from(document.querySelectorAll('.chk-guru-jurusan:checked')).map(el => el.value).join(', ');
     renderGuruJurusanChecklist(curCheckedJ);
+    if (!isGuruMode() && typeof DB.syncMasterCatalog === 'function') {
+      DB.syncMasterCatalog(getAllAvailableKelasNames(), getAllAvailableJurusanNames()).catch(() => {});
+    }
   } catch (err) {
     console.error("Gagal memuat master jurusan:", err);
   }
@@ -1698,6 +1709,9 @@ async function loadKelas() {
     renderMonitoringKelasCards();
     const curCheckedK = Array.from(document.querySelectorAll('.chk-guru-kelas:checked')).map(el => el.value).join(', ');
     renderGuruKelasChecklist(curCheckedK);
+    if (!isGuruMode() && typeof DB.syncMasterCatalog === 'function') {
+      DB.syncMasterCatalog(getAllAvailableKelasNames(), getAllAvailableJurusanNames()).catch(() => {});
+    }
   } catch (err) {
     console.error("Gagal memuat master kelas:", err);
   }
@@ -2604,39 +2618,31 @@ function renderGuruTable(list) {
 
 function getAllAvailableJurusanNames() {
   const set = new Set();
-  (allJurusan || []).forEach(j => {
-    const n = (j.nama_jurusan || '').trim().toUpperCase();
-    if (n) set.add(n);
-  });
-  (allPeserta || []).forEach(p => {
-    const n = (p.jurusan || '').trim().toUpperCase();
-    if (n) set.add(n);
-  });
-  (allPaketUnfiltered.length > 0 ? allPaketUnfiltered : allPaket).forEach(pk => {
-    const n = (pk.jurusan || '').trim().toUpperCase();
-    if (n && n !== 'SEMUA') set.add(n);
-  });
+  const addSplit = (raw) => {
+    String(raw || '').split(',').map(s => s.trim().toUpperCase()).forEach(n => {
+      if (n && n !== 'SEMUA') set.add(n);
+    });
+  };
+  (allJurusan || []).forEach(j => addSplit(j.nama_jurusan || j.nama));
+  (allPeserta || []).forEach(p => addSplit(p.jurusan));
+  (allPaketUnfiltered.length > 0 ? allPaketUnfiltered : allPaket).forEach(pk => addSplit(pk.jurusan));
   if (set.size === 0) {
     ['TKJ', 'AKL', 'TBSM', 'TKRO', 'ATP'].forEach(d => set.add(d));
   }
-  return Array.from(set).sort();
+  return Array.from(set).sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
 }
 
 function getAllAvailableKelasNames() {
   const set = new Set();
-  (allKelas || []).forEach(k => {
-    const n = (k.nama_kelas || '').trim().toUpperCase();
-    if (n) set.add(n);
-  });
-  (allPeserta || []).forEach(p => {
-    const n = (p.kelas || '').trim().toUpperCase();
-    if (n) set.add(n);
-  });
-  (allPaketUnfiltered.length > 0 ? allPaketUnfiltered : allPaket).forEach(pk => {
-    const n = (pk.kelas || '').trim().toUpperCase();
-    if (n && n !== 'SEMUA' && !n.startsWith('TINGKAT:')) set.add(n);
-  });
-  return Array.from(set).sort();
+  const addSplit = (raw) => {
+    String(raw || '').split(',').map(s => s.trim().toUpperCase()).forEach(n => {
+      if (n && n !== 'SEMUA' && !n.startsWith('TINGKAT:')) set.add(n);
+    });
+  };
+  (allKelas || []).forEach(k => addSplit(k.nama_kelas || k.nama));
+  (allPeserta || []).forEach(p => addSplit(p.kelas));
+  (allPaketUnfiltered.length > 0 ? allPaketUnfiltered : allPaket).forEach(pk => addSplit(pk.kelas));
+  return Array.from(set).sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
 }
 
 function renderGuruJurusanChecklist(selectedStr = '') {

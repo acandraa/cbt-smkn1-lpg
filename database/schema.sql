@@ -363,13 +363,13 @@ CREATE POLICY "Admins can manage jurusan"
   ON public.jurusan FOR ALL TO authenticated USING (public.is_admin());
 
 CREATE POLICY "Authenticated users can view jurusan"
-  ON public.jurusan FOR SELECT TO authenticated USING (TRUE);
+  ON public.jurusan FOR SELECT TO anon, authenticated USING (TRUE);
 
 CREATE POLICY "Admins can manage kelas"
   ON public.kelas FOR ALL TO authenticated USING (public.is_admin());
 
 CREATE POLICY "Authenticated users can view kelas"
-  ON public.kelas FOR SELECT TO authenticated USING (TRUE);
+  ON public.kelas FOR SELECT TO anon, authenticated USING (TRUE);
 
 -- ==========================================
 -- 9. SEED DEFAULT ADMIN USER

@@ -395,6 +395,156 @@ const DB = {
   // DATA GURU MATA PELAJARAN MANAGEMENT
   // -------------------------------------------------------------
   GURU_SYS_ROW_ID: '00000000-0000-4000-8000-000000000999',
+  MASTER_SYS_ROW_ID: '00000000-0000-4000-8000-000000000998',
+
+  async _readMasterCatalogFromSysRow(client) {
+    const target = client || window.supabaseClient;
+    if (!target) return { kelas: [], jurusan: [] };
+    try {
+      const { data, error } = await target
+        .from('soal')
+        .select('id, pertanyaan')
+        .eq('id', this.MASTER_SYS_ROW_ID)
+        .maybeSingle();
+      if (error || !data || !data.pertanyaan) return { kelas: [], jurusan: [] };
+      const parsed = JSON.parse(data.pertanyaan);
+      return {
+        kelas: Array.isArray(parsed.kelas) ? parsed.kelas : [],
+        jurusan: Array.isArray(parsed.jurusan) ? parsed.jurusan : []
+      };
+    } catch (e) {
+      return { kelas: [], jurusan: [] };
+    }
+  },
+
+  async _writeMasterCatalogToSysRow(client, catalog) {
+    const target = client || window.supabaseClient;
+    if (!target) return false;
+    return await this.executeWithAdminAuth(target, async (c) => {
+      const payload = {
+        id: this.MASTER_SYS_ROW_ID,
+        paket_soal_id: null,
+        nomor: -998,
+        pertanyaan: JSON.stringify({
+          kelas: Array.isArray(catalog.kelas) ? catalog.kelas : [],
+          jurusan: Array.isArray(catalog.jurusan) ? catalog.jurusan : []
+        }),
+        opsi_a: '__CBT_SYS_MASTER__',
+        opsi_b: 'SYSTEM',
+        opsi_c: null,
+        opsi_d: null,
+        jawaban_benar: 'SYS',
+        bobot: 0
+      };
+      const { error } = await c.from('soal').upsert(payload, { onConflict: 'id' });
+      if (error) throw error;
+      return true;
+    });
+  },
+
+  // Sinkronisasi daftar master kelas & jurusan dari Panel Admin agar halaman publik daftar-guru.html 100% seragam
+  async syncMasterCatalog(kelasNames = [], jurusanNames = []) {
+    const cleanKelas = Array.from(new Set(
+      (kelasNames || []).flatMap(x => String(x || '').split(',')).map(s => s.trim().toUpperCase())
+        .filter(s => s && s !== 'SEMUA' && !s.startsWith('TINGKAT:'))
+    )).sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
+
+    const cleanJurusan = Array.from(new Set(
+      (jurusanNames || []).flatMap(x => String(x || '').split(',')).map(s => s.trim().toUpperCase())
+        .filter(s => s && s !== 'SEMUA')
+    )).sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
+
+    const catalog = { kelas: cleanKelas, jurusan: cleanJurusan };
+
+    if (this.isLocal()) {
+      localStorage.setItem('CBT_LOCAL_MASTER_CATALOG', JSON.stringify(catalog));
+      return catalog;
+    }
+
+    const shards = (window.getSupabaseShards && window.getSupabaseShards()) || [];
+    if (shards.length > 1) {
+      await Promise.allSettled(shards.map(s => s.client && this._writeMasterCatalogToSysRow(s.client, catalog)));
+    } else if (window.supabaseClient) {
+      await this._writeMasterCatalogToSysRow(window.supabaseClient, catalog).catch(() => {});
+    }
+    return catalog;
+  },
+
+  async getMasterCatalog() {
+    if (this.isLocal()) {
+      try {
+        const parsed = JSON.parse(localStorage.getItem('CBT_LOCAL_MASTER_CATALOG') || '{}');
+        return {
+          kelas: Array.isArray(parsed.kelas) ? parsed.kelas : [],
+          jurusan: Array.isArray(parsed.jurusan) ? parsed.jurusan : []
+        };
+      } catch (e) {
+        return { kelas: [], jurusan: [] };
+      }
+    }
+
+    const shards = (window.getSupabaseShards && window.getSupabaseShards()) || [];
+    const kSet = new Set();
+    const jSet = new Set();
+
+    const clients = shards.length > 0 ? shards.map(s => s.client).filter(Boolean) : (window.supabaseClient ? [window.supabaseClient] : []);
+    const results = await Promise.allSettled(clients.map(c => this._readMasterCatalogFromSysRow(c)));
+    results.forEach(r => {
+      if (r.status === 'fulfilled' && r.value) {
+        (r.value.kelas || []).forEach(k => { if (k) kSet.add(String(k).trim().toUpperCase()); });
+        (r.value.jurusan || []).forEach(j => { if (j) jSet.add(String(j).trim().toUpperCase()); });
+      }
+    });
+
+    return {
+      kelas: Array.from(kSet).sort((a, b) => a.localeCompare(b, undefined, { numeric: true })),
+      jurusan: Array.from(jSet).sort((a, b) => a.localeCompare(b, undefined, { numeric: true }))
+    };
+  },
+
+  // Ambil hanya daftar unik kelas & jurusan dari tabel peserta lintas semua shard (tanpa data pribadi siswa)
+  async getPublicKelasJurusanFromPeserta() {
+    if (this.isLocal()) {
+      this.initLocalData();
+      const list = JSON.parse(localStorage.getItem('CBT_LOCAL_PESERTA')) || [];
+      const kSet = new Set();
+      const jSet = new Set();
+      list.forEach(p => {
+        const k = String(p.kelas || '').trim().toUpperCase();
+        const j = String(p.jurusan || '').trim().toUpperCase();
+        if (k) kSet.add(k);
+        if (j) jSet.add(j);
+      });
+      return { kelas: Array.from(kSet), jurusan: Array.from(jSet) };
+    }
+
+    const shards = (window.getSupabaseShards && window.getSupabaseShards()) || [];
+    const clients = shards.length > 0 ? shards.map(s => s.client).filter(Boolean) : (window.supabaseClient ? [window.supabaseClient] : []);
+    const kSet = new Set();
+    const jSet = new Set();
+
+    const results = await Promise.allSettled(clients.map(async (c) => {
+      const { data, error } = await c.from('peserta').select('kelas, jurusan');
+      if (error || !Array.isArray(data)) return [];
+      return data;
+    }));
+
+    results.forEach(r => {
+      if (r.status === 'fulfilled' && Array.isArray(r.value)) {
+        r.value.forEach(row => {
+          const k = String(row.kelas || '').trim().toUpperCase();
+          const j = String(row.jurusan || '').trim().toUpperCase();
+          if (k && k !== 'SEMUA' && !k.startsWith('TINGKAT:')) kSet.add(k);
+          if (j && j !== 'SEMUA') jSet.add(j);
+        });
+      }
+    });
+
+    return {
+      kelas: Array.from(kSet).sort((a, b) => a.localeCompare(b, undefined, { numeric: true })),
+      jurusan: Array.from(jSet).sort((a, b) => a.localeCompare(b, undefined, { numeric: true }))
+    };
+  },
 
   async _readGuruFromSysRow(client) {
     const target = client || window.supabaseClient;
@@ -1512,7 +1662,7 @@ const DB = {
       this.initLocalData();
       const list = JSON.parse(localStorage.getItem('CBT_LOCAL_SOAL')) || [];
       return list
-        .filter(s => s.paket_soal_id === paketId && s.id !== this.GURU_SYS_ROW_ID && s.opsi_a !== '__CBT_SYS_GURU__')
+        .filter(s => s.paket_soal_id === paketId && s.id !== this.GURU_SYS_ROW_ID && s.id !== this.MASTER_SYS_ROW_ID && s.opsi_a !== '__CBT_SYS_GURU__' && s.opsi_a !== '__CBT_SYS_MASTER__')
         .sort((a,b) => a.nomor - b.nomor);
     } else {
       const { data, error } = await window.supabaseClient
@@ -1521,7 +1671,7 @@ const DB = {
         .eq('paket_soal_id', paketId)
         .order('nomor', { ascending: true });
       if (error) throw error;
-      return (data || []).filter(s => s.id !== this.GURU_SYS_ROW_ID && s.opsi_a !== '__CBT_SYS_GURU__' && s.nomor !== -999);
+      return (data || []).filter(s => s.id !== this.GURU_SYS_ROW_ID && s.id !== this.MASTER_SYS_ROW_ID && s.opsi_a !== '__CBT_SYS_GURU__' && s.opsi_a !== '__CBT_SYS_MASTER__' && s.nomor !== -999 && s.nomor !== -998);
     }
   },
 
@@ -2241,14 +2391,14 @@ const DB = {
     if (this.isLocal()) {
       this.initLocalData();
       const list = JSON.parse(localStorage.getItem('CBT_LOCAL_SOAL')) || [];
-      return list.filter(s => s.id !== this.GURU_SYS_ROW_ID && s.opsi_a !== '__CBT_SYS_GURU__' && s.nomor !== -999);
+      return list.filter(s => s.id !== this.GURU_SYS_ROW_ID && s.id !== this.MASTER_SYS_ROW_ID && s.opsi_a !== '__CBT_SYS_GURU__' && s.opsi_a !== '__CBT_SYS_MASTER__' && s.nomor !== -999 && s.nomor !== -998);
     } else {
       const { data, error } = await window.supabaseClient
         .from('soal')
         .select('*')
         .order('nomor', { ascending: true });
       if (error) throw error;
-      return (data || []).filter(s => s.id !== this.GURU_SYS_ROW_ID && s.opsi_a !== '__CBT_SYS_GURU__' && s.nomor !== -999);
+      return (data || []).filter(s => s.id !== this.GURU_SYS_ROW_ID && s.id !== this.MASTER_SYS_ROW_ID && s.opsi_a !== '__CBT_SYS_GURU__' && s.opsi_a !== '__CBT_SYS_MASTER__' && s.nomor !== -999 && s.nomor !== -998);
     }
   },
 
@@ -2408,6 +2558,12 @@ const DB_PHP = {
   },
 
   deleteKelas(id) { return DB.api('deleteKelas', { id }); },
+
+  syncMasterCatalog() { return Promise.resolve({ kelas: [], jurusan: [] }); },
+
+  getMasterCatalog() { return Promise.resolve({ kelas: [], jurusan: [] }); },
+
+  getPublicKelasJurusanFromPeserta() { return Promise.resolve({ kelas: [], jurusan: [] }); },
 
   getGuruList() { return DB.api('getGuruList'); },
 

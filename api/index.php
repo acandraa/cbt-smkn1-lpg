@@ -470,7 +470,6 @@ try {
 
         // ---------------- DATA GURU ----------------
         case 'getGuruList': {
-            requireAdmin();
             ensureGuruTable();
             $rows = fetchAll('SELECT id, username, nama_lengkap, mapel_diampu, jurusan_diampu, kelas_diampu, paket_ids, penugasan_mapel, created_at FROM guru ORDER BY nama_lengkap ASC');
             $out = array_map(function ($r) {
@@ -721,7 +720,6 @@ try {
 
         // ---------------- JURUSAN ----------------
         case 'getJurusanList': {
-            requireAnyLogin();
             db()->exec("CREATE TABLE IF NOT EXISTS jurusan (
                 id CHAR(36) NOT NULL PRIMARY KEY,
                 nama_jurusan VARCHAR(100) NOT NULL UNIQUE,
@@ -775,7 +773,6 @@ try {
 
         // ---------------- KELAS ----------------
         case 'getKelasList': {
-            requireAnyLogin();
             db()->exec("CREATE TABLE IF NOT EXISTS kelas (
                 id CHAR(36) NOT NULL PRIMARY KEY,
                 nama_kelas VARCHAR(50) NOT NULL UNIQUE,
@@ -859,7 +856,6 @@ try {
 
         // ---------------- PAKET SOAL ----------------
         case 'getPaketList': {
-            requireAnyLogin();
             // Pastikan kolom kelas ada di tabel paket_soal
             try { db()->query("SELECT kelas FROM paket_soal LIMIT 1"); }
             catch (Throwable $e) { db()->exec("ALTER TABLE paket_soal ADD COLUMN kelas VARCHAR(50) DEFAULT NULL AFTER jurusan"); }

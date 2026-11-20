@@ -101,6 +101,7 @@
   // -------------------------------------------------------------
   const validShards = [];
   const isAdminPage = /(admin|login-admin)\.html/i.test(window.location.pathname || '');
+  const isPublicMultiShardPage = /daftar-guru\.html/i.test(window.location.pathname || '');
   const SHARD_ID_KEY = isAdminPage ? 'CBT_ADMIN_ACTIVE_SHARD_ID' : 'CBT_PESERTA_ACTIVE_SHARD_ID';
   const SHARD_NAME_KEY = isAdminPage ? 'CBT_ADMIN_ACTIVE_SHARD_NAME' : 'CBT_PESERTA_ACTIVE_SHARD_NAME';
 
@@ -163,8 +164,11 @@
 
   // Helper: Cek apakah sedang dalam Mode Gabungan (Unified All Servers)
   window.isUnifiedSupabaseMode = function () {
-    if (!isAdminPage) return false;
     if (!window.CBT_CONFIG || window.CBT_CONFIG.backend !== 'supabase') return false;
+    if (isPublicMultiShardPage) {
+      return Boolean(window.CBT_VALID_SHARDS && window.CBT_VALID_SHARDS.length > 1);
+    }
+    if (!isAdminPage) return false;
     const activeId = sessionStorage.getItem(SHARD_ID_KEY);
     return (activeId === 'all' || !activeId) && (window.CBT_VALID_SHARDS && window.CBT_VALID_SHARDS.length > 1);
   };
