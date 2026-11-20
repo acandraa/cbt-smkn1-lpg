@@ -75,9 +75,9 @@ CREATE TABLE public.peserta (
 -- 3. Table for Paket Soal (Question Groups)
 CREATE TABLE public.paket_soal (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  nama_paket VARCHAR(150) NOT NULL,
-  jurusan VARCHAR(50),
-  kelas VARCHAR(50),
+  nama_paket TEXT NOT NULL,
+  jurusan TEXT,
+  kelas TEXT,
   jadwal_mulai TIMESTAMP WITH TIME ZONE,
   jadwal_selesai TIMESTAMP WITH TIME ZONE,
   created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()

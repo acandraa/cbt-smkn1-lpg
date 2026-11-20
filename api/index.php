@@ -935,7 +935,8 @@ try {
         case 'getPaketList': {
             // Pastikan kolom kelas ada di tabel paket_soal
             try { db()->query("SELECT kelas FROM paket_soal LIMIT 1"); }
-            catch (Throwable $e) { db()->exec("ALTER TABLE paket_soal ADD COLUMN kelas VARCHAR(50) DEFAULT NULL AFTER jurusan"); }
+            catch (Throwable $e) { db()->exec("ALTER TABLE paket_soal ADD COLUMN kelas TEXT DEFAULT NULL AFTER jurusan"); }
+            try { db()->exec("ALTER TABLE paket_soal MODIFY COLUMN kelas TEXT DEFAULT NULL, MODIFY COLUMN jurusan TEXT DEFAULT NULL"); } catch (Throwable $e) {}
             $rows = fetchAll(
                 'SELECT p.*, (SELECT COUNT(*) FROM soal s WHERE s.paket_soal_id = p.id) AS total_soal
                  FROM paket_soal p
@@ -955,7 +956,8 @@ try {
                 requireAdminOrGuru();
             }
             try { db()->query("SELECT kelas FROM paket_soal LIMIT 1"); }
-            catch (Throwable $e) { db()->exec("ALTER TABLE paket_soal ADD COLUMN kelas VARCHAR(50) DEFAULT NULL AFTER jurusan"); }
+            catch (Throwable $e) { db()->exec("ALTER TABLE paket_soal ADD COLUMN kelas TEXT DEFAULT NULL AFTER jurusan"); }
+            try { db()->exec("ALTER TABLE paket_soal MODIFY COLUMN kelas TEXT DEFAULT NULL, MODIFY COLUMN jurusan TEXT DEFAULT NULL"); } catch (Throwable $e) {}
 
             $id = (string)($req['id'] ?? '');
             $p = $req['payload'] ?? [];

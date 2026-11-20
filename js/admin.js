@@ -2606,6 +2606,188 @@ function exportPesertaData() {
   ExcelHelpers.exportJSONToExcel(allPeserta, map, "Daftar_Peserta_CBT_PPDB", "Peserta");
 }
 
+function exportGuruData() {
+  if (!allGuru || allGuru.length === 0) {
+    Swal.fire('Ekspor Kosong', 'Tidak ada data guru mata pelajaran untuk diekspor.', 'warning');
+    return;
+  }
+
+  const sourcePakets = (allPaketUnfiltered && allPaketUnfiltered.length > 0) ? allPaketUnfiltered : (allPaket || []);
+  const paketMap = new Map();
+  sourcePakets.forEach(pk => paketMap.set(String(pk.id), pk));
+
+  const formatKelasReadable = (raw) => {
+    if (!raw || String(raw).trim().toUpperCase() === 'SEMUA') return 'Semua Kelas';
+    return String(raw)
+      .split(',')
+      .map(s => {
+        const clean = s.trim();
+        if (!clean) return '';
+        return clean.toUpperCase().startsWith('TINGKAT:') ? `Tingkat ${clean.split(':')[1]}` : clean;
+      })
+      .filter(Boolean)
+      .join(', ') || 'Semua Kelas';
+  };
+
+  const formatJurusanReadable = (raw) => {
+    if (!raw || String(raw).trim().toUpperCase() === 'SEMUA') return 'Semua Jurusan';
+    return String(raw).split(',').map(s => s.trim()).filter(Boolean).join(', ') || 'Semua Jurusan';
+  };
+
+  // Sheet 1: Rekap Guru (1 baris per guru + progres jumlah paket & total soal)
+  const rekapHeaders = [
+    'No',
+    'Username',
+    'Nama Lengkap Guru',
+    'Mata Pelajaran Diampu',
+    'Tingkat / Kelas Diampu',
+    'Jurusan Diampu',
+    'Paket Soal Terkait',
+    'Jumlah Paket',
+    'Total Butir Soal',
+    'Status Input Soal'
+  ];
+  const rekapRows = [rekapHeaders];
+
+  // Sheet 2: Rincian Penugasan Mapel (1 baris per mapel per guru)
+  const rincianHeaders = [
+    'No',
+    'Username',
+    'Nama Lengkap Guru',
+    'Mata Pelajaran',
+    'Tingkat / Kelas',
+    'Jurusan'
+  ];
+  const rincianRows = [rincianHeaders];
+  let rincianNo = 1;
+
+  allGuru.forEach((g, idx) => {
+    let penugasanList = [];
+    if (Array.isArray(g.penugasan_mapel)) {
+      penugasanList = g.penugasan_mapel;
+    } else if (typeof g.penugasan_mapel === 'string' && g.penugasan_mapel.trim()) {
+      try {
+        const parsed = JSON.parse(g.penugasan_mapel);
+        if (Array.isArray(parsed)) penugasanList = parsed;
+      } catch (e) {}
+    }
+
+    let paketIds = [];
+    if (Array.isArray(g.paket_ids)) {
+      paketIds = g.paket_ids;
+    } else if (typeof g.paket_ids === 'string' && g.paket_ids.trim()) {
+      try {
+        const parsed = JSON.parse(g.paket_ids);
+        if (Array.isArray(parsed)) paketIds = parsed;
+      } catch (e) {}
+    }
+
+    let totalSoalGuru = 0;
+    const paketSummaries = [];
+    paketIds.forEach(pid => {
+      const pk = paketMap.get(String(pid));
+      if (pk) {
+        const sc = Number(pk.total_soal !== undefined ? pk.total_soal : (pk.soal_count || 0)) || 0;
+        totalSoalGuru += sc;
+        const cleanName = getCleanPaketName(pk.nama_paket, pk.kelas, pk.jurusan);
+        paketSummaries.push(`${cleanName} (${sc} Soal)`);
+      }
+    });
+
+    let mapelSummary = '';
+    let kelasSummary = '';
+    let jurusanSummary = '';
+    if (penugasanList.length > 0) {
+      mapelSummary = Array.from(new Set(penugasanList.map(x => (x.mapel || '').trim()).filter(Boolean))).join(', ');
+      kelasSummary = Array.from(new Set(penugasanList.map(x => formatKelasReadable(x.tingkat)))).join(' | ');
+      jurusanSummary = Array.from(new Set(penugasanList.map(x => formatJurusanReadable(x.jurusan)))).join(' | ');
+
+      penugasanList.forEach(item => {
+        rincianRows.push([
+          rincianNo++,
+          String(g.username || ''),
+          String(g.nama_lengkap || ''),
+          String(item.mapel || '-'),
+          formatKelasReadable(item.tingkat),
+          formatJurusanReadable(item.jurusan)
+        ]);
+      });
+    } else {
+      mapelSummary = String(g.mapel_diampu || '').trim() || 'Belum diatur';
+      kelasSummary = g.mapel_diampu ? formatKelasReadable(g.kelas_diampu) : '-';
+      jurusanSummary = g.mapel_diampu ? formatJurusanReadable(g.jurusan_diampu) : '-';
+
+      rincianRows.push([
+        rincianNo++,
+        String(g.username || ''),
+        String(g.nama_lengkap || ''),
+        mapelSummary,
+        kelasSummary,
+        jurusanSummary
+      ]);
+    }
+
+    let statusSoal = 'Belum Atur Mapel';
+    if (paketSummaries.length > 0 || penugasanList.length > 0 || g.mapel_diampu) {
+      statusSoal = totalSoalGuru > 0 ? 'Sudah Ada Soal' : 'Masih Kosong (0 Soal)';
+    }
+
+    rekapRows.push([
+      idx + 1,
+      String(g.username || ''),
+      String(g.nama_lengkap || ''),
+      mapelSummary,
+      kelasSummary,
+      jurusanSummary,
+      paketSummaries.length > 0 ? paketSummaries.join('; ') : '-',
+      paketSummaries.length,
+      totalSoalGuru,
+      statusSoal
+    ]);
+  });
+
+  const wb = XLSX.utils.book_new();
+
+  const wsRekap = XLSX.utils.aoa_to_sheet(rekapRows);
+  wsRekap['!cols'] = [
+    { wch: 5 },  // No
+    { wch: 18 }, // Username
+    { wch: 30 }, // Nama Lengkap Guru
+    { wch: 28 }, // Mata Pelajaran
+    { wch: 28 }, // Tingkat / Kelas
+    { wch: 22 }, // Jurusan
+    { wch: 42 }, // Paket Soal Terkait
+    { wch: 13 }, // Jumlah Paket
+    { wch: 16 }, // Total Butir Soal
+    { wch: 22 }  // Status Input Soal
+  ];
+  // Format kolom Username sebagai Text agar angka 0 di depan tidak terpotong
+  for (let r = 2; r <= rekapRows.length; r++) {
+    const ref = `B${r}`;
+    if (wsRekap[ref]) { wsRekap[ref].t = 's'; wsRekap[ref].z = '@'; }
+  }
+  XLSX.utils.book_append_sheet(wb, wsRekap, 'Rekap Guru');
+
+  const wsRincian = XLSX.utils.aoa_to_sheet(rincianRows);
+  wsRincian['!cols'] = [
+    { wch: 5 },  // No
+    { wch: 18 }, // Username
+    { wch: 30 }, // Nama Lengkap Guru
+    { wch: 28 }, // Mata Pelajaran
+    { wch: 28 }, // Tingkat / Kelas
+    { wch: 22 }  // Jurusan
+  ];
+  for (let r = 2; r <= rincianRows.length; r++) {
+    const ref = `B${r}`;
+    if (wsRincian[ref]) { wsRincian[ref].t = 's'; wsRincian[ref].z = '@'; }
+  }
+  XLSX.utils.book_append_sheet(wb, wsRincian, 'Rincian Mapel');
+
+  const d = new Date();
+  const dateStr = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+  XLSX.writeFile(wb, `Data_Guru_Mapel_CBT_${dateStr}.xlsx`);
+}
+
 // -------------------------------------------------------------
 // CRUD: DATA GURU MATA PELAJARAN
 // -------------------------------------------------------------
@@ -7118,6 +7300,7 @@ async function saveAiGeneratedSoalToBank() {
 window.switchTab = switchTab;
 window.loadDashboardStats = loadDashboardStats;
 window.exportPesertaData = exportPesertaData;
+window.exportGuruData = exportGuruData;
 window.exportSoalData = exportSoalData;
 window.exportHasilUjian = exportHasilUjian;
 window.openPesertaForm = openPesertaForm;

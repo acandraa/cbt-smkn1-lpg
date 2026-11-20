@@ -1702,6 +1702,31 @@ const DB = {
     }
   },
 
+  _compactPaketForVarchar50(payload) {
+    const out = { ...payload };
+    const compactCsv = (val, maxLen, isKelas) => {
+      if (!val || typeof val !== 'string' || val.length <= maxLen) return val;
+      const parts = val.split(',').map(s => s.trim()).filter(Boolean);
+      if (isKelas && parts.length > 1) {
+        const firstT = parts[0].split(/[\s\-_]+/)[0].toUpperCase();
+        if (['X', 'XI', 'XII', '10', '11', '12'].includes(firstT) && parts.every(k => k.split(/[\s\-_]+/)[0].toUpperCase() === firstT)) {
+          return `TINGKAT:${firstT}`;
+        }
+      }
+      let acc = '';
+      for (const p of parts) {
+        const next = acc ? `${acc}, ${p}` : p;
+        if (next.length > maxLen) break;
+        acc = next;
+      }
+      return acc || val.slice(0, maxLen);
+    };
+    if (out.kelas) out.kelas = compactCsv(out.kelas, 50, true);
+    if (out.jurusan) out.jurusan = compactCsv(out.jurusan, 50, false);
+    if (out.nama_paket && out.nama_paket.length > 150) out.nama_paket = out.nama_paket.slice(0, 150);
+    return out;
+  },
+
   async savePaket(id, payload) {
     if (this.isLocal()) {
       const list = JSON.parse(localStorage.getItem('CBT_LOCAL_PAKET')) || [];
@@ -1717,21 +1742,39 @@ const DB = {
       return payload;
     } else {
       const shards = (window.getSupabaseShards && window.getSupabaseShards()) || [];
+      const runUpsert = async (c, isUpdate, targetId, dataObj) => {
+        try {
+          if (isUpdate) {
+            const { error } = await c.from('paket_soal').update(dataObj).eq('id', targetId);
+            if (error) throw error;
+          } else {
+            const { error } = await c.from('paket_soal').insert(dataObj);
+            if (error) throw error;
+          }
+          return true;
+        } catch (err) {
+          const msg = String(err && (err.message || err.details || '')).toLowerCase();
+          if ((err && err.code === '22001') || msg.includes('value too long for type character varying')) {
+            const compactObj = this._compactPaketForVarchar50(dataObj);
+            if (isUpdate) {
+              const { error: e2 } = await c.from('paket_soal').update(compactObj).eq('id', targetId);
+              if (e2) throw e2;
+            } else {
+              const { error: e2 } = await c.from('paket_soal').insert(compactObj);
+              if (e2) throw e2;
+            }
+            return true;
+          }
+          throw err;
+        }
+      };
+
       if (shards.length > 1) {
         const insertPayload = id ? payload : { ...payload, id: payload.id || this.uuidv4() };
         // Broadcast ke semua server Supabase agar paket soal selalu seragam dengan ID yang sama
         const results = await Promise.allSettled(shards.map(async (shard) => {
           if (!shard.client) return null;
-          return await this.executeWithAdminAuth(shard.client, async (c) => {
-            if (id) {
-              const { error } = await c.from('paket_soal').update(payload).eq('id', id);
-              if (error) throw error;
-            } else {
-              const { error } = await c.from('paket_soal').insert(insertPayload);
-              if (error) throw error;
-            }
-            return true;
-          });
+          return await this.executeWithAdminAuth(shard.client, (c) => runUpsert(c, Boolean(id), id, insertPayload));
         }));
         const anySuccess = results.some(r => r.status === 'fulfilled' && r.value);
         if (!anySuccess) {
@@ -1740,19 +1783,10 @@ const DB = {
         }
         return insertPayload;
       }
-      if (id) {
-        return await this.executeWithAdminAuth(window.supabaseClient, async (c) => {
-          const { error } = await c.from('paket_soal').update(payload).eq('id', id);
-          if (error) throw error;
-          return payload;
-        });
-      } else {
-        return await this.executeWithAdminAuth(window.supabaseClient, async (c) => {
-          const { error } = await c.from('paket_soal').insert(payload);
-          if (error) throw error;
-          return payload;
-        });
-      }
+      return await this.executeWithAdminAuth(window.supabaseClient, async (c) => {
+        await runUpsert(c, Boolean(id), id, payload);
+        return payload;
+      });
     }
   },
 
