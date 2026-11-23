@@ -2717,8 +2717,12 @@ async function exportGuruData() {
 
     let totalSoalGuru = 0;
     const paketSummaries = [];
+    const seenPids = new Set();
     paketIds.forEach(pid => {
-      const pk = paketMap.get(String(pid));
+      const sId = String(pid).trim();
+      if (!sId || seenPids.has(sId)) return;
+      seenPids.add(sId);
+      const pk = paketMap.get(sId);
       if (pk) {
         const sc = Number(pk.total_soal !== undefined ? pk.total_soal : (pk.soal_count || 0)) || 0;
         totalSoalGuru += sc;
@@ -2897,20 +2901,53 @@ function renderGuruTable(list) {
     }
 
     // 2. Tampilkan paket soal terkait
-    let paketIds = [];
+    let rawPaketIds = [];
     if (Array.isArray(g.paket_ids)) {
-      paketIds = g.paket_ids;
+      rawPaketIds = g.paket_ids;
     } else if (typeof g.paket_ids === 'string' && g.paket_ids.trim()) {
       try {
         const parsed = JSON.parse(g.paket_ids);
-        if (Array.isArray(parsed)) paketIds = parsed;
+        if (Array.isArray(parsed)) rawPaketIds = parsed;
       } catch (e) {}
     }
 
-    const paketBadges = paketIds.length > 0
-      ? paketIds.map(pid => {
+    const validPaketIds = [];
+    const seenIds = new Set();
+    let hasDeadOrDuplicateIds = false;
+
+    rawPaketIds.forEach(pid => {
+      const sId = String(pid).trim();
+      if (!sId) return;
+      if (seenIds.has(sId)) {
+        hasDeadOrDuplicateIds = true;
+        return;
+      }
+      seenIds.add(sId);
+      if (paketLookup.has(sId)) {
+        validPaketIds.push(sId);
+      } else {
+        hasDeadOrDuplicateIds = true;
+      }
+    });
+
+    if (hasDeadOrDuplicateIds && g.id) {
+      g.paket_ids = validPaketIds;
+      DB.saveGuru(g.id, {
+        username: g.username,
+        nama_lengkap: g.nama_lengkap,
+        mapel_diampu: g.mapel_diampu || '',
+        jurusan_diampu: g.jurusan_diampu || '',
+        kelas_diampu: g.kelas_diampu || '',
+        paket_ids: validPaketIds,
+        penugasan_mapel: penugasanList
+      }).catch(err => console.warn('Self-heal paket_ids admin gagal:', err));
+    }
+
+    const paketBadges = validPaketIds.length > 0
+      ? validPaketIds.map(pid => {
           const pkObj = paketLookup.get(String(pid));
-          const pName = pkObj ? pkObj.nama_paket : 'Paket Terkait';
+          if (!pkObj) return '';
+          const pName = pkObj.nama_paket || 'Paket Soal';
           return `
             <span class="badge bg-primary-subtle text-primary border border-primary-subtle me-1 mb-1 d-inline-flex align-items-center gap-1" style="font-size: 0.72rem;">
               <i class="bi bi-journal-check"></i>
@@ -2920,7 +2957,7 @@ function renderGuruTable(list) {
                 title="Hapus paket soal ini"></button>
             </span>
           `;
-        }).join('')
+        }).filter(Boolean).join('')
       : `<span class="text-muted small"><i class="bi bi-magic me-1"></i>Otomatis</span>`;
 
     return `
