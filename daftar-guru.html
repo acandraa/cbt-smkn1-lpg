@@ -156,6 +156,9 @@
         </div>
       </div>
 
+      <!-- Banner Deteksi Tabrakan Mapel & Rombel Antar Guru -->
+      <div id="daftar-guru-conflict-banner" class="mb-4 d-none"></div>
+
       <!-- Table Container -->
       <div class="table-responsive border rounded-3 bg-white">
         <table class="table table-hover align-middle mb-0" id="table-guru-rekap">
@@ -333,9 +336,9 @@
   <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   
-  <script src="js/config.js?v=73"></script>
-  <script src="js/supabase-config.js?v=73"></script>
-  <script src="js/db-adapter.js?v=73"></script>
+  <script src="js/config.js?v=74"></script>
+  <script src="js/supabase-config.js?v=74"></script>
+  <script src="js/db-adapter.js?v=74"></script>
 
   <script>
     let allGuruList = [];
@@ -423,7 +426,26 @@
 
       if (emptyState) emptyState.classList.add('d-none');
 
+      // Evaluasi tabrakan pembagian kelas global antar seluruh guru
+      const { conflictsByGuruId, allCollisions } = findAllGuruAssignmentConflicts(allGuruList, allPaketList);
+      renderConflictSummaryBanner('daftar-guru-conflict-banner', allCollisions);
+
       const rows = list.map((g, idx) => {
+        // Cek apakah akun guru ini terlibat dalam tabrakan kelas
+        const myConflicts = conflictsByGuruId.get(String(g.id)) || [];
+        let conflictBadgeHtml = '';
+        if (myConflicts.length > 0) {
+          const cTexts = myConflicts.map(c => `• Mapel <strong>${escapeHtml(c.mapel)}</strong> (${escapeHtml(c.overlapText)}) ganda dg <strong>${escapeHtml(c.otherGuruName)}</strong>`).join('<br>');
+          conflictBadgeHtml = `
+            <div class="alert alert-danger py-1 px-2 mt-2 mb-0 small rounded-2 border-danger d-flex align-items-start gap-1 shadow-sm" style="font-size: 0.72rem; line-height: 1.35;">
+              <i class="bi bi-exclamation-triangle-fill text-danger flex-shrink-0 mt-1"></i>
+              <div>
+                <strong class="text-danger d-block">Tabrakan Kelas:</strong>
+                ${cTexts}
+              </div>
+            </div>
+          `;
+        }
         // 1. Tugas Mengajar (Penugasan Mapel)
         let penugasanList = [];
         if (Array.isArray(g.penugasan_mapel)) {
@@ -526,7 +548,7 @@
           : `<span class="badge bg-light text-muted border" style="font-size: 0.72rem;"><i class="bi bi-magic me-1"></i>Otomatis</span>`;
 
         // 3. Tombol Aksi (+ Tambah Mapel & Login Guru)
-        const loginUrl = `login-admin.html?v=73&role=guru&username=${encodeURIComponent(g.username || '')}`;
+        const loginUrl = `login-admin.html?v=74&role=guru&username=${encodeURIComponent(g.username || '')}`;
 
         return `
           <tr>
@@ -539,7 +561,7 @@
                 <i class="bi bi-person me-1"></i>${escapeHtml(g.username || '-')}
               </span>
             </td>
-            <td>${mapelHtml}</td>
+            <td>${mapelHtml}${conflictBadgeHtml}</td>
             <td>${paketBadges}</td>
             <td class="text-center">
               <div class="d-flex align-items-center justify-content-center gap-1 flex-wrap">
@@ -1066,24 +1088,32 @@
         penugasanList.push({ mapel, tingkat, jurusan });
       });
 
-      // Cek Warning Tabrakan Mapel & Kelas dengan Guru Lain sebelum menyimpan
+      // Cek Validasi Tabrakan Mapel & Kelas dengan Guru Lain sebelum menyimpan (STRICT BLOCK)
       const conflicts = detectMapelKelasConflicts(g.id, penugasanList, allGuruList, allPaketList);
       if (conflicts.length > 0) {
         const listHtml = conflicts.slice(0, 8).map(c =>
-          `<li class="mb-1">Mapel <strong>${escapeHtml(c.mapel)}</strong> pada kelas <span class="badge bg-warning text-dark">${escapeHtml(c.overlapText)}</span> sudah dibuat paket soalnya oleh <strong>${escapeHtml(c.otherGuruName)}</strong></li>`
+          `<li class="mb-1 text-danger">Mata Pelajaran <strong>${escapeHtml(c.mapel)}</strong> pada kelas <span class="badge bg-danger text-white">${escapeHtml(c.overlapText)}</span> sudah diampu oleh <strong>${escapeHtml(c.otherGuruName)}</strong></li>`
         ).join('');
-        const warnRes = await Swal.fire({
-          icon: 'warning',
-          title: 'Peringatan: Kelas Sudah Ada Paket Soal!',
-          html: `<div class="text-start small">Terdeteksi kelas/mapel yang sudah dibuatkan paket soal oleh guru lain:<ul class="mt-2 mb-2 ps-3">${listHtml}</ul><div class="text-muted">Pastikan kelas yang dipilih tidak bentrok dengan guru lain pada jam ujian yang sama.</div></div>`,
-          showCancelButton: true,
-          confirmButtonText: '<i class="bi bi-check-lg me-1"></i> Tetap Simpan',
-          cancelButtonText: 'Periksa & Ubah Kelas',
-          confirmButtonColor: '#f59e0b',
-          cancelButtonColor: '#0d6efd',
-          reverseButtons: true
+        const moreHtml = conflicts.length > 8 ? `<li class="text-muted">...dan ${conflicts.length - 8} kelas lainnya</li>` : '';
+        await Swal.fire({
+          icon: 'error',
+          title: 'Tidak Bisa Simpan Penugasan!',
+          html: `
+            <div class="text-start small">
+              <div class="alert alert-danger py-2 px-3 mb-3 border-danger shadow-sm">
+                <div class="fw-bold mb-1"><i class="bi bi-x-octagon-fill me-1"></i>Terdeteksi Tabrakan Kelas dengan Guru Lain:</div>
+                <ul class="mb-0 ps-3">${listHtml}${moreHtml}</ul>
+              </div>
+              <p class="text-muted mb-0">
+                <i class="bi bi-shield-lock-fill text-danger me-1"></i>
+                <strong>Aturan Sistem:</strong> Satu kelas/rombel tidak boleh diampu oleh lebih dari satu guru untuk mata pelajaran yang sama agar paket soal ujian siswa tidak tertukar atau tumpang tindih. Silakan hapus atau ubah centang kelas yang bentrok terlebih dahulu.
+              </p>
+            </div>
+          `,
+          confirmButtonText: '<i class="bi bi-pencil-square me-1"></i> Kembali & Ubah Pembagian Kelas',
+          confirmButtonColor: '#dc3545'
         });
-        if (!warnRes.isConfirmed) return;
+        return; // DIBUAT TIDAK BISA SIMPAN!
       }
 
       const btn = document.getElementById('btn-save-penugasan-guru');
@@ -1699,10 +1729,11 @@
       const s = String(name || '').toLowerCase().trim();
       if (!s) return '';
       if (s.includes('agama islam') || s.includes('agma islam') || /\bpai(bp)?\b/.test(s)) return 'pendidikan agama islam';
-      if (s.includes('kristen') && (s.includes('protestan') || s.includes('potestan'))) return 'agama kristen protestan';
+      if (s.includes('kristen') && !s.includes('katolik') && !s.includes('katholik')) return 'agama kristen protestan';
       if (s.includes('katolik') || s.includes('katholik')) return 'agama katolik';
       if (s.includes('hindu')) return 'agama hindu';
       if (s.includes('budha') || s.includes('buddha')) return 'agama buddha';
+      if (s.includes('konghucu') || s.includes('khonghucu')) return 'agama konghucu';
       if (s.includes('indonesia') || s.includes('ainonesia')) return 'bahasa indonesia';
       if (s.includes('inggris')) return 'bahasa inggris';
       if (s.includes('matematika') || s === 'mtk') return 'matematika';
@@ -1879,6 +1910,7 @@
 
     function updatePenugasanConflictWarning() {
       const box = document.getElementById('penugasan-conflict-warning');
+      const btnSave = document.getElementById('btn-save-penugasan-guru');
       if (!box) return;
       const guruId = document.getElementById('penugasan-guru-id')?.value || '';
       const rows = collectCurrentPenugasanRows();
@@ -1887,24 +1919,176 @@
       if (conflicts.length === 0) {
         box.classList.add('d-none');
         box.innerHTML = '';
+        if (btnSave) {
+          btnSave.disabled = false;
+          btnSave.classList.remove('btn-secondary');
+          btnSave.classList.add('btn-primary');
+          btnSave.title = '';
+        }
         return;
       }
 
       const itemsHtml = conflicts.slice(0, 6).map(c =>
-        `<li>Mapel <strong>${escapeHtml(c.mapel)}</strong> pada kelas <span class="badge bg-danger text-white">${escapeHtml(c.overlapText)}</span> sudah dibuat paket soalnya oleh <strong>${escapeHtml(c.otherGuruName)}</strong></li>`
+        `<li>Mata Pelajaran <strong>${escapeHtml(c.mapel)}</strong> pada kelas <span class="badge bg-danger text-white">${escapeHtml(c.overlapText)}</span> sudah diampu oleh <strong>${escapeHtml(c.otherGuruName)}</strong></li>`
       ).join('');
-      const moreHtml = conflicts.length > 6 ? `<li class="text-muted">...dan ${conflicts.length - 6} peringatan lainnya.</li>` : '';
+      const moreHtml = conflicts.length > 6 ? `<li class="text-muted">...dan ${conflicts.length - 6} kelas lainnya.</li>` : '';
 
       box.innerHTML = `
-        <div class="d-flex align-items-start gap-2">
-          <i class="bi bi-exclamation-triangle-fill text-danger fs-5 flex-shrink-0 mt-1"></i>
+        <div class="alert alert-danger border-danger shadow-sm d-flex align-items-start gap-2 mb-0">
+          <i class="bi bi-x-octagon-fill text-danger fs-5 flex-shrink-0 mt-1"></i>
           <div>
-            <div class="fw-bold text-danger mb-1">Peringatan! Kelas Sudah Dibuat Paket Soalnya oleh Guru Lain:</div>
-            <ul class="mb-0 ps-3">${itemsHtml}${moreHtml}</ul>
+            <div class="fw-bold text-danger mb-1"><i class="bi bi-exclamation-triangle-fill me-1"></i>Ditolak: Ada Tabrakan Kelas dengan Guru Lain!</div>
+            <ul class="mb-2 ps-3 small text-dark">${itemsHtml}${moreHtml}</ul>
+            <div class="small text-danger fw-semibold"><i class="bi bi-lock-fill me-1"></i>Tombol simpan dinonaktifkan sampai centang kelas yang bentrok diubah/dihapus.</div>
           </div>
         </div>
       `;
       box.classList.remove('d-none');
+
+      if (btnSave) {
+        btnSave.disabled = true;
+        btnSave.classList.remove('btn-primary');
+        btnSave.classList.add('btn-secondary');
+        btnSave.title = 'Tidak bisa simpan: terdeteksi tabrakan kelas dengan guru lain';
+      }
+    }
+
+    // Mendeteksi seluruh tabrakan penugasan kelas yang sudah terlanjur terjadi di database
+    function findAllGuruAssignmentConflicts(guruList, paketList) {
+      const conflictsByGuruId = new Map();
+      const allCollisions = [];
+      const seenPairKeys = new Set();
+      const pkMap = new Map();
+      (paketList || []).forEach(p => { if (p && p.id) pkMap.set(String(p.id), p); });
+
+      const guruEntries = [];
+      (guruList || []).forEach(g => {
+        if (!g || !g.id) return;
+        const entries = [];
+        let pList = [];
+        if (Array.isArray(g.penugasan_mapel)) pList = g.penugasan_mapel;
+        else if (typeof g.penugasan_mapel === 'string' && g.penugasan_mapel.trim()) {
+          try { const dec = JSON.parse(g.penugasan_mapel); if (Array.isArray(dec)) pList = dec; } catch (e) {}
+        }
+        pList.forEach(pe => {
+          if (pe && pe.mapel) entries.push({ mapel: pe.mapel, kelas: pe.tingkat || '', jurusan: pe.jurusan || '' });
+        });
+
+        let pids = [];
+        if (Array.isArray(g.paket_ids)) pids = g.paket_ids;
+        else if (typeof g.paket_ids === 'string' && g.paket_ids.trim()) {
+          try { const dec = JSON.parse(g.paket_ids); if (Array.isArray(dec)) pids = dec; } catch (e) {}
+        }
+        pids.forEach(pid => {
+          const pk = pkMap.get(String(pid));
+          if (pk && pk.nama_paket) {
+            const baseMapel = pk.nama_paket.split(' - ')[0].split(' (')[0].trim();
+            entries.push({ mapel: baseMapel, kelas: pk.kelas || '', jurusan: pk.jurusan || '' });
+          }
+        });
+
+        guruEntries.push({ guru: g, id: String(g.id), name: g.nama_lengkap || g.username || 'Guru', entries });
+      });
+
+      for (let i = 0; i < guruEntries.length; i++) {
+        const gA = guruEntries[i];
+        for (let j = i + 1; j < guruEntries.length; j++) {
+          const gB = guruEntries[j];
+
+          for (const entA of gA.entries) {
+            const famA = normalizeMapelFamily(entA.mapel);
+            if (!famA) continue;
+
+            for (const entB of gB.entries) {
+              const famB = normalizeMapelFamily(entB.mapel);
+              if (!famB) continue;
+
+              const sameMapel = (famA === famB) || (famA.length >= 6 && famB.length >= 6 && (famA.includes(famB) || famB.includes(famA)));
+              if (!sameMapel) continue;
+              if (!hasJurusanOverlap(entA.jurusan, entB.jurusan)) continue;
+
+              const ov = getOverlappingClasses(entA.kelas, entB.kelas);
+              if (ov.length > 0) {
+                const overlapText = ov.join(', ');
+                const pairKey = `${famA}|${[gA.id, gB.id].sort().join('-')}|${overlapText}`;
+                if (!seenPairKeys.has(pairKey)) {
+                  seenPairKeys.add(pairKey);
+                  const collisionObj = {
+                    mapel: entA.mapel,
+                    overlapText,
+                    guruAName: gA.name,
+                    guruBName: gB.name
+                  };
+                  allCollisions.push(collisionObj);
+
+                  if (!conflictsByGuruId.has(gA.id)) conflictsByGuruId.set(gA.id, []);
+                  conflictsByGuruId.get(gA.id).push({ mapel: entA.mapel, overlapText, otherGuruName: gB.name });
+
+                  if (!conflictsByGuruId.has(gB.id)) conflictsByGuruId.set(gB.id, []);
+                  conflictsByGuruId.get(gB.id).push({ mapel: entB.mapel, overlapText, otherGuruName: gA.name });
+                }
+              }
+            }
+          }
+        }
+      }
+
+      return { conflictsByGuruId, allCollisions };
+    }
+
+    function renderConflictSummaryBanner(containerId, allCollisions) {
+      const banner = document.getElementById(containerId);
+      if (!banner) return;
+      if (!allCollisions || allCollisions.length === 0) {
+        banner.classList.add('d-none');
+        banner.innerHTML = '';
+        return;
+      }
+
+      const listHtml = allCollisions.map((c, i) => `
+        <tr>
+          <td class="text-danger fw-bold text-nowrap" style="width: 35px;">#${i + 1}</td>
+          <td>
+            <strong class="text-dark">${escapeHtml(c.mapel)}</strong>
+            <span class="badge bg-danger text-white ms-1">${escapeHtml(c.overlapText)}</span>
+          </td>
+          <td class="text-dark">
+            <span class="badge bg-warning-subtle text-dark border me-1">${escapeHtml(c.guruAName)}</span>
+            <span class="text-danger fw-bold">&harr;</span>
+            <span class="badge bg-warning-subtle text-dark border ms-1">${escapeHtml(c.guruBName)}</span>
+          </td>
+        </tr>
+      `).join('');
+
+      banner.innerHTML = `
+        <div class="alert alert-danger border-danger shadow-sm rounded-3 p-3 mb-0">
+          <div class="d-flex align-items-start gap-3">
+            <i class="bi bi-exclamation-triangle-fill fs-3 text-danger flex-shrink-0 mt-1"></i>
+            <div class="w-100">
+              <div class="d-flex justify-content-between align-items-center flex-wrap gap-2 mb-1">
+                <h6 class="fw-bold text-danger mb-0">
+                  <i class="bi bi-shield-exclamation me-1"></i>Peringatan: Terdeteksi ${allCollisions.length} Tabrakan Pembagian Kelas!
+                </h6>
+                <span class="badge bg-danger text-white">Perlu Tindakan</span>
+              </div>
+              <p class="small text-dark mb-2">Terdapat guru dengan mata pelajaran yang sama mengampu rombel/kelas yang sama. Harap segera sesuaikan penugasan mapel agar paket soal dan nilai ujian siswa tidak tertukar:</p>
+              <div class="table-responsive bg-white rounded border border-danger-subtle p-2">
+                <table class="table table-sm table-hover mb-0 small">
+                  <thead class="text-muted border-bottom">
+                    <tr>
+                      <th>No</th>
+                      <th>Mata Pelajaran & Kelas Bentrok</th>
+                      <th>Guru yang Berselisih</th>
+                    </tr>
+                  </thead>
+                  <tbody>${listHtml}</tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+        </div>
+      `;
+      banner.classList.remove('d-none');
     }
 
     // =============================================================
