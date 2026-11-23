@@ -541,6 +541,11 @@
               <button class="btn btn-success btn-sm rounded-pill px-3" onclick="openImportModal('guru')">
                 <i class="bi bi-file-earmark-excel-fill me-1"></i> Import Excel
               </button>
+              <button class="btn btn-outline-warning text-dark btn-sm rounded-pill px-3 fw-semibold"
+                onclick="cleanupOrphanAndDuplicatePakets()"
+                title="Sinkronkan kelas/jurusan paket soal dengan penugasan guru & hapus paket yatim/duplikat yang masih 0 soal">
+                <i class="bi bi-magic me-1"></i> Bersihkan & Sinkronkan Paket
+              </button>
               <button class="btn btn-outline-success btn-sm rounded-pill px-3" onclick="exportGuruData()">
                 <i class="bi bi-download me-1"></i> Export Excel
               </button>
@@ -594,6 +599,11 @@
               <h1 class="h2 text-dark mb-0" id="heading-sec-soal">Bank Soal & Paket Ujian</h1>
             </div>
             <div class="btn-toolbar mb-2 mb-md-0 gap-2">
+              <button class="btn btn-warning text-dark btn-sm rounded-pill px-3 fw-semibold" id="btn-cleanup-bank-soal"
+                onclick="cleanupOrphanAndDuplicatePakets()"
+                title="Sinkronkan kelas/jurusan paket soal dengan penugasan guru & hapus paket yatim/duplikat yang masih 0 soal">
+                <i class="bi bi-magic me-1"></i> Bersihkan & Sinkronkan Paket
+              </button>
               <button class="btn btn-success btn-sm rounded-pill px-3" id="btn-export-all-bank-soal"
                 onclick="exportAllBankSoalExcel()">
                 <i class="bi bi-file-earmark-excel-fill me-1"></i> Export Semua Bank Soal
@@ -2139,13 +2149,13 @@ Jawaban: B"></textarea>
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 
   <!-- CBT Modules -->
-  <script src="js/config.js?v=71"></script>
-  <script src="js/supabase-config.js?v=71"></script>
-  <script src="js/db-adapter.js?v=71"></script>
-  <script src="js/auth.js?v=71"></script>
-  <script src="js/excel-helpers.js?v=71"></script>
-  <script src="js/templates.js?v=71"></script>
-  <script src="js/admin.js?v=71"></script>
+  <script src="js/config.js?v=72"></script>
+  <script src="js/supabase-config.js?v=72"></script>
+  <script src="js/db-adapter.js?v=72"></script>
+  <script src="js/auth.js?v=72"></script>
+  <script src="js/excel-helpers.js?v=72"></script>
+  <script src="js/templates.js?v=72"></script>
+  <script src="js/admin.js?v=72"></script>
   <script>
     // Dark mode logic
     const themeToggleBtn = document.getElementById('theme-toggle-admin');

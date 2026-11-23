@@ -446,6 +446,8 @@ function applyGuruRoleUI() {
   // Sembunyikan tombol Buat Paket Baru dan Hapus Paket untuk Guru (Wadah paket disiapkan oleh Admin)
   const btnCreatePaket = document.getElementById('btn-create-paket');
   if (btnCreatePaket) btnCreatePaket.classList.add('d-none');
+  const btnCleanupBankSoal = document.getElementById('btn-cleanup-bank-soal');
+  if (btnCleanupBankSoal) btnCleanupBankSoal.classList.add('d-none');
 
   // Guru diizinkan menghapus paket soal miliknya sendiri
   const btnDeletePaket = document.getElementById('btn-delete-paket');
@@ -4037,6 +4039,353 @@ async function quickDeleteGuruPaket(guruId, paketId, paketName) {
     await loadPaket();
   } catch (err) {
     Swal.fire('Gagal Menghapus', err.message || 'Terjadi kesalahan saat menghapus paket.', 'error');
+  }
+}
+
+async function cleanupOrphanAndDuplicatePakets() {
+  if (isGuruMode()) return;
+
+  Swal.fire({
+    title: 'Menganalisis Bank Soal & Penugasan Guru...',
+    html: 'Memeriksa paket yatim, paket duplikat kosong (0 soal), dan kesesuaian kelas/jurusan...',
+    allowOutsideClick: false,
+    didOpen: () => Swal.showLoading()
+  });
+
+  try {
+    const [freshGurus, freshPakets] = await Promise.all([
+      DB.getGuruList(),
+      DB.getPaketList()
+    ]);
+    allGuru = Array.isArray(freshGurus) ? freshGurus : (allGuru || []);
+    allPaketUnfiltered = Array.isArray(freshPakets) ? freshPakets : (allPaketUnfiltered || []);
+
+    const paketMap = new Map();
+    allPaketUnfiltered.forEach(p => { if (p && p.id) paketMap.set(String(p.id), p); });
+
+    // Helper: lengkapi otomatis jurusan dari rombel spesifik (cth: X TKJ 1 -> tambah TKJ)
+    const completeJurusanFromKelas = (rawKelas, rawJurusan) => {
+      const tStr = String(rawKelas || '').trim();
+      const jStr = String(rawJurusan || '').trim();
+      if (!tStr || !jStr || jStr.toUpperCase() === 'SEMUA') return jStr;
+      const jurSet = new Set(jStr.split(',').map(s => s.trim().toUpperCase()).filter(Boolean));
+      const knownNorms = new Set(Array.from(jurSet).map(normalizeJurAlias));
+      tStr.split(',').map(s => s.trim().toUpperCase()).filter(Boolean).forEach(kTok => {
+        if (kTok.startsWith('TINGKAT:')) return;
+        const parts = kTok.split(/[\s\-_]+/);
+        if (parts.length >= 2 && ['X', 'XI', 'XII', '10', '11', '12'].includes(parts[0])) {
+          const rJur = parts[1];
+          const nRJ = normalizeJurAlias(rJur);
+          if (rJur && !knownNorms.has(nRJ)) {
+            jurSet.add(rJur);
+            knownNorms.add(nRJ);
+          }
+        }
+      });
+      return Array.from(jurSet).join(', ');
+    };
+
+    const extractGradesSet = (rawKelas) => {
+      const parsed = parseCleanKelasTokens(rawKelas);
+      const gSet = new Set(parsed.grades);
+      parsed.rombels.forEach(r => {
+        const gTok = r.split(/[\s\-_]+/)[0];
+        if (['X', 'XI', 'XII', '10', '11', '12'].includes(gTok)) gSet.add(gTok);
+      });
+      return gSet;
+    };
+
+    // 1. Kumpulkan seluruh paket yang terikat ke guru beserta rencana sinkronisasi per guru
+    const allOwnedPaketIds = new Set();
+    const duplicateEmptyPaketsToDelete = []; // { paket, guruName }
+    const paketsToUpdate = [];               // { paket, nextKelas, nextJurusan, guruName }
+    const gurusToUpdate = [];                // { guru, nextPaketIds, nextPenugasan }
+
+    for (const g of allGuru) {
+      let pids = [];
+      if (Array.isArray(g.paket_ids)) pids = g.paket_ids.map(String).filter(Boolean);
+      else if (typeof g.paket_ids === 'string' && g.paket_ids.trim()) {
+        try { const dec = JSON.parse(g.paket_ids); if (Array.isArray(dec)) pids = dec.map(String).filter(Boolean); } catch (e) {}
+      }
+      pids = Array.from(new Set(pids)).filter(pid => paketMap.has(pid));
+
+      let pList = [];
+      if (Array.isArray(g.penugasan_mapel)) pList = g.penugasan_mapel;
+      else if (typeof g.penugasan_mapel === 'string' && g.penugasan_mapel.trim()) {
+        try { const dec = JSON.parse(g.penugasan_mapel); if (Array.isArray(dec)) pList = dec; } catch (e) {}
+      }
+
+      // Lengkapi jurusan yang terlupa pada setiap baris penugasan guru
+      let penugasanChanged = false;
+      const cleanPenugasan = pList.map(item => {
+        const fixedJur = completeJurusanFromKelas(item.tingkat || '', item.jurusan || '');
+        if (fixedJur !== String(item.jurusan || '').trim()) penugasanChanged = true;
+        return { ...item, jurusan: fixedJur };
+      });
+
+      const myPakets = pids.map(pid => paketMap.get(pid)).filter(Boolean);
+
+      if (cleanPenugasan.length === 0) {
+        // Jika guru belum mengatur baris penugasan, hanya pertahankan paket yang sudah berisi soal (> 0 soal)
+        const keptIds = [];
+        for (const pk of myPakets) {
+          const sc = Number(pk.total_soal !== undefined ? pk.total_soal : (pk.soal_count || 0)) || 0;
+          if (sc > 0) {
+            keptIds.push(String(pk.id));
+            allOwnedPaketIds.add(String(pk.id));
+          } else {
+            duplicateEmptyPaketsToDelete.push({ paket: pk, guruName: g.nama_lengkap || g.username });
+          }
+        }
+        if (keptIds.length !== pids.length) {
+          gurusToUpdate.push({ guru: g, nextPaketIds: keptIds, nextPenugasan: cleanPenugasan });
+        } else {
+          keptIds.forEach(id => allOwnedPaketIds.add(id));
+        }
+        continue;
+      }
+
+      const claimedIds = new Set();
+
+      // Pasangkan setiap baris penugasan guru ke paket terbaik miliknya (utamakan paket yang sudah berisi soal > 0!)
+      for (const item of cleanPenugasan) {
+        const itemFam = normalizeMapelFamily(item.mapel);
+        const itemGrades = extractGradesSet(item.tingkat);
+        const avail = myPakets.filter(p => !claimedIds.has(String(p.id)));
+
+        // Cari paket dengan mapel yang sama & tingkat/kelas beririsan (utamakan total_soal > 0)
+        let candidates = avail.filter(p => {
+          const pBase = String(p.nama_paket || '').split(' - ')[0].split(' (')[0].trim();
+          const pFam = normalizeMapelFamily(pBase);
+          const sameM = (pFam && pFam === itemFam) || String(p.nama_paket || '').toLowerCase().includes(String(item.mapel || '').toLowerCase());
+          if (!sameM) return false;
+          if (getOverlappingClasses(p.kelas, item.tingkat).length > 0) return true;
+          const pGrades = extractGradesSet(p.kelas);
+          for (const gTok of itemGrades) {
+            if (pGrades.has(gTok)) return true;
+          }
+          return itemGrades.size === 0 && pGrades.size === 0;
+        });
+
+        if (candidates.length === 0) {
+          candidates = avail.filter(p => {
+            const pBase = String(p.nama_paket || '').split(' - ')[0].split(' (')[0].trim();
+            const pFam = normalizeMapelFamily(pBase);
+            return (pFam && pFam === itemFam) || String(p.nama_paket || '').toLowerCase().includes(String(item.mapel || '').toLowerCase());
+          });
+        }
+
+        candidates.sort((a, b) => {
+          const scA = Number(a.total_soal !== undefined ? a.total_soal : (a.soal_count || 0)) || 0;
+          const scB = Number(b.total_soal !== undefined ? b.total_soal : (b.soal_count || 0)) || 0;
+          if ((scB > 0 ? 1 : 0) !== (scA > 0 ? 1 : 0)) return (scB > 0 ? 1 : 0) - (scA > 0 ? 1 : 0);
+          const exactK_A = String(a.kelas || '').trim().toUpperCase() === String(item.tingkat || '').trim().toUpperCase() ? 1 : 0;
+          const exactK_B = String(b.kelas || '').trim().toUpperCase() === String(item.tingkat || '').trim().toUpperCase() ? 1 : 0;
+          if (exactK_B !== exactK_A) return exactK_B - exactK_A;
+          return scB - scA;
+        });
+
+        const best = candidates[0] || null;
+        if (best) {
+          const bId = String(best.id);
+          claimedIds.add(bId);
+          allOwnedPaketIds.add(bId);
+
+          // Cek apakah kelas atau jurusan paket perlu disinkronkan dengan penugasan guru
+          const curK = String(best.kelas || '').trim();
+          const curJ = String(best.jurusan || '').trim();
+          const nextK = String(item.tingkat || '').trim();
+          const nextJ = String(item.jurusan || '').trim();
+          if (curK.toUpperCase() !== nextK.toUpperCase() || curJ.toUpperCase() !== nextJ.toUpperCase()) {
+            paketsToUpdate.push({
+              paket: best,
+              nextKelas: nextK || null,
+              nextJurusan: nextJ || null,
+              guruName: g.nama_lengkap || g.username
+            });
+          }
+        }
+      }
+
+      // Periksa sisa paket milik guru ini yang TIDAK diklaim oleh baris penugasan mana pun
+      const nextIds = Array.from(claimedIds);
+      for (const pk of myPakets) {
+        const pidStr = String(pk.id);
+        if (claimedIds.has(pidStr)) continue;
+        const sc = Number(pk.total_soal !== undefined ? pk.total_soal : (pk.soal_count || 0)) || 0;
+        if (sc > 0) {
+          // Paket sudah ada soalnya (> 0 soal) -> JANGAN DIHAPUS! Tetap pertahankan & lengkapi jurusannya bila lupa
+          nextIds.push(pidStr);
+          allOwnedPaketIds.add(pidStr);
+          const fixedJ = completeJurusanFromKelas(pk.kelas || '', pk.jurusan || '');
+          if (fixedJ.toUpperCase() !== String(pk.jurusan || '').trim().toUpperCase()) {
+            paketsToUpdate.push({
+              paket: pk,
+              nextKelas: pk.kelas || null,
+              nextJurusan: fixedJ || null,
+              guruName: g.nama_lengkap || g.username
+            });
+          }
+        } else {
+          // Paket kembar/duplikat yang masih 0 soal -> masukkan ke daftar hapus
+          duplicateEmptyPaketsToDelete.push({ paket: pk, guruName: g.nama_lengkap || g.username });
+        }
+      }
+
+      if (penugasanChanged || nextIds.length !== pids.length || !nextIds.every((v, i) => v === pids[i])) {
+        gurusToUpdate.push({ guru: g, nextPaketIds: nextIds, nextPenugasan: cleanPenugasan });
+      }
+    }
+
+    // 2. Cari paket yatim tanpa guru pengampu yang masih kosong (0 soal)
+    const orphanEmptyPaketsToDelete = [];
+    const orphanFilledPakets = [];
+    for (const pk of allPaketUnfiltered) {
+      if (!pk || !pk.id) continue;
+      if (allOwnedPaketIds.has(String(pk.id))) continue;
+      // Pastikan juga tidak ada di daftar duplicateEmptyPaketsToDelete
+      if (duplicateEmptyPaketsToDelete.some(d => String(d.paket.id) === String(pk.id))) continue;
+
+      const sc = Number(pk.total_soal !== undefined ? pk.total_soal : (pk.soal_count || 0)) || 0;
+      if (sc === 0) {
+        orphanEmptyPaketsToDelete.push(pk);
+      } else {
+        orphanFilledPakets.push(pk);
+      }
+    }
+
+    const totalToDelete = orphanEmptyPaketsToDelete.length + duplicateEmptyPaketsToDelete.length;
+    if (totalToDelete === 0 && paketsToUpdate.length === 0 && gurusToUpdate.length === 0) {
+      Swal.fire({
+        icon: 'success',
+        title: 'Bank Soal Sudah Bersih & Sinkron!',
+        text: 'Tidak ditemukan paket yatim kosong (0 soal), paket duplikat kosong, maupun selisih kelas/jurusan pada Bank Soal.',
+        confirmButtonColor: '#198754'
+      });
+      return;
+    }
+
+    const updatePreviewHtml = paketsToUpdate.length > 0
+      ? `<div class="mb-2"><strong class="text-primary"><i class="bi bi-arrow-repeat me-1"></i>${paketsToUpdate.length} Paket Disinkronkan Kelas/Jurusannya:</strong><ul class="mb-1 ps-3 small">${paketsToUpdate.slice(0, 6).map(u => `<li><strong>${escapeHtml(u.guruName)}</strong> — ${escapeHtml(u.paket.nama_paket)} &rarr; Kelas: <code>${escapeHtml(u.nextKelas || 'Semua')}</code> | Jur: <code>${escapeHtml(u.nextJurusan || 'Semua')}</code></li>`).join('')}${paketsToUpdate.length > 6 ? `<li class="text-muted">...dan ${paketsToUpdate.length - 6} paket lainnya</li>` : ''}</ul></div>`
+      : '';
+
+    const dupPreviewHtml = duplicateEmptyPaketsToDelete.length > 0
+      ? `<div class="mb-2"><strong class="text-danger"><i class="bi bi-files me-1"></i>${duplicateEmptyPaketsToDelete.length} Paket Ganda/Duplikat Guru yang Kosong (0 Soal) Dihapus:</strong><ul class="mb-1 ps-3 small">${duplicateEmptyPaketsToDelete.slice(0, 5).map(d => `<li><strong>${escapeHtml(d.guruName)}</strong> — ${escapeHtml(d.paket.nama_paket)} (0 Soal)</li>`).join('')}${duplicateEmptyPaketsToDelete.length > 5 ? `<li class="text-muted">...dan ${duplicateEmptyPaketsToDelete.length - 5} paket kosong lainnya</li>` : ''}</ul></div>`
+      : '';
+
+    const orphanPreviewHtml = orphanEmptyPaketsToDelete.length > 0
+      ? `<div class="mb-2"><strong class="text-danger"><i class="bi bi-trash me-1"></i>${orphanEmptyPaketsToDelete.length} Paket Yatim Tanpa Guru yang Kosong (0 Soal) Dihapus:</strong><ul class="mb-1 ps-3 small">${orphanEmptyPaketsToDelete.slice(0, 5).map(p => `<li>${escapeHtml(p.nama_paket)} (0 Soal)</li>`).join('')}${orphanEmptyPaketsToDelete.length > 5 ? `<li class="text-muted">...dan ${orphanEmptyPaketsToDelete.length - 5} paket yatim kosong lainnya</li>` : ''}</ul></div>`
+      : '';
+
+    const safeNoteHtml = `<div class="alert alert-success py-2 px-3 small mb-0 mt-2"><i class="bi bi-shield-check me-1"></i><strong>Jaminan Aman:</strong> Seluruh paket yang sudah berisi soal (<strong>&gt; 0 soal</strong>) <strong>TIDAK AKAN DIHAPUS</strong>.</div>`;
+
+    const confirmRes = await Swal.fire({
+      icon: 'question',
+      title: 'Bersihkan & Sinkronkan Bank Soal?',
+      html: `<div class="text-start small">${updatePreviewHtml}${dupPreviewHtml}${orphanPreviewHtml}${safeNoteHtml}</div>`,
+      showCancelButton: true,
+      confirmButtonText: '<i class="bi bi-magic me-1"></i> Ya, Bersihkan & Sinkronkan Sekarang',
+      cancelButtonText: 'Batal',
+      confirmButtonColor: '#198754',
+      cancelButtonColor: '#6c757d',
+      width: '620px'
+    });
+
+    if (!confirmRes.isConfirmed) return;
+
+    Swal.fire({
+      title: 'Memproses Pembersihan & Sinkronisasi...',
+      html: 'Mohon tunggu sebentar...',
+      allowOutsideClick: false,
+      didOpen: () => Swal.showLoading()
+    });
+
+    // 1. Update paket yang kelas/jurusannya perlu disinkronkan
+    let updatedPaketCount = 0;
+    for (const u of paketsToUpdate) {
+      try {
+        await DB.savePaket(String(u.paket.id), {
+          nama_paket: u.paket.nama_paket,
+          jurusan: u.nextJurusan,
+          kelas: u.nextKelas,
+          jadwal_mulai: u.paket.jadwal_mulai || null,
+          jadwal_selesai: u.paket.jadwal_selesai || null
+        });
+        updatedPaketCount++;
+      } catch (e) {
+        console.warn('Gagal update paket saat sinkronisasi:', u.paket.id, e);
+      }
+    }
+
+    // 2. Hapus paket duplikat kosong & paket yatim kosong (verifikasi ulang 0 soal sebelum hapus)
+    const allToDelete = [
+      ...duplicateEmptyPaketsToDelete.map(d => d.paket),
+      ...orphanEmptyPaketsToDelete
+    ];
+    let deletedCount = 0;
+    for (const pk of allToDelete) {
+      const pidStr = String(pk.id);
+      let sc = Number(pk.total_soal !== undefined ? pk.total_soal : (pk.soal_count || 0)) || 0;
+      if (sc === 0 && pk.total_soal === undefined && typeof DB.getSoalByPaket === 'function') {
+        try {
+          const qCheck = await DB.getSoalByPaket(pidStr);
+          sc = Array.isArray(qCheck) ? qCheck.length : 0;
+        } catch (e) {}
+      }
+      if (sc > 0) continue; // Pengaman ekstra: jangan pernah hapus jika ternyata ada soalnya
+      try {
+        await DB.deletePaket(pidStr);
+        deletedCount++;
+        if (String(activePaketId) === pidStr) {
+          activePaketId = null;
+        }
+      } catch (e) {
+        console.warn('Gagal hapus paket kosong:', pidStr, e);
+      }
+    }
+
+    // 3. Simpan pembaruan paket_ids & penugasan pada akun guru yang terdampak
+    for (const gu of gurusToUpdate) {
+      const g = gu.guru;
+      const pList = gu.nextPenugasan;
+      const uniqueMapels = Array.from(new Set(pList.map(p => p.mapel).filter(Boolean)));
+      const uniqueJurusans = Array.from(new Set(pList.flatMap(p => (p.jurusan || '').split(',').map(s => s.trim())).filter(Boolean)));
+      const uniqueTingkats = Array.from(new Set(pList.flatMap(p => (p.tingkat || '').split(',').map(s => s.trim())).filter(Boolean)));
+      try {
+        await DB.saveGuru(g.id, {
+          username: g.username,
+          nama_lengkap: g.nama_lengkap,
+          mapel_diampu: uniqueMapels.length > 0 ? uniqueMapels.join(', ') : (g.mapel_diampu || ''),
+          jurusan_diampu: uniqueJurusans.length > 0 ? uniqueJurusans.join(', ') : (g.jurusan_diampu || ''),
+          kelas_diampu: uniqueTingkats.length > 0 ? uniqueTingkats.join(', ') : (g.kelas_diampu || ''),
+          paket_ids: gu.nextPaketIds,
+          penugasan_mapel: pList
+        });
+      } catch (e) {
+        console.warn('Gagal update paket_ids guru:', g.nama_lengkap, e);
+      }
+    }
+
+    await loadGuru();
+    await loadPaket();
+
+    Swal.fire({
+      icon: 'success',
+      title: 'Pembersihan & Sinkronisasi Selesai!',
+      html: `
+        <div class="text-start small">
+          <ul class="mb-0 ps-3">
+            <li><strong>${updatedPaketCount} paket soal</strong> berhasil disinkronkan kelas & jurusannya sesuai penugasan guru.</li>
+            <li><strong>${deletedCount} paket yatim / duplikat kosong (0 soal)</strong> berhasil dihapus dari Bank Soal.</li>
+            <li><strong>${gurusToUpdate.length} akun guru</strong> berhasil dirapikan daftar paket terkaitnya.</li>
+          </ul>
+        </div>
+      `,
+      confirmButtonColor: '#198754'
+    });
+  } catch (err) {
+    console.error('Gagal cleanupOrphanAndDuplicatePakets:', err);
+    Swal.fire('Gagal Memproses', err.message || 'Terjadi kesalahan saat membersihkan Bank Soal.', 'error');
   }
 }
 
@@ -8989,6 +9338,7 @@ window.setWordQuestionKey = setWordQuestionKey;
 window.deleteWordQuestion = deleteWordQuestion;
 window.saveWordImportedData = saveWordImportedData;
 window.quickDeleteGuruPaket = quickDeleteGuruPaket;
+window.cleanupOrphanAndDuplicatePakets = cleanupOrphanAndDuplicatePakets;
 window.updatePenugasanConflictWarning = updatePenugasanConflictWarning;
 window.formatMathExponents = formatMathExponents;
 window.renderMathHtml = renderMathHtml;
