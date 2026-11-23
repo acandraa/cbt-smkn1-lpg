@@ -5845,9 +5845,29 @@ function formatMathExponents(text) {
   return parts.join('');
 }
 
-// Merender teks soal/opsi ke HTML dengan tag <sup>...</sup> dan <sub>...</sub> asli
-// agar seluruh angka pangkat (2², 3⁵, 10⁻⁵, (2³)⁴) tampil seragam, tajam, dan tidak mengecil/rusak di semua font
-function renderMathHtml(rawText) {
+function splitWacanaAndQuestion(rawText) {
+  const s = String(rawText || '');
+  const match = s.match(/^\s*\[WACANA\]\s*([\s\S]*?)\s*\[\/WACANA\]\s*([\s\S]*)$/i);
+  if (match) {
+    return {
+      wacana: match[1].trim(),
+      question: match[2].trim()
+    };
+  }
+  return { wacana: '', question: s };
+}
+
+function combineWacanaAndQuestion(wacana, question) {
+  const cleanW = String(wacana || '')
+    .replace(/^\s*\[WACANA\]\s*/i, '')
+    .replace(/\s*\[\/WACANA\]\s*$/i, '')
+    .trim();
+  const cleanQ = String(question || '').trim();
+  if (!cleanW) return cleanQ;
+  return `[WACANA]\n${cleanW}\n[/WACANA]\n${cleanQ}`;
+}
+
+function renderMathHtmlCore(rawText) {
   if (rawText === null || rawText === undefined) return '';
   const normalized = formatMathExponents(String(rawText));
   if (!normalized) return '';
@@ -5875,12 +5895,23 @@ function renderMathHtml(rawText) {
   }).join('');
 }
 
+// Merender teks soal/opsi ke HTML dengan tag <sup>...</sup>, <sub>...</sub>, dan Kotak Wacana jika soal memiliki [WACANA]...[/WACANA]
+function renderMathHtml(rawText) {
+  if (rawText === null || rawText === undefined) return '';
+  const { wacana, question } = splitWacanaAndQuestion(rawText);
+  if (wacana) {
+    return `<div class="p-2 px-3 mb-2 rounded border-start border-4 border-primary bg-white text-dark small shadow-xs" style="max-height: 180px; overflow-y: auto; white-space: pre-wrap; font-weight: 400; line-height: 1.6; border: 1px solid #cbd5e1;"><div class="fw-bold text-primary mb-1"><i class="bi bi-book-half me-1"></i>Teks Wacana / Bacaan:</div>${renderMathHtmlCore(wacana)}</div><div>${renderMathHtmlCore(question)}</div>`;
+  }
+  return renderMathHtmlCore(question);
+}
+
 let lastFocusedSoalFieldId = 'crud-soal-pertanyaan';
 let soalMathInputsInitialized = false;
 
 function initSoalMathInputs() {
   if (soalMathInputsInitialized) return;
   const fieldIds = [
+    'crud-soal-wacana',
     'crud-soal-pertanyaan',
     'crud-soal-opsia',
     'crud-soal-opsib',
@@ -5956,6 +5987,7 @@ function insertMathSymbol(symbol) {
 
 function convertAllSoalFormExponents() {
   const fieldIds = [
+    'crud-soal-wacana',
     'crud-soal-pertanyaan',
     'crud-soal-opsia',
     'crud-soal-opsib',
@@ -5969,6 +6001,143 @@ function convertAllSoalFormExponents() {
       el.value = formatMathExponents(el.value);
     }
   });
+}
+
+let lastUsedWacanaText = '';
+
+function copyWacanaFromPrevSoal() {
+  const wacanaEl = document.getElementById('crud-soal-wacana');
+  if (!wacanaEl) return;
+
+  const curNo = parseInt(document.getElementById('crud-soal-nomor')?.value) || (allSoal.length + 1);
+  // Cari wacana dari soal sebelumnya terdekat di paket ini
+  let foundWacana = '';
+  const sorted = [...(allSoal || [])].sort((a, b) => (Number(b.nomor) || 0) - (Number(a.nomor) || 0));
+  for (const s of sorted) {
+    if ((Number(s.nomor) || 0) < curNo) {
+      const { wacana } = splitWacanaAndQuestion(s.pertanyaan);
+      if (wacana) {
+        foundWacana = wacana;
+        break;
+      }
+    }
+  }
+  if (!foundWacana) {
+    for (const s of sorted) {
+      const { wacana } = splitWacanaAndQuestion(s.pertanyaan);
+      if (wacana) {
+        foundWacana = wacana;
+        break;
+      }
+    }
+  }
+  if (!foundWacana && lastUsedWacanaText) {
+    foundWacana = lastUsedWacanaText;
+  }
+
+  if (!foundWacana) {
+    Swal.fire('Belum Ada Wacana', 'Belum ditemukan teks wacana pada soal-soal sebelumnya di paket ini. Silakan tempel teks wacana pada soal pertama terlebih dahulu.', 'info');
+    return;
+  }
+
+  wacanaEl.value = foundWacana;
+  wacanaEl.focus();
+}
+
+function clearSoalWacanaInput() {
+  const wacanaEl = document.getElementById('crud-soal-wacana');
+  if (wacanaEl) wacanaEl.value = '';
+}
+
+async function applyWacanaToSoalRangePrompt() {
+  const wacanaEl = document.getElementById('crud-soal-wacana');
+  const wacanaText = formatMathExponents((wacanaEl?.value || '').trim());
+  if (!wacanaText) {
+    Swal.fire('Wacana Masih Kosong', 'Silakan isi atau tempel Teks Wacana / Bacaan pada kotak wacana terlebih dahulu.', 'warning');
+    return;
+  }
+  if (!allSoal || allSoal.length === 0) {
+    Swal.fire('Belum Ada Soal', 'Simpan soal ini terlebih dahulu atau buat butir soal di paket ini sebelum menerapkan wacana ke rentang nomor.', 'info');
+    return;
+  }
+
+  const curNo = parseInt(document.getElementById('crud-soal-nomor')?.value) || 1;
+  const maxNo = Math.max(...allSoal.map(s => Number(s.nomor) || 1), curNo);
+
+  const { value: rangeVals } = await Swal.fire({
+    title: 'Terapkan Wacana ke Beberapa Soal',
+    html: `
+      <div class="text-start small mb-2">Pasang teks wacana ini sekaligus ke soal nomor:</div>
+      <div class="d-flex align-items-center gap-2 justify-content-center">
+        <div>
+          <label class="small fw-bold">Dari Nomor</label>
+          <input type="number" id="swal-wacana-start" class="form-control text-center" min="1" value="${curNo}">
+        </div>
+        <span class="mt-3 fw-bold">s.d.</span>
+        <div>
+          <label class="small fw-bold">Sampai Nomor</label>
+          <input type="number" id="swal-wacana-end" class="form-control text-center" min="1" value="${Math.min(curNo + 3, maxNo)}">
+        </div>
+      </div>
+    `,
+    showCancelButton: true,
+    confirmButtonText: 'Terapkan Wacana',
+    cancelButtonText: 'Batal',
+    confirmButtonColor: '#198754',
+    preConfirm: () => {
+      const sNo = parseInt(document.getElementById('swal-wacana-start')?.value);
+      const eNo = parseInt(document.getElementById('swal-wacana-end')?.value);
+      if (!sNo || !eNo || sNo < 1 || eNo < sNo) {
+        Swal.showValidationMessage('Rentang nomor soal tidak valid.');
+        return false;
+      }
+      return { sNo, eNo };
+    }
+  });
+
+  if (!rangeVals) return;
+
+  const targets = (allSoal || []).filter(s => {
+    const n = Number(s.nomor) || 0;
+    return n >= rangeVals.sNo && n <= rangeVals.eNo;
+  });
+
+  if (targets.length === 0) {
+    Swal.fire('Tidak Ditemukan', `Tidak ada soal dengan nomor antara ${rangeVals.sNo} s.d. ${rangeVals.eNo} yang sudah tersimpan di paket ini.`, 'warning');
+    return;
+  }
+
+  Swal.fire({
+    title: 'Menerapkan Wacana...',
+    text: `Memperbarui ${targets.length} butir soal...`,
+    allowOutsideClick: false,
+    didOpen: () => Swal.showLoading()
+  });
+
+  try {
+    for (const s of targets) {
+      const { question } = splitWacanaAndQuestion(s.pertanyaan);
+      const updatedPertanyaan = combineWacanaAndQuestion(wacanaText, question);
+      await DB.saveSoal(s.id, {
+        paket_soal_id: s.paket_soal_id || activePaketId,
+        nomor: s.nomor,
+        bobot: s.bobot || 1,
+        pertanyaan: updatedPertanyaan,
+        opsi_a: s.opsi_a,
+        opsi_b: s.opsi_b,
+        opsi_c: s.opsi_c || null,
+        opsi_d: s.opsi_d || null,
+        opsi_e: s.opsi_e || null,
+        jawaban_benar: s.jawaban_benar,
+        gambar: s.gambar || null
+      });
+    }
+    lastUsedWacanaText = wacanaText;
+    await loadSoal();
+    Swal.fire('Berhasil!', `Teks wacana berhasil diterapkan ke ${targets.length} soal (No. ${rangeVals.sNo} s.d. ${rangeVals.eNo}).`, 'success');
+  } catch (err) {
+    Swal.fire('Gagal', err.message || 'Terjadi kesalahan saat menerapkan wacana.', 'error');
+  }
 }
 
 function renderSoalList(list) {
@@ -6074,6 +6243,8 @@ function openSoalForm() {
   document.getElementById('form-soal-crud').reset();
   document.getElementById('soal-id').value = "";
   document.getElementById('crud-soal-nomor').value = allSoal.length + 1;
+  const elWacana = document.getElementById('crud-soal-wacana');
+  if (elWacana) elWacana.value = "";
   document.getElementById('crud-soal-gambar-preview').src = "";
   document.getElementById('crud-soal-gambar-preview').classList.add('d-none');
   document.getElementById('crud-soal-gambar-base64').value = "";
@@ -6099,11 +6270,15 @@ function editSoal(id) {
   const s = allSoal.find(item => item.id === id);
   if (!s) return;
 
+  const { wacana, question } = splitWacanaAndQuestion(s.pertanyaan);
+
   document.getElementById('soalFormTitle').innerText = "Edit Soal Ujian";
   document.getElementById('soal-id').value = s.id;
   document.getElementById('crud-soal-nomor').value = s.nomor;
   document.getElementById('crud-soal-bobot').value = s.bobot;
-  document.getElementById('crud-soal-pertanyaan').value = formatMathExponents(s.pertanyaan);
+  const elWacana = document.getElementById('crud-soal-wacana');
+  if (elWacana) elWacana.value = formatMathExponents(wacana);
+  document.getElementById('crud-soal-pertanyaan').value = formatMathExponents(question);
   document.getElementById('crud-soal-opsia').value = formatMathExponents(s.opsi_a);
   document.getElementById('crud-soal-opsib').value = formatMathExponents(s.opsi_b);
   document.getElementById('crud-soal-opsic').value = formatMathExponents(s.opsi_c || "");
@@ -6148,7 +6323,10 @@ async function handleSoalCrudSubmit(e) {
   const id = document.getElementById('soal-id').value;
   const no = parseInt(document.getElementById('crud-soal-nomor').value);
   const bobot = parseInt(document.getElementById('crud-soal-bobot').value);
-  const q = formatMathExponents(document.getElementById('crud-soal-pertanyaan').value.trim());
+  const wacanaVal = formatMathExponents((document.getElementById('crud-soal-wacana')?.value || '').trim());
+  if (wacanaVal) lastUsedWacanaText = wacanaVal;
+  const qCore = formatMathExponents(document.getElementById('crud-soal-pertanyaan').value.trim());
+  const q = combineWacanaAndQuestion(wacanaVal, qCore);
   const oa = formatMathExponents(document.getElementById('crud-soal-opsia').value.trim());
   const ob = formatMathExponents(document.getElementById('crud-soal-opsib').value.trim());
   const oc = formatMathExponents(document.getElementById('crud-soal-opsic').value.trim());
@@ -7612,6 +7790,48 @@ function clearWordRawInput() {
   }
 }
 
+function detectWacanaRangeHeader(line) {
+  const s = String(line || '').trim();
+  if (!s) return null;
+
+  // 1. Tag eksplisit: [WACANA 1-4] atau [WACANA 1 s.d. 4]
+  const tagMatch = s.match(/^\[\s*wacana\s+(\d+)\s*(?:-|–|—|s\.?d\.?|sampai|to)\s*(\d+)\s*\](.*)$/i);
+  if (tagMatch) {
+    const a = parseInt(tagMatch[1]);
+    const b = parseInt(tagMatch[2]);
+    if (a >= 1 && b >= a && (b - a) <= 30) {
+      return { startNo: a, endNo: b, remainderText: (tagMatch[3] || '').trim() };
+    }
+  }
+
+  // Pastikan baris mengandung kata kunci penanda wacana/bacaan (Indonesia / Inggris)
+  const hasWacanaKeyword = /\b(?:bacalah|perhatikan|cermati|simaklah|teks|wacana|kutipan|dialog|percakapan|puisi|cerita|bacaan|paragraf|artikel|surat|pengumuman|read|following|passage|text|dialogue|story|letter|announcement|table|chart)\b/i.test(s);
+  if (!hasWacanaKeyword) return null;
+
+  // Pola rentang nomor: "nomor 1 s.d. 4", "no. 1 - 4", "soal 1 sampai 4", "questions 1 to 4", "number 1 and 2"
+  const rangeRegex = /(?:(?:untuk(?:\s+menjawab)?|menjawab|for|to\s+answer|refer(?:s)?\s+to)\s+)?(?:(?:soal|pertanyaan|questions?|numbers?|items?|nomor|no\.?)\s*)+(?:nomor\s*|no\.?\s*|number\s*)?(\d+)\s*(?:-|–|—|s\.?d\.?|sampai(?:\s+dengan)?|to|through|until|dan|and|&)\s*(?:(?:soal|pertanyaan|questions?|numbers?|nomor|no\.?)\s*)?(\d+)\b[\s\!\.\:\-]*(.*)$/i;
+  const m = s.match(rangeRegex);
+  if (m) {
+    const a = parseInt(m[1]);
+    const b = parseInt(m[2]);
+    if (a >= 1 && b >= a && (b - a) <= 30) {
+      return { startNo: a, endNo: b, remainderText: (m[3] || '').trim() };
+    }
+  }
+
+  // Pola Inggris alternatif: "Questions 1 - 3 refer to the following text"
+  const altEng = s.match(/^(?:questions?|numbers?|items?|soal(?:\s+nomor)?)\s+(\d+)\s*(?:-|–|—|s\.?d\.?|sampai|to|through|and|dan)\s*(\d+)\b[^:\n]*[\:\.\!]?\s*(.*)$/i);
+  if (altEng) {
+    const a = parseInt(altEng[1]);
+    const b = parseInt(altEng[2]);
+    if (a >= 1 && b >= a && (b - a) <= 30) {
+      return { startNo: a, endNo: b, remainderText: (altEng[3] || '').trim() };
+    }
+  }
+
+  return null;
+}
+
 function parseWordQuestions(rawText) {
   if (!rawText || !rawText.trim()) return [];
 
@@ -7626,12 +7846,10 @@ function parseWordQuestions(rawText) {
   const kunciBlockMatch = cleanText.match(/\n\s*(?:kunci\s*jawaban|daftar\s*kunci|kunci\s*soal|kunci\s*pilihan\s*ganda)[\s\:\-]*\n([\s\S]*)$/i);
   if (kunciBlockMatch) {
     const keySection = kunciBlockMatch[1];
-    // Ambil pola '1. A' atau '1=A' atau '1:A' atau '1.A' atau '1 - A'
     const keyPairs = keySection.matchAll(/(?:no\.?\s*)?(\d+)[\.\s\:\=\)\-]+([A-Ea-e])/gi);
     for (const kp of keyPairs) {
       separatedKeys[parseInt(kp[1])] = kp[2].toUpperCase();
     }
-    // Potong teks agar bagian kunci terpisah tidak dianggap soal
     cleanText = cleanText.substring(0, kunciBlockMatch.index);
   }
 
@@ -7643,7 +7861,6 @@ function parseWordQuestions(rawText) {
     const trimmed = l.trim();
     if (!trimmed) continue;
 
-    // Cek apakah ada multi-opsi horizontal, misal: A. apel  B. jeruk  C. mangga atau (A) apel (B) jeruk
     const multiOptMatch = trimmed.match(/^(\(?[A-Ea-e][\.\)])\s+(.+?)(?=\s+\(?[B-Eb-e][\.\)]\s+)/);
     if (multiOptMatch && /\s+\(?[B-Eb-e][\.\)]\s+/.test(trimmed)) {
       const parts = trimmed.split(/(?=\s+\(?[A-Ea-e][\.\)]\s+)/);
@@ -7654,7 +7871,9 @@ function parseWordQuestions(rawText) {
   }
 
   const questions = [];
+  const sharedWacanaBlocks = [];
   let curQ = null;
+  let activeWacana = null;
 
   const qRegex = /^(?:no\.?\s*|soal\s*)?(\d+)[\.\)\:\-\]]\s*(.*)/i;
   const optRegex = /^\(?([A-Ea-e])[\.\)\:\-]\s*(.*)/;
@@ -7675,11 +7894,41 @@ function parseWordQuestions(rawText) {
     // Cek apakah baris ini adalah nomor soal baru
     const qMatch = line.match(qRegex);
 
+    // Cek apakah baris ini adalah pengantar wacana untuk rentang soal (misal: "Bacalah teks berikut untuk soal nomor 1 s.d. 4!")
+    if (!optMatch && !qMatch) {
+      const wRange = detectWacanaRangeHeader(line);
+      if (wRange) {
+        // Simpan soal sebelumnya agar teks wacana baru TIDAK masuk ke Opsi E soal sebelumnya
+        if (curQ && curQ.pertanyaan && (curQ.opsi_a || curQ.opsi_b)) {
+          questions.push(curQ);
+          curQ = null;
+        }
+        if (activeWacana && activeWacana.lines.length > 0) {
+          sharedWacanaBlocks.push({
+            startNo: activeWacana.startNo,
+            endNo: activeWacana.endNo,
+            text: activeWacana.lines.join('\n').trim()
+          });
+        }
+        activeWacana = {
+          startNo: wRange.startNo,
+          endNo: wRange.endNo,
+          lines: wRange.remainderText ? [wRange.remainderText] : []
+        };
+        continue;
+      }
+    }
+
+    // Jika sedang mengumpulkan baris-baris cerita wacana sebelum nomor soal berikutnya dimulai
+    if (activeWacana && !qMatch) {
+      activeWacana.lines.push(line);
+      continue;
+    }
+
     if (optMatch && curQ && curQ.pertanyaan) {
       const letter = optMatch[1].toLowerCase();
       let optText = optMatch[2] ? optMatch[2].trim() : '';
 
-      // Cek apakah ada tanda bintang jawaban benar (cth: '*B. Jakarta' atau 'B. Jakarta *')
       if (optText.startsWith('*') || optText.endsWith('*')) {
         curQ.jawaban_benar = letter.toUpperCase();
         optText = optText.replace(/\*/g, '').trim();
@@ -7690,6 +7939,18 @@ function parseWordQuestions(rawText) {
     }
 
     if (qMatch && !optMatch) {
+      // Jika ada blok wacana yang baru selesai dikumpulkan tepat sebelum soal ini, simpan ke daftar wacana bersama
+      if (activeWacana) {
+        if (activeWacana.lines.length > 0) {
+          sharedWacanaBlocks.push({
+            startNo: activeWacana.startNo,
+            endNo: activeWacana.endNo,
+            text: activeWacana.lines.join('\n').trim()
+          });
+        }
+        activeWacana = null;
+      }
+
       // Simpan soal sebelumnya jika valid
       if (curQ && curQ.pertanyaan && (curQ.opsi_a || curQ.opsi_b)) {
         questions.push(curQ);
@@ -7708,7 +7969,6 @@ function parseWordQuestions(rawText) {
         bobot: 1
       };
 
-      // Cek apakah ada kunci di dalam baris nomor (cth: '1. (Kunci: B) Pertanyaan...')
       const inlineKey = curQ.pertanyaan.match(/\((?:kunci|jawaban)[\s\:\-]+([A-Ea-e])\)/i);
       if (inlineKey) {
         curQ.jawaban_benar = inlineKey[1].toUpperCase();
@@ -7720,11 +7980,9 @@ function parseWordQuestions(rawText) {
 
     // Jika bukan soal baru dan bukan opsi baru:
     if (curQ) {
-      // Jika belum ada opsi A, berarti masih teks pertanyaan
       if (!curQ.opsi_a) {
         curQ.pertanyaan += (curQ.pertanyaan ? '\n' : '') + line;
       } else {
-        // Jika sudah ada opsi, cari opsi terakhir yang terisi dan tambahkan baris lanjutannya
         const letters = ['e', 'd', 'c', 'b', 'a'];
         for (const l of letters) {
           if (curQ['opsi_' + l]) {
@@ -7740,6 +7998,44 @@ function parseWordQuestions(rawText) {
   if (curQ && curQ.pertanyaan && (curQ.opsi_a || curQ.opsi_b)) {
     questions.push(curQ);
   }
+
+  // Cek juga jika guru menaruh kalimat pengantar wacana ("1. Bacalah teks berikut untuk soal nomor 1 - 3!\n<cerita>\n<pertanyaan>") di dalam nomor soal pertama
+  questions.forEach(q => {
+    const qLines = String(q.pertanyaan || '').split('\n').map(s => s.trim()).filter(Boolean);
+    if (qLines.length >= 3) {
+      const inHeader = detectWacanaRangeHeader(qLines[0]);
+      if (inHeader) {
+        const coreQ = qLines[qLines.length - 1];
+        const bodyParts = [
+          ...(inHeader.remainderText ? [inHeader.remainderText] : []),
+          ...qLines.slice(1, qLines.length - 1)
+        ];
+        const wText = bodyParts.join('\n').trim();
+        if (wText && coreQ) {
+          q.pertanyaan = combineWacanaAndQuestion(wText, coreQ);
+          sharedWacanaBlocks.push({
+            startNo: inHeader.startNo,
+            endNo: inHeader.endNo,
+            text: wText
+          });
+        }
+      }
+    }
+  });
+
+  // Sematkan setiap blok wacana bersama ke seluruh nomor soal dalam rentangnya (startNo s.d. endNo)
+  sharedWacanaBlocks.forEach(block => {
+    if (!block.text) return;
+    questions.forEach(q => {
+      const qNo = Number(q.nomor) || 0;
+      if (qNo >= block.startNo && qNo <= block.endNo) {
+        const { wacana, question } = splitWacanaAndQuestion(q.pertanyaan);
+        if (!wacana) {
+          q.pertanyaan = combineWacanaAndQuestion(block.text, question);
+        }
+      }
+    });
+  });
 
   // Konversi otomatis penulisan pangkat seperti 2^2 -> 2², x^3 -> x³ pada hasil ekstraksi Word/teks
   questions.forEach(q => {
@@ -8194,6 +8490,7 @@ ${materi ? `4. Gunakan materi/referensi berikut sebagai acuan utama:\n"""\n${mat
 7. Tentukan kunci jawaban_benar secara akurat (pilih salah satu huruf: "A", "B", "C", "D", atau "E").
 8. Bobot setiap butir soal bernilai 1.
 9. Untuk penulisan bilangan berpangkat / eksponen / satuan persegi atau kubik, tulis dengan jelas (misal 3^5, 2^2, (2^3)^4, 10^-5, x^2, cm^2) dan JANGAN menambahkan tanda baca koma di akhir teks pilihan jawaban (contoh salah: "3¹," -> contoh benar: "3^1").
+10. Khusus jika soal menggunakan teks bacaan / wacana / cerita / dialog (seperti Bahasa Indonesia, Bahasa Inggris, atau studi kasus), WAJIB sertakan teks wacananya langsung di dalam field "pertanyaan" pada setiap butir soal yang merujuk wacana tersebut dengan format: "[WACANA]\\n(isi teks wacana/bacaan)\\n[/WACANA]\\n(kalimat pertanyaan inti)". JANGAN PERNAH merujuk ke nomor soal lain seperti "Berdasarkan teks pada soal nomor 1..." tanpa menyertakan teks wacananya, karena urutan soal di layar siswa akan diacak.
 
 PENTING:
 Keluarkan output HANYA berupa JSON Array murni tanpa format markdown seperti \`\`\`json.
@@ -8560,5 +8857,11 @@ window.saveWordImportedData = saveWordImportedData;
 window.quickDeleteGuruPaket = quickDeleteGuruPaket;
 window.updatePenugasanConflictWarning = updatePenugasanConflictWarning;
 window.formatMathExponents = formatMathExponents;
+window.renderMathHtml = renderMathHtml;
 window.insertMathSymbol = insertMathSymbol;
 window.convertAllSoalFormExponents = convertAllSoalFormExponents;
+window.splitWacanaAndQuestion = splitWacanaAndQuestion;
+window.combineWacanaAndQuestion = combineWacanaAndQuestion;
+window.copyWacanaFromPrevSoal = copyWacanaFromPrevSoal;
+window.clearSoalWacanaInput = clearSoalWacanaInput;
+window.applyWacanaToSoalRangePrompt = applyWacanaToSoalRangePrompt;

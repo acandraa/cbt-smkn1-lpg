@@ -1360,10 +1360,21 @@
                 Kunci: B<br><br>
                 2. Satuan dari kecepatan transfer data adalah...<br>
                 A. bps &nbsp;&nbsp; B. Byte &nbsp;&nbsp; C. Hertz &nbsp;&nbsp; D. Volt &nbsp;&nbsp; E. Watt<br>
-                Jawaban: A
+                Jawaban: A<br><br>
+                Bacalah teks berikut untuk menjawab soal nomor 3 s.d. 4!<br>
+                Teknologi kecerdasan artifisial (AI) berkembang pesat dalam dunia pendidikan modern.<br><br>
+                3. Apa topik utama kutipan teks di atas?<br>
+                A. Perkembangan AI di dunia pendidikan *<br>
+                B. Sejarah komputer tabung<br>
+                C. Jaringan kabel serat optik<br>
+                D. Perangkat keras printer<br>
+                E. Sistem operasi ponsel<br><br>
+                4. Berdasarkan teks tersebut, di bidang apa AI berkembang pesat?<br>
+                A. Pertanian &nbsp;&nbsp; B. Pendidikan &nbsp;&nbsp; C. Pertambangan &nbsp;&nbsp; D. Perikanan &nbsp;&nbsp; E. Perhutanan<br>
+                Kunci: B
               </div>
               <div class="small text-muted mt-2">
-                <em>*Tips: Kunci jawaban juga bisa diletakkan di akhir dokumen dengan judul <code>KUNCI JAWABAN:</code> (contoh: <code>1. B, 2. A</code>). Tanda bintang pada opsi yang benar (contoh: <code>B. Keyboard *</code>) juga otomatis terbaca.</em>
+                <em>*Tips: Untuk <strong>Soal Cerita / Wacana (B. Indonesia & B. Inggris)</strong>, cukup tulis kalimat seperti <code>Bacalah teks berikut untuk soal nomor 3 s.d. 4!</code> atau <code>Read the following text for questions 3 to 4!</code> diikuti teks ceritanya — sistem otomatis menyematkan kotak wacana tersebut ke semua nomor soal terkait zodat tetap aman walau soal diacak.</em>
               </div>
             </div>
           </div>
@@ -1696,9 +1707,31 @@ Jawaban: B"></textarea>
                 <input type="number" class="form-control" id="crud-soal-bobot" required min="1" value="1">
               </div>
             </div>
+            <!-- Kotak Wacana / Teks Bacaan Soal Cerita (Opsional - B. Indonesia / B. Inggris) -->
+            <div class="mb-3 p-2 px-3 rounded-3 border bg-light-subtle">
+              <div class="d-flex justify-content-between align-items-center flex-wrap gap-1 mb-1">
+                <label for="crud-soal-wacana" class="form-label fw-semibold mb-0 small text-primary">
+                  <i class="bi bi-book-half me-1"></i>Teks Wacana / Bacaan Soal Cerita <span class="text-muted fw-normal">(Opsional — B. Indonesia / B. Inggris)</span>
+                </label>
+                <div class="d-flex flex-wrap gap-1">
+                  <button type="button" class="btn btn-outline-primary btn-sm py-0 px-2" style="font-size: 0.74rem;" onclick="copyWacanaFromPrevSoal()" title="Salin teks wacana dari soal sebelumnya di paket ini">
+                    <i class="bi bi-files me-1"></i>Salin Wacana Sebelumnya
+                  </button>
+                  <button type="button" class="btn btn-outline-success btn-sm py-0 px-2" style="font-size: 0.74rem;" onclick="applyWacanaToSoalRangePrompt()" title="Pasang teks wacana ini sekaligus ke beberapa nomor soal (misal No. 1 s.d. 5)">
+                    <i class="bi bi-collection me-1"></i>Terapkan ke No. X–Y
+                  </button>
+                  <button type="button" class="btn btn-outline-secondary btn-sm py-0 px-2" style="font-size: 0.74rem;" onclick="clearSoalWacanaInput()" title="Kosongkan teks wacana">
+                    <i class="bi bi-x-lg"></i>
+                  </button>
+                </div>
+              </div>
+              <textarea class="form-control form-control-sm" id="crud-soal-wacana" rows="3"
+                placeholder="Kosongkan jika bukan soal cerita. Jika soal cerita/wacana, tempel teks bacaan di sini agar tampil di kotak bacaan khusus di atas pertanyaan (tetap aman saat soal diacak)."></textarea>
+            </div>
+
             <div class="mb-3">
               <div class="d-flex justify-content-between align-items-center flex-wrap gap-1 mb-1">
-                <label for="crud-soal-pertanyaan" class="form-label fw-semibold mb-0">Pertanyaan</label>
+                <label for="crud-soal-pertanyaan" class="form-label fw-semibold mb-0">Pertanyaan Inti</label>
                 <small class="text-muted" style="font-size: 0.75rem;">
                   <i class="bi bi-magic text-primary me-1"></i>Ketik <code>2^2</code> atau <code>x^3</code> otomatis berubah jadi <strong>2²</strong>, <strong>x³</strong>
                 </small>
@@ -2106,13 +2139,13 @@ Jawaban: B"></textarea>
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 
   <!-- CBT Modules -->
-  <script src="js/config.js?v=69"></script>
-  <script src="js/supabase-config.js?v=69"></script>
-  <script src="js/db-adapter.js?v=69"></script>
-  <script src="js/auth.js?v=69"></script>
-  <script src="js/excel-helpers.js?v=69"></script>
-  <script src="js/templates.js?v=69"></script>
-  <script src="js/admin.js?v=69"></script>
+  <script src="js/config.js?v=70"></script>
+  <script src="js/supabase-config.js?v=70"></script>
+  <script src="js/db-adapter.js?v=70"></script>
+  <script src="js/auth.js?v=70"></script>
+  <script src="js/excel-helpers.js?v=70"></script>
+  <script src="js/templates.js?v=70"></script>
+  <script src="js/admin.js?v=70"></script>
   <script>
     // Dark mode logic
     const themeToggleBtn = document.getElementById('theme-toggle-admin');

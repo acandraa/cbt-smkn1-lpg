@@ -1013,6 +1013,18 @@ function formatMathExponentsUjian(text) {
   return s;
 }
 
+function splitWacanaAndQuestionUjian(rawText) {
+  const s = String(rawText || '');
+  const match = s.match(/^\s*\[WACANA\]\s*([\s\S]*?)\s*\[\/WACANA\]\s*([\s\S]*)$/i);
+  if (match) {
+    return {
+      wacana: match[1].trim(),
+      question: match[2].trim()
+    };
+  }
+  return { wacana: '', question: s };
+}
+
 function renderMathHtmlUjian(rawText) {
   const norm = formatMathExponentsUjian(rawText);
   if (!norm) return '';
@@ -1038,7 +1050,21 @@ function renderQuestion() {
 
   const s = allQuestions[currentIndex];
   document.getElementById('exam-soal-index').innerText = `Soal ${currentIndex + 1} dari ${totalSoalCount}`;
-  document.getElementById('exam-pertanyaan').innerHTML = `${escapeHtmlUjian(s.nomor || (currentIndex + 1))}. ${renderMathHtmlUjian(s.pertanyaan)}`;
+
+  const qNumLabel = escapeHtmlUjian(s.nomor || (currentIndex + 1));
+  const { wacana, question } = splitWacanaAndQuestionUjian(s.pertanyaan);
+  if (wacana) {
+    document.getElementById('exam-pertanyaan').innerHTML = `
+      <div class="p-3 mb-3 rounded-3 border border-primary border-opacity-25"
+           style="background: rgba(37, 99, 235, 0.05); border-left: 4px solid #2563eb !important; max-height: 290px; overflow-y: auto; font-size: 0.95rem; font-weight: 400; line-height: 1.7; text-align: justify; white-space: pre-wrap;">
+        <div class="small fw-bold text-primary mb-2" style="text-align: left;">
+          <i class="bi bi-book-half me-1"></i>Teks Bacaan / Wacana:
+        </div>${renderMathHtmlUjian(wacana)}</div>
+      <div class="fw-semibold text-dark" style="white-space: pre-wrap;">${qNumLabel}. ${renderMathHtmlUjian(question)}</div>
+    `;
+  } else {
+    document.getElementById('exam-pertanyaan').innerHTML = `${qNumLabel}. ${renderMathHtmlUjian(question)}`;
+  }
 
   const imgEl = document.getElementById('exam-gambar');
   if (s.gambar) {
