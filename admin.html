@@ -13,6 +13,35 @@
   <link href="https://cdn.jsdelivr.net/npm/sweetalert2@11/dist/sweetalert2.min.css" rel="stylesheet">
   <!-- Custom Styles -->
   <link rel="stylesheet" href="css/styles.css?v=9">
+  <style>
+    .kesiapan-kpi-card {
+      cursor: pointer;
+      transition: transform 0.15s ease, box-shadow 0.15s ease;
+    }
+    .kesiapan-kpi-card:hover {
+      transform: translateY(-2px);
+      box-shadow: 0 0.5rem 1rem rgba(0, 0, 0, 0.08) !important;
+    }
+    .kesiapan-matrix-table th.sticky-col,
+    .kesiapan-matrix-table td.sticky-col {
+      position: sticky;
+      left: 0;
+      z-index: 2;
+      background-color: var(--bs-body-bg, #ffffff);
+      box-shadow: 2px 0 5px rgba(0, 0, 0, 0.05);
+    }
+    .kesiapan-matrix-table thead th.sticky-col {
+      z-index: 4;
+      background-color: #f8f9fa;
+    }
+    .kesiapan-cell-btn {
+      cursor: pointer;
+      transition: filter 0.12s ease;
+    }
+    .kesiapan-cell-btn:hover {
+      filter: brightness(0.95);
+    }
+  </style>
 </head>
 
 <body>
@@ -106,6 +135,12 @@
             <li class="nav-item" id="nav-item-guru">
               <a class="admin-nav-link" href="#" onclick="switchTab('guru')">
                 <i class="bi bi-person-workspace"></i> Data Guru Mapel
+              </a>
+            </li>
+            <li class="nav-item" id="nav-item-kesiapan">
+              <a class="admin-nav-link" href="#" onclick="switchTab('kesiapan')">
+                <i class="bi bi-clipboard2-check-fill"></i> Monitoring Kesiapan
+                <span class="badge bg-danger rounded-pill ms-auto d-none" id="nav-badge-kesiapan" style="font-size: 0.65rem;">0</span>
               </a>
             </li>
             <li class="nav-item" id="nav-item-soal">
@@ -996,6 +1031,275 @@
                 <nav aria-label="Hasil Pagination">
                   <ul class="pagination pagination-sm mb-0" id="hasil-pagination-nav"></ul>
                 </nav>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <!-- SECTION: MONITORING KESIAPAN GURU & KELAS -->
+        <section id="sec-kesiapan" class="d-none">
+          <div class="d-flex justify-content-between flex-wrap flex-md-nowrap align-items-center pt-3 pb-2 mb-3 border-bottom">
+            <div>
+              <h1 class="h2 text-dark mb-0"><i class="bi bi-clipboard2-check-fill text-primary me-2"></i>Monitoring Kesiapan Mapel &amp; Soal</h1>
+              <p class="text-muted small mb-0 mt-1">Pantau guru yang belum mengatur mapel / input soal dan rombel kelas yang belum mendapatkan paket ujian</p>
+            </div>
+            <div class="btn-toolbar mb-2 mb-md-0 gap-2 flex-wrap">
+              <button class="btn btn-outline-primary btn-sm rounded-pill px-3 fw-semibold" id="btn-refresh-kesiapan"
+                onclick="loadKesiapanMonitoring(true)">
+                <i class="bi bi-arrow-clockwise me-1"></i> Refresh &amp; Hitung Soal
+              </button>
+              <button class="btn btn-success btn-sm rounded-pill px-3 fw-semibold"
+                onclick="copyKesiapanWaRecap('auto')" title="Salin rekap rapi untuk ditempel ke Grup WhatsApp Guru">
+                <i class="bi bi-whatsapp me-1"></i> Salin Rekap WA
+              </button>
+              <button class="btn btn-outline-success btn-sm rounded-pill px-3 fw-semibold"
+                onclick="exportKesiapanExcel()">
+                <i class="bi bi-file-earmark-excel-fill me-1"></i> Export Excel
+              </button>
+            </div>
+          </div>
+
+          <!-- Status Loading Hitung Soal -->
+          <div id="kesiapan-sync-banner" class="alert alert-info border-0 shadow-sm py-2 px-3 small d-none align-items-center gap-2 mb-3">
+            <span class="spinner-border spinner-border-sm text-primary"></span>
+            <span id="kesiapan-sync-text">Sedang menghitung jumlah butir soal per paket di database...</span>
+          </div>
+
+          <!-- 4 KPI Summary Cards -->
+          <div class="row g-3 mb-4">
+            <div class="col-sm-6 col-xl-3">
+              <div class="glass-card p-3 kesiapan-kpi-card border-start border-4 border-danger"
+                onclick="jumpKesiapanFilter('guru', 'NO_MAPEL')" title="Klik untuk melihat daftar guru yang belum mengatur mapel">
+                <div class="d-flex align-items-center justify-content-between">
+                  <div>
+                    <div class="text-muted small fw-semibold text-uppercase mb-1">Guru Belum Atur Mapel</div>
+                    <h3 class="fw-bold mb-0 text-danger" id="kesiapan-stat-guru-nomapel">0</h3>
+                    <div class="text-muted" style="font-size: 0.72rem;" id="kesiapan-stat-guru-nomapel-sub">Akun tanpa tugas mengajar</div>
+                  </div>
+                  <div class="avatar-circle" style="background-color: rgba(220, 53, 69, 0.12); color: #dc3545;">
+                    <i class="bi bi-person-x-fill fs-4"></i>
+                  </div>
+                </div>
+              </div>
+            </div>
+            <div class="col-sm-6 col-xl-3">
+              <div class="glass-card p-3 kesiapan-kpi-card border-start border-4 border-warning"
+                onclick="jumpKesiapanFilter('guru', 'ZERO_SOAL')" title="Klik untuk melihat guru yang soalnya masih 0 / belum lengkap">
+                <div class="d-flex align-items-center justify-content-between">
+                  <div>
+                    <div class="text-muted small fw-semibold text-uppercase mb-1">Guru Soal 0 / Kurang</div>
+                    <h3 class="fw-bold mb-0 text-warning-emphasis" id="kesiapan-stat-guru-nosoal">0</h3>
+                    <div class="text-muted" style="font-size: 0.72rem;" id="kesiapan-stat-guru-nosoal-sub">Belum ada paket atau masih 0 soal</div>
+                  </div>
+                  <div class="avatar-circle" style="background-color: rgba(255, 193, 7, 0.18); color: #997404;">
+                    <i class="bi bi-hourglass-split fs-4"></i>
+                  </div>
+                </div>
+              </div>
+            </div>
+            <div class="col-sm-6 col-xl-3">
+              <div class="glass-card p-3 kesiapan-kpi-card border-start border-4 border-success"
+                onclick="jumpKesiapanFilter('guru', 'READY')" title="Klik untuk melihat guru yang semua paket soalnya sudah siap">
+                <div class="d-flex align-items-center justify-content-between">
+                  <div>
+                    <div class="text-muted small fw-semibold text-uppercase mb-1">Guru Siap Ujian</div>
+                    <h3 class="fw-bold mb-0 text-success" id="kesiapan-stat-guru-siap">0</h3>
+                    <div class="text-muted" style="font-size: 0.72rem;" id="kesiapan-stat-guru-siap-sub">Semua paket sudah terisi soal</div>
+                  </div>
+                  <div class="avatar-circle" style="background-color: rgba(25, 135, 84, 0.12); color: #198754;">
+                    <i class="bi bi-check-circle-fill fs-4"></i>
+                  </div>
+                </div>
+              </div>
+            </div>
+            <div class="col-sm-6 col-xl-3">
+              <div class="glass-card p-3 kesiapan-kpi-card border-start border-4 border-primary"
+                onclick="jumpKesiapanFilter('kelas', 'ISSUES')" title="Klik untuk membuka Matriks Kelas yang belum mendapat mapel">
+                <div class="d-flex align-items-center justify-content-between">
+                  <div>
+                    <div class="text-muted small fw-semibold text-uppercase mb-1">Kelas Belum Lengkap</div>
+                    <h3 class="fw-bold mb-0 text-primary" id="kesiapan-stat-kelas-kurang">0</h3>
+                    <div class="text-muted" style="font-size: 0.72rem;" id="kesiapan-stat-kelas-kurang-sub">Rombel masih kurang mapel / 0 soal</div>
+                  </div>
+                  <div class="avatar-circle" style="background-color: rgba(13, 110, 253, 0.12); color: #0d6efd;">
+                    <i class="bi bi-building-exclamation fs-4"></i>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Sub-Tabs Selector -->
+          <div class="glass-card p-3 mb-4">
+            <div class="d-flex flex-wrap justify-content-between align-items-center gap-2 border-bottom pb-3 mb-3">
+              <ul class="nav nav-pills gap-2" id="kesiapan-subtabs">
+                <li class="nav-item">
+                  <button type="button" class="nav-link active fw-semibold rounded-pill px-3" id="btn-subtab-kesiapan-guru"
+                    onclick="switchKesiapanSubTab('guru')">
+                    <i class="bi bi-person-badge me-1"></i> Monitoring Kesiapan Guru
+                    <span class="badge bg-danger ms-1 rounded-pill" id="badge-subtab-guru-issues">0</span>
+                  </button>
+                </li>
+                <li class="nav-item">
+                  <button type="button" class="nav-link fw-semibold rounded-pill px-3" id="btn-subtab-kesiapan-kelas"
+                    onclick="switchKesiapanSubTab('kelas')">
+                    <i class="bi bi-grid-3x3-gap-fill me-1"></i> Monitoring Cakupan Kelas (Matriks Mapel)
+                    <span class="badge bg-primary ms-1 rounded-pill" id="badge-subtab-kelas-issues">0</span>
+                  </button>
+                </li>
+              </ul>
+              <div class="small text-muted" id="kesiapan-last-updated">
+                <i class="bi bi-clock me-1"></i>Belum disinkronkan
+              </div>
+            </div>
+
+            <!-- SUB-TAB 1: MONITORING GURU -->
+            <div id="kesiapan-panel-guru">
+              <div class="row g-2 mb-3 align-items-center">
+                <div class="col-md-4">
+                  <div class="input-group input-group-sm">
+                    <span class="input-group-text"><i class="bi bi-search"></i></span>
+                    <input type="text" class="form-control" id="kesiapan-guru-search"
+                      placeholder="Cari nama guru, username, atau mapel..." oninput="renderKesiapanGuruTable()">
+                  </div>
+                </div>
+                <div class="col-md-4">
+                  <select class="form-select form-select-sm fw-semibold" id="kesiapan-guru-status"
+                    onchange="renderKesiapanGuruTable()">
+                    <option value="ISSUES">⚠️ Hanya yang Belum Siap (Prioritas)</option>
+                    <option value="ALL">👥 Semua Status Guru</option>
+                    <option value="NO_MAPEL">🔴 Belum Atur Mapel Sama Sekali</option>
+                    <option value="NO_PAKET">🟠 Mapel Ada, Belum Ada Paket Soal</option>
+                    <option value="ZERO_SOAL">🟡 Paket Ada, Soal Masih 0 / Belum Lengkap</option>
+                    <option value="READY">🟢 Sudah Siap Ujian (Semua Paket Terisi)</option>
+                  </select>
+                </div>
+                <div class="col-md-4 d-flex justify-content-md-end gap-2">
+                  <button type="button" class="btn btn-sm btn-outline-success rounded-pill px-3"
+                    onclick="copyKesiapanWaRecap('guru')">
+                    <i class="bi bi-whatsapp me-1"></i> Salin Daftar Guru Belum Siap
+                  </button>
+                </div>
+              </div>
+
+              <div class="table-responsive border rounded-3 bg-white">
+                <table class="table table-hover align-middle mb-0 custom-table">
+                  <thead class="table-light">
+                    <tr>
+                      <th class="text-center" style="width: 45px;">No</th>
+                      <th style="min-width: 190px;">Nama Guru &amp; Username</th>
+                      <th style="min-width: 165px;">Status Kesiapan</th>
+                      <th style="min-width: 220px;">Penugasan Mapel &amp; Rombel</th>
+                      <th style="min-width: 240px;">Status Paket &amp; Jumlah Soal</th>
+                      <th class="text-center" style="min-width: 150px;">Aksi Cepat</th>
+                    </tr>
+                  </thead>
+                  <tbody id="tbody-kesiapan-guru">
+                    <tr>
+                      <td colspan="6" class="text-center py-4 text-muted">
+                        <span class="spinner-border spinner-border-sm me-2 text-primary"></span>Memuat analisis kesiapan guru...
+                      </td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+            </div>
+
+            <!-- SUB-TAB 2: MONITORING KELAS (MATRIKS MAPEL) -->
+            <div id="kesiapan-panel-kelas" class="d-none">
+              <!-- Bar Pilih Tingkat + Filter -->
+              <div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-3">
+                <div class="btn-group btn-group-sm" role="group" id="kesiapan-tingkat-pills">
+                  <button type="button" class="btn btn-primary fw-semibold" data-tingkat="X"
+                    onclick="selectKesiapanTingkat('X')">
+                    Tingkat X <span class="badge bg-light text-dark ms-1" id="badge-tingkat-X">0</span>
+                  </button>
+                  <button type="button" class="btn btn-outline-primary fw-semibold" data-tingkat="XI"
+                    onclick="selectKesiapanTingkat('XI')">
+                    Tingkat XI <span class="badge bg-secondary-subtle text-dark ms-1" id="badge-tingkat-XI">0</span>
+                  </button>
+                  <button type="button" class="btn btn-outline-primary fw-semibold" data-tingkat="XII"
+                    onclick="selectKesiapanTingkat('XII')">
+                    Tingkat XII <span class="badge bg-secondary-subtle text-dark ms-1" id="badge-tingkat-XII">0</span>
+                  </button>
+                </div>
+
+                <div class="d-flex flex-wrap align-items-center gap-2">
+                  <select class="form-select form-select-sm" id="kesiapan-kelas-jurusan" style="width: auto; min-width: 145px;"
+                    onchange="renderKesiapanKelasMatrix()">
+                    <option value="">Semua Jurusan</option>
+                  </select>
+                  <div class="form-check form-switch mb-0 ms-1">
+                    <input class="form-check-input" type="checkbox" id="kesiapan-kelas-only-issues"
+                      onchange="renderKesiapanKelasMatrix()">
+                    <label class="form-check-label small fw-semibold text-dark" for="kesiapan-kelas-only-issues">
+                      Hanya Kelas Bermasalah
+                    </label>
+                  </div>
+                  <button type="button" class="btn btn-sm btn-outline-dark rounded-pill px-3"
+                    data-bs-toggle="collapse" data-bs-target="#collapse-target-mapel-wajib">
+                    <i class="bi bi-list-check me-1"></i> Target Mapel Wajib
+                  </button>
+                  <button type="button" class="btn btn-sm btn-outline-success rounded-pill px-3"
+                    onclick="copyKesiapanWaRecap('kelas')">
+                    <i class="bi bi-whatsapp me-1"></i> Salin Rekap Kelas
+                  </button>
+                </div>
+              </div>
+
+              <!-- Panel Opsional: Target Mapel Wajib Tambahan per Tingkat -->
+              <div class="collapse mb-3" id="collapse-target-mapel-wajib">
+                <div class="p-3 border rounded-3 bg-light">
+                  <div class="d-flex justify-content-between align-items-start flex-wrap gap-2 mb-2">
+                    <div>
+                      <h6 class="fw-bold mb-1 text-dark">
+                        <i class="bi bi-bookmark-plus-fill text-primary me-1"></i>
+                        Target Mapel Wajib Tambahan — <span id="kesiapan-target-tingkat-label" class="text-primary">Tingkat X</span>
+                      </h6>
+                      <p class="small text-muted mb-0">
+                        Secara default, sistem sudah mendeteksi otomatis mapel umum &amp; kejuruan dari perbandingan antar kelas setingkat. Tambahkan nama mapel di sini jika ada mapel wajib yang <strong>sama sekali belum dibuat oleh satu guru pun</strong> di tingkat ini (contoh: <em>Seni Budaya, Bahasa Daerah</em>).
+                      </p>
+                    </div>
+                  </div>
+                  <div class="input-group input-group-sm mb-2" style="max-width: 480px;">
+                    <input type="text" class="form-control" id="input-target-mapel-wajib"
+                      placeholder="Ketik nama mapel wajib, lalu klik Tambah..."
+                      onkeydown="if(event.key==='Enter'){event.preventDefault();addCustomTargetMapel();}">
+                    <button type="button" class="btn btn-primary fw-semibold" onclick="addCustomTargetMapel()">
+                      <i class="bi bi-plus-circle me-1"></i> Tambah
+                    </button>
+                  </div>
+                  <div id="list-custom-target-mapel" class="d-flex flex-wrap gap-1"></div>
+                </div>
+              </div>
+
+              <!-- Ringkasan Kelas Bolong / Bermasalah -->
+              <div id="kesiapan-kelas-summary-box" class="mb-3"></div>
+
+              <!-- Legenda -->
+              <div class="d-flex flex-wrap align-items-center gap-2 small mb-2 px-1">
+                <span class="fw-semibold text-muted me-1">Keterangan:</span>
+                <span class="badge bg-success-subtle text-success border border-success-subtle">✅ Siap (&gt; 0 Soal)</span>
+                <span class="badge bg-warning-subtle text-dark border border-warning-subtle">⚠️ 0 Soal / Belum Ada Paket</span>
+                <span class="badge bg-danger-subtle text-danger border border-danger-subtle">❌ Belum Dapat Mapel</span>
+                <span class="badge bg-danger text-white">🔥 Ganda / Tabrakan</span>
+                <span class="badge bg-light text-muted border">— Bukan Jurusannya / Opsional</span>
+              </div>
+
+              <!-- Matriks Kelas x Mapel -->
+              <div class="table-responsive border rounded-3 bg-white" style="max-height: 540px; overflow: auto;">
+                <table class="table table-bordered table-sm align-middle mb-0 kesiapan-matrix-table" id="table-kesiapan-kelas-matrix">
+                  <thead class="table-light sticky-top" id="thead-kesiapan-kelas">
+                    <tr>
+                      <th class="sticky-col px-3 py-2">Kelas / Rombel</th>
+                    </tr>
+                  </thead>
+                  <tbody id="tbody-kesiapan-kelas">
+                    <tr>
+                      <td class="text-center py-4 text-muted">Memuat matriks cakupan kelas...</td>
+                    </tr>
+                  </tbody>
+                </table>
               </div>
             </div>
           </div>
@@ -2158,13 +2462,13 @@ Jawaban: B"></textarea>
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 
   <!-- CBT Modules -->
-  <script src="js/config.js?v=75"></script>
-  <script src="js/supabase-config.js?v=75"></script>
-  <script src="js/db-adapter.js?v=75"></script>
-  <script src="js/auth.js?v=75"></script>
-  <script src="js/excel-helpers.js?v=75"></script>
-  <script src="js/templates.js?v=75"></script>
-  <script src="js/admin.js?v=75"></script>
+  <script src="js/config.js?v=76"></script>
+  <script src="js/supabase-config.js?v=76"></script>
+  <script src="js/db-adapter.js?v=76"></script>
+  <script src="js/auth.js?v=76"></script>
+  <script src="js/excel-helpers.js?v=76"></script>
+  <script src="js/templates.js?v=76"></script>
+  <script src="js/admin.js?v=76"></script>
   <script>
     // Dark mode logic
     const themeToggleBtn = document.getElementById('theme-toggle-admin');

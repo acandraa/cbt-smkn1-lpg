@@ -427,7 +427,7 @@ function applyGuruRoleUI() {
   }
 
   // Sembunyikan menu yang khusus Admin
-  ['nav-item-dashboard', 'nav-item-peserta', 'nav-item-guru', 'nav-item-jurusan', 'nav-item-pengaturan'].forEach(id => {
+  ['nav-item-dashboard', 'nav-item-peserta', 'nav-item-guru', 'nav-item-kesiapan', 'nav-item-jurusan', 'nav-item-pengaturan'].forEach(id => {
     const el = document.getElementById(id);
     if (el) el.classList.add('d-none');
   });
@@ -557,6 +557,9 @@ async function refreshAllData() {
     renderJurusanTable();
     renderKelasTable();
     renderHasilTable(allHasil);
+    if (typeof updateKesiapanSidebarBadge === 'function') {
+      updateKesiapanSidebarBadge();
+    }
 
     // Ambil pengaturan ujian
     await loadSettings();
@@ -641,7 +644,7 @@ function switchTab(tabId) {
     tabId = 'soal';
   }
   activeTab = tabId;
-  const sections = ['dashboard', 'peserta', 'guru', 'soal', 'jurusan', 'nilai', 'pengaturan'];
+  const sections = ['dashboard', 'peserta', 'guru', 'kesiapan', 'soal', 'jurusan', 'nilai', 'pengaturan'];
   
   sections.forEach(sec => {
     const el = document.getElementById(`sec-${sec}`);
@@ -673,6 +676,8 @@ function switchTab(tabId) {
     toggleAutoRefresh(false);
     if (tabId === 'guru' && !isGuruMode()) {
       loadGuru();
+    } else if (tabId === 'kesiapan' && !isGuruMode()) {
+      loadKesiapanMonitoring(false);
     } else if (tabId === 'jurusan') {
       renderJurusanTable();
       renderKelasTable();
@@ -4040,6 +4045,10 @@ async function savePenugasanGuru() {
     Swal.fire('Berhasil Disimpan', `Daftar mata pelajaran untuk guru "${g.nama_lengkap}" berhasil diperbarui.`, 'success');
     await loadGuru();
     await loadPaket();
+    if (typeof updateKesiapanSidebarBadge === 'function') updateKesiapanSidebarBadge();
+    if (activeTab === 'kesiapan' && typeof loadKesiapanMonitoring === 'function') {
+      await loadKesiapanMonitoring(false);
+    }
   } catch (err) {
     Swal.fire('Gagal Menyimpan', err.message || 'Terjadi kesalahan.', 'error');
   } finally {
@@ -9760,7 +9769,1502 @@ async function saveAiGeneratedSoalToBank() {
   }
 }
 
+// -------------------------------------------------------------
+// MONITORING KESIAPAN GURU & CAKUPAN MAPEL PER KELAS (ADMIN)
+// -------------------------------------------------------------
+let kesiapanActiveSubTab = 'guru';
+let kesiapanSelectedTingkat = 'X';
+let kesiapanSoalCountsHydrated = false;
+let kesiapanLastSnapshot = null;
+
+const KESIAPAN_CUSTOM_TARGETS_KEY = 'CBT_KESIAPAN_CUSTOM_MAPEL_TARGETS_V1';
+
+const KESIAPAN_COMMON_MAPEL_FAMS = new Set([
+  'pendidikan agama islam',
+  'pendidikan pancasila',
+  'bahasa indonesia',
+  'matematika',
+  'bahasa inggris',
+  'sejarah',
+  'pjok',
+  'seni budaya / musik',
+  'projek ipas',
+  'informatika',
+  'pkk / kewirausahaan',
+  'koding / kka'
+]);
+
+const KESIAPAN_OPTIONAL_RELIGION_FAMS = new Set([
+  'agama kristen protestan',
+  'agama katolik',
+  'agama hindu',
+  'agama buddha',
+  'agama konghucu'
+]);
+
+const KESIAPAN_MAPEL_DISPLAY_LABELS = {
+  'pendidikan agama islam': 'Pendidikan Agama Islam',
+  'agama kristen protestan': 'Agama Kristen',
+  'agama katolik': 'Agama Katolik',
+  'agama hindu': 'Agama Hindu',
+  'agama buddha': 'Agama Buddha',
+  'agama konghucu': 'Agama Konghucu',
+  'pendidikan pancasila': 'Pendidikan Pancasila',
+  'bahasa indonesia': 'Bahasa Indonesia',
+  'matematika': 'Matematika',
+  'bahasa inggris': 'Bahasa Inggris',
+  'sejarah': 'Sejarah',
+  'pjok': 'PJOK',
+  'seni budaya / musik': 'Seni Budaya / Musik',
+  'projek ipas': 'Projek IPAS',
+  'informatika': 'Informatika',
+  'pkk / kewirausahaan': 'PKK / Kewirausahaan',
+  'koding / kka': 'Koding / KKA',
+  'ddk tjkt': 'DDK TJKT',
+  'kejuruan akuntansi': 'Kejuruan Akuntansi'
+};
+
+function getKesiapanMapelDisplayLabel(fam, fallbackRaw = '') {
+  if (KESIAPAN_MAPEL_DISPLAY_LABELS[fam]) return KESIAPAN_MAPEL_DISPLAY_LABELS[fam];
+  const src = String(fallbackRaw || fam || '').trim();
+  if (!src) return '-';
+  return src.replace(/\s+/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
+}
+
+function getKesiapanCustomTargetsMap() {
+  try {
+    const raw = localStorage.getItem(KESIAPAN_CUSTOM_TARGETS_KEY);
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      if (parsed && typeof parsed === 'object') return parsed;
+    }
+  } catch (e) {}
+  return { X: [], XI: [], XII: [] };
+}
+
+function saveKesiapanCustomTargetsMap(mapObj) {
+  try {
+    localStorage.setItem(KESIAPAN_CUSTOM_TARGETS_KEY, JSON.stringify(mapObj));
+  } catch (e) {}
+}
+
+function getKesiapanCustomTargets(tingkat) {
+  const all = getKesiapanCustomTargetsMap();
+  const list = all[tingkat];
+  return Array.isArray(list) ? list : [];
+}
+
+function addCustomTargetMapel() {
+  const input = document.getElementById('input-target-mapel-wajib');
+  if (!input) return;
+  const rawVal = input.value.trim();
+  if (!rawVal) return;
+
+  const fam = normalizeMapelFamily(rawVal);
+  if (!fam) return;
+
+  const all = getKesiapanCustomTargetsMap();
+  if (!Array.isArray(all[kesiapanSelectedTingkat])) all[kesiapanSelectedTingkat] = [];
+
+  const exists = all[kesiapanSelectedTingkat].some(item => normalizeMapelFamily(item) === fam);
+  if (!exists) {
+    all[kesiapanSelectedTingkat].push(rawVal);
+    saveKesiapanCustomTargetsMap(all);
+  }
+  input.value = '';
+  recomputeAndRenderKesiapan();
+}
+
+function removeCustomTargetMapel(tingkat, index) {
+  const all = getKesiapanCustomTargetsMap();
+  if (Array.isArray(all[tingkat])) {
+    all[tingkat].splice(index, 1);
+    saveKesiapanCustomTargetsMap(all);
+  }
+  recomputeAndRenderKesiapan();
+}
+
+function normalizeTingkatToken(raw) {
+  const s = String(raw || '').toUpperCase().trim();
+  if (s === '10' || s === 'X') return 'X';
+  if (s === '11' || s === 'XI') return 'XI';
+  if (s === '12' || s === 'XII') return 'XII';
+  return '';
+}
+
+function extractJurusanHintFromMapel(rawMapel) {
+  const s = String(rawMapel || '').toLowerCase();
+  const found = new Set();
+  if (/\b(tkj|tjkt)\b/.test(s) || s.includes('jaringan komputer') || s.includes('pengalamatan jaringan')) found.add('tkj');
+  if (/\b(akl)\b/.test(s) || s.includes('akuntansi')) found.add('akl');
+  if (/\b(tbsm|tsm)\b/.test(s) || s.includes('sepeda motor')) found.add('tbsm');
+  if (/\b(tkro|tkr)\b/.test(s) || s.includes('kendaraan ringan') || s.includes('otomotif')) found.add('tkro');
+  if (/\b(atp)\b/.test(s) || s.includes('agribisnis')) found.add('atp');
+  return found;
+}
+
+function isVocationalMapelName(rawMapel, fam) {
+  if (KESIAPAN_COMMON_MAPEL_FAMS.has(fam)) return false;
+  const s = String(rawMapel || fam || '').toLowerCase();
+  if (extractJurusanHintFromMapel(s).size > 0) return true;
+  if (s.includes('kejuruan') || s.includes('dasar-dasar') || s.includes('dasar dasar') || s.includes('pilihan') || s.includes('produktif')) {
+    return true;
+  }
+  return false;
+}
+
+async function hydrateAllPaketSoalCounts(force = false) {
+  const pakets = (allPaketUnfiltered && allPaketUnfiltered.length > 0) ? allPaketUnfiltered : (allPaket || []);
+  if (pakets.length === 0) return;
+
+  // Cek apakah semua paket sudah memiliki total_soal numerik (misal dari backend PHP)
+  const alreadyHasCounts = pakets.every(p => typeof p.total_soal === 'number' && !isNaN(p.total_soal));
+  if (alreadyHasCounts && !force && kesiapanSoalCountsHydrated) return;
+
+  const counts = new Map();
+  let success = false;
+
+  // 1. Mode Local Storage
+  if (typeof DB !== 'undefined' && typeof DB.isLocal === 'function' && DB.isLocal()) {
+    try {
+      const soalAll = await DB.getSoalList();
+      (soalAll || []).forEach(s => {
+        if (s && s.paket_soal_id) {
+          const pid = String(s.paket_soal_id);
+          counts.set(pid, (counts.get(pid) || 0) + 1);
+        }
+      });
+      success = true;
+    } catch (e) {
+      console.warn('Gagal hitung soal lokal:', e);
+    }
+  }
+  // 2. Mode Supabase (Ringan: hanya ambil kolom paket_soal_id secara paginasi 1000 baris)
+  else if (window.CBT_CONFIG && window.CBT_CONFIG.backend === 'supabase' && window.supabaseClient) {
+    try {
+      const PAGE_SIZE = 1000;
+      const MAX_PAGES = 30;
+      let page = 0;
+      let totalFetched = 0;
+      while (page < MAX_PAGES) {
+        const from = page * PAGE_SIZE;
+        const to = from + PAGE_SIZE - 1;
+        const { data, error } = await window.supabaseClient
+          .from('soal')
+          .select('paket_soal_id')
+          .not('paket_soal_id', 'is', null)
+          .neq('nomor', -999)
+          .neq('nomor', -998)
+          .range(from, to);
+        if (error) throw error;
+        const rows = Array.isArray(data) ? data : [];
+        rows.forEach(r => {
+          if (r && r.paket_soal_id) {
+            const pid = String(r.paket_soal_id);
+            counts.set(pid, (counts.get(pid) || 0) + 1);
+          }
+        });
+        totalFetched += rows.length;
+        if (rows.length < PAGE_SIZE) break;
+        page++;
+      }
+      success = true;
+      // Jika totalFetched 0 padahal ada paket (misal shard lain), cek cepat per batch jika perlu
+      if (totalFetched === 0 && pakets.length <= 150) {
+        const shards = (window.getSupabaseShards && window.getSupabaseShards()) || [];
+        if (shards.length > 1) {
+          for (let sIdx = 1; sIdx < shards.length; sIdx++) {
+            const c = shards[sIdx] && shards[sIdx].client;
+            if (!c) continue;
+            const { data } = await c
+              .from('soal')
+              .select('paket_soal_id')
+              .not('paket_soal_id', 'is', null)
+              .neq('nomor', -999)
+              .neq('nomor', -998)
+              .limit(1000);
+            if (Array.isArray(data) && data.length > 0) {
+              data.forEach(r => {
+                if (r && r.paket_soal_id) {
+                  const pid = String(r.paket_soal_id);
+                  counts.set(pid, (counts.get(pid) || 0) + 1);
+                }
+              });
+              break;
+            }
+          }
+        }
+      }
+    } catch (e) {
+      console.warn('Gagal hitung soal cepat di Supabase, fallback per paket:', e);
+    }
+  }
+  // 3. Mode PHP (sudah terisi dari getPaketList)
+  else if (alreadyHasCounts) {
+    pakets.forEach(p => counts.set(String(p.id), Number(p.total_soal) || 0));
+    success = true;
+  }
+
+  // Fallback jika metode cepat gagal: hitung paralel per batch 8 paket
+  if (!success && typeof DB !== 'undefined' && typeof DB.getSoalByPaket === 'function') {
+    const BATCH = 8;
+    for (let i = 0; i < pakets.length; i += BATCH) {
+      const slice = pakets.slice(i, i + BATCH);
+      const res = await Promise.allSettled(slice.map(pk => DB.getSoalByPaket(pk.id)));
+      res.forEach((r, idx) => {
+        const pid = String(slice[idx].id);
+        counts.set(pid, (r.status === 'fulfilled' && Array.isArray(r.value)) ? r.value.length : 0);
+      });
+    }
+    success = true;
+  }
+
+  if (success) {
+    pakets.forEach(p => {
+      p.total_soal = counts.get(String(p.id)) || 0;
+    });
+    if (Array.isArray(allPaket) && allPaket !== pakets) {
+      allPaket.forEach(p => {
+        p.total_soal = counts.get(String(p.id)) || 0;
+      });
+    }
+    kesiapanSoalCountsHydrated = true;
+    // Perbarui badge jumlah soal di Bank Soal juga
+    if (typeof renderPaketList === 'function') {
+      renderPaketList(allPaket);
+    }
+  }
+}
+
+function getPaketSoalCountSafe(pk) {
+  if (!pk) return 0;
+  return Number(pk.total_soal !== undefined ? pk.total_soal : (pk.soal_count || 0)) || 0;
+}
+
+function parseGuruPenugasanSafe(g) {
+  if (!g) return [];
+  if (Array.isArray(g.penugasan_mapel)) return g.penugasan_mapel.filter(x => x && String(x.mapel || '').trim());
+  if (typeof g.penugasan_mapel === 'string' && g.penugasan_mapel.trim()) {
+    try {
+      const dec = JSON.parse(g.penugasan_mapel);
+      if (Array.isArray(dec)) return dec.filter(x => x && String(x.mapel || '').trim());
+    } catch (e) {}
+  }
+  return [];
+}
+
+function buildKesiapanGuruAnalysis() {
+  const gurus = Array.isArray(allGuru) ? allGuru : [];
+  const pakets = (allPaketUnfiltered && allPaketUnfiltered.length > 0) ? allPaketUnfiltered : (allPaket || []);
+  const paketById = new Map();
+  pakets.forEach(p => { if (p && p.id) paketById.set(String(p.id), p); });
+
+  const assignedPaketIds = new Set();
+  const guruPaketsMap = new Map();
+  gurus.forEach(g => guruPaketsMap.set(String(g.id || g.username), []));
+
+  // Tahap 1: Paket eksplisit via g.paket_ids
+  gurus.forEach(g => {
+    const gKey = String(g.id || g.username);
+    let pids = [];
+    if (Array.isArray(g.paket_ids)) pids = g.paket_ids;
+    else if (typeof g.paket_ids === 'string' && g.paket_ids.trim()) {
+      try { const p = JSON.parse(g.paket_ids); if (Array.isArray(p)) pids = p; } catch (e) {}
+    }
+    pids.forEach(pid => {
+      const pk = paketById.get(String(pid));
+      if (pk && !assignedPaketIds.has(String(pid))) {
+        guruPaketsMap.get(gKey).push(pk);
+        assignedPaketIds.add(String(pid));
+      }
+    });
+  });
+
+  // Tahap 2: Smart assignment fallback untuk paket yang belum tercatat di paket_ids
+  pakets.forEach(pk => {
+    if (!pk || !pk.id) return;
+    const pkIdStr = String(pk.id);
+    if (assignedPaketIds.has(pkIdStr)) return;
+
+    const pClean = getCleanPaketName(pk.nama_paket, pk.kelas, pk.jurusan);
+    const pBase = (pClean.split(' - ')[0] || pk.nama_paket || '').split(' (')[0].trim();
+    const pFam = normalizeMapelFamily(pBase);
+
+    let bestGuru = null;
+    let bestScore = -1;
+
+    gurus.forEach(g => {
+      const pList = parseGuruPenugasanSafe(g);
+      for (const item of pList) {
+        const itemMapel = String(item.mapel || '').trim();
+        const itemFam = normalizeMapelFamily(itemMapel);
+        const sameM = (pFam && itemFam && pFam === itemFam) ||
+          String(pk.nama_paket || '').toLowerCase().includes(itemMapel.toLowerCase()) ||
+          itemMapel.toLowerCase().includes(pBase.toLowerCase());
+        if (!sameM) continue;
+        if (!hasJurusanOverlap(pk.jurusan, item.jurusan)) continue;
+        const overlaps = getOverlappingClasses(pk.kelas, item.tingkat);
+        let score = 10;
+        if (overlaps.length > 0) score += 20;
+        if (String(pk.kelas || '').trim().toUpperCase() === String(item.tingkat || '').trim().toUpperCase()) score += 50;
+        if (score > bestScore) {
+          bestScore = score;
+          bestGuru = g;
+        }
+      }
+
+      if (bestScore < 30 && g.mapel_diampu) {
+        const gMapels = String(g.mapel_diampu).split(/[,;/|]+/).map(s => s.trim()).filter(Boolean);
+        for (const m of gMapels) {
+          const mFam = normalizeMapelFamily(m);
+          const sameM = (pFam && mFam && pFam === mFam) ||
+            String(pk.nama_paket || '').toLowerCase().includes(m.toLowerCase()) ||
+            m.toLowerCase().includes(pBase.toLowerCase());
+          if (!sameM) continue;
+          if (!hasJurusanOverlap(pk.jurusan, g.jurusan_diampu)) continue;
+          const overlaps = getOverlappingClasses(pk.kelas, g.kelas_diampu);
+          let score = 5;
+          if (overlaps.length > 0) score += 15;
+          if (score > bestScore) {
+            bestScore = score;
+            bestGuru = g;
+          }
+        }
+      }
+    });
+
+    if (bestGuru && bestScore > 0) {
+      const gKey = String(bestGuru.id || bestGuru.username);
+      if (guruPaketsMap.has(gKey)) {
+        guruPaketsMap.get(gKey).push(pk);
+        assignedPaketIds.add(pkIdStr);
+      }
+    }
+  });
+
+  const statusOrder = { NO_MAPEL: 1, NO_PAKET: 2, ZERO_SOAL: 3, READY: 4 };
+
+  const rows = gurus.map(g => {
+    const gKey = String(g.id || g.username);
+    const penugasan = parseGuruPenugasanSafe(g);
+    const legacyMapelStr = String(g.mapel_diampu || '').trim();
+    const hasMapel = penugasan.length > 0 || legacyMapelStr.length > 0;
+    const myPakets = guruPaketsMap.get(gKey) || [];
+
+    const filledPakets = myPakets.filter(p => getPaketSoalCountSafe(p) > 0);
+    const emptyPakets = myPakets.filter(p => getPaketSoalCountSafe(p) === 0);
+    const totalSoal = myPakets.reduce((acc, p) => acc + getPaketSoalCountSafe(p), 0);
+
+    // Cek penugasan yang belum punya paket sama sekali
+    const unmatchedPenugasan = penugasan.filter(item => {
+      const itemFam = normalizeMapelFamily(item.mapel);
+      return !myPakets.some(pk => {
+        const pBase = String(pk.nama_paket || '').split(' - ')[0].split(' (')[0].trim();
+        const pFam = normalizeMapelFamily(pBase);
+        const sameM = (pFam && itemFam && pFam === itemFam) ||
+          String(pk.nama_paket || '').toLowerCase().includes(String(item.mapel || '').toLowerCase());
+        if (!sameM) return false;
+        return getOverlappingClasses(pk.kelas, item.tingkat).length > 0;
+      });
+    });
+
+    let status = 'READY';
+    if (!hasMapel && myPakets.length === 0) {
+      status = 'NO_MAPEL';
+    } else if (hasMapel && myPakets.length === 0) {
+      status = 'NO_PAKET';
+    } else if (emptyPakets.length > 0 || unmatchedPenugasan.length > 0) {
+      status = 'ZERO_SOAL';
+    } else {
+      status = 'READY';
+    }
+
+    return {
+      guru: g,
+      id: g.id,
+      nama: g.nama_lengkap || g.username || 'Guru',
+      username: g.username || '',
+      penugasan,
+      legacyMapelStr,
+      hasMapel,
+      pakets: myPakets,
+      filledPakets,
+      emptyPakets,
+      unmatchedPenugasan,
+      totalSoal,
+      status
+    };
+  });
+
+  rows.sort((a, b) => {
+    const oA = statusOrder[a.status] || 9;
+    const oB = statusOrder[b.status] || 9;
+    if (oA !== oB) return oA - oB;
+    return a.nama.localeCompare(b.nama, 'id', { sensitivity: 'base' });
+  });
+
+  return rows;
+}
+
+function buildKesiapanRombelsList() {
+  const rombelMap = new Map(); // UPPER_NAME -> { nama, tingkat, jurusan, jurNorm, siswaCount }
+  const jurVoteByRombel = new Map();
+
+  const isStandaloneGrade = (tok) => {
+    const u = String(tok || '').toUpperCase().trim();
+    if (!u || u === 'SEMUA' || u === 'SEMUA KELAS' || u.startsWith('TINGKAT:')) return true;
+    if (['X', 'XI', 'XII', '10', '11', '12', 'KELAS X', 'KELAS XI', 'KELAS XII', 'KELAS 10', 'KELAS 11', 'KELAS 12'].includes(u)) return true;
+    return false;
+  };
+
+  const registerRombel = (rawName, rawJur = '', countStudent = false) => {
+    const clean = String(rawName || '').trim().toUpperCase().replace(/\s+/g, ' ');
+    if (isStandaloneGrade(clean)) return;
+
+    const parts = clean.split(/[\s\-_]+/).filter(Boolean);
+    let tingkat = normalizeTingkatToken(parts[0]);
+    let jurFromName = parts.length >= 2 ? parts[1] : '';
+    if (!tingkat && parts[0] === 'KELAS' && parts.length >= 2) {
+      tingkat = normalizeTingkatToken(parts[1]);
+      jurFromName = parts.length >= 3 ? parts[2] : '';
+    }
+    if (!tingkat) return;
+
+    if (!rombelMap.has(clean)) {
+      const initJur = (rawJur && rawJur.toUpperCase() !== 'SEMUA') ? rawJur.toUpperCase().trim() : jurFromName;
+      rombelMap.set(clean, {
+        nama: clean,
+        tingkat,
+        jurusan: initJur || '-',
+        jurNorm: normalizeJurAlias(initJur || ''),
+        siswaCount: 0
+      });
+    }
+
+    const entry = rombelMap.get(clean);
+    if (countStudent) {
+      entry.siswaCount++;
+      const j = String(rawJur || '').toUpperCase().trim();
+      if (j && j !== 'SEMUA') {
+        if (!jurVoteByRombel.has(clean)) jurVoteByRombel.set(clean, new Map());
+        const vm = jurVoteByRombel.get(clean);
+        vm.set(j, (vm.get(j) || 0) + 1);
+      }
+    }
+  };
+
+  (allKelas || []).forEach(k => registerRombel(k.nama_kelas || k.nama, '', false));
+  (allPeserta || []).forEach(p => registerRombel(p.kelas, p.jurusan, true));
+
+  // Gunakan jurusan mayoritas dari peserta jika ada
+  jurVoteByRombel.forEach((vm, clean) => {
+    let bestJ = '';
+    let bestC = -1;
+    vm.forEach((c, j) => { if (c > bestC) { bestC = c; bestJ = j; } });
+    if (bestJ && rombelMap.has(clean)) {
+      const entry = rombelMap.get(clean);
+      entry.jurusan = bestJ;
+      entry.jurNorm = normalizeJurAlias(bestJ);
+    }
+  });
+
+  return Array.from(rombelMap.values()).sort((a, b) => a.nama.localeCompare(b.nama, 'id', { numeric: true }));
+}
+
+function buildKesiapanKelasAnalysis() {
+  const rombels = buildKesiapanRombelsList();
+  const pakets = (allPaketUnfiltered && allPaketUnfiltered.length > 0) ? allPaketUnfiltered : (allPaket || []);
+  const gurus = Array.isArray(allGuru) ? allGuru : [];
+  const ownerMap = getPaketOwnerNameMap();
+
+  const grades = ['X', 'XI', 'XII'];
+  const byGrade = {};
+
+  // Pra-parsing paket dengan mapel family-nya
+  const parsedPakets = pakets.map(pk => {
+    const pClean = getCleanPaketName(pk.nama_paket, pk.kelas, pk.jurusan);
+    const pBase = (pClean.split(' - ')[0] || pk.nama_paket || '').split(' (')[0].trim();
+    const fam = normalizeMapelFamily(pBase);
+    return {
+      pk,
+      pBase,
+      fam,
+      soalCount: getPaketSoalCountSafe(pk),
+      ownerName: ownerMap.get(String(pk.id)) || ''
+    };
+  }).filter(x => x.fam);
+
+  // Pra-parsing penugasan guru
+  const parsedAssignments = [];
+  gurus.forEach(g => {
+    const gName = g.nama_lengkap || g.username || 'Guru';
+    const pList = parseGuruPenugasanSafe(g);
+    if (pList.length > 0) {
+      pList.forEach(item => {
+        const fam = normalizeMapelFamily(item.mapel);
+        if (fam) {
+          parsedAssignments.push({
+            guruId: g.id,
+            guruName: gName,
+            rawMapel: item.mapel,
+            fam,
+            tingkat: item.tingkat || 'SEMUA',
+            jurusan: item.jurusan || 'SEMUA'
+          });
+        }
+      });
+    } else if (g.mapel_diampu) {
+      String(g.mapel_diampu).split(/[,;/|]+/).map(s => s.trim()).filter(Boolean).forEach(m => {
+        const fam = normalizeMapelFamily(m);
+        if (fam) {
+          parsedAssignments.push({
+            guruId: g.id,
+            guruName: gName,
+            rawMapel: m,
+            fam,
+            tingkat: g.kelas_diampu || 'SEMUA',
+            jurusan: g.jurusan_diampu || 'SEMUA'
+          });
+        }
+      });
+    }
+  });
+
+  grades.forEach(grade => {
+    const gradeRombels = rombels.filter(r => r.tingkat === grade);
+    const customTargets = getKesiapanCustomTargets(grade);
+    const customFams = new Set(customTargets.map(m => normalizeMapelFamily(m)).filter(Boolean));
+
+    // Kumpulkan semua mapel family yang relevan untuk tingkat ini
+    const mapelMeta = new Map(); // fam -> { fam, label, rawSample, observedJurNorms: Set, isCustom, isVocational, isOptional }
+
+    const touchMapel = (fam, rawName, matchedRombels, isCustom = false) => {
+      if (!fam) return;
+      if (!mapelMeta.has(fam)) {
+        mapelMeta.set(fam, {
+          fam,
+          label: getKesiapanMapelDisplayLabel(fam, rawName),
+          rawSample: rawName,
+          observedJurNorms: new Set(),
+          isCustom: Boolean(isCustom),
+          isVocational: isVocationalMapelName(rawName, fam),
+          isOptional: KESIAPAN_OPTIONAL_RELIGION_FAMS.has(fam) && !isCustom
+        });
+      }
+      const meta = mapelMeta.get(fam);
+      if (isCustom) {
+        meta.isCustom = true;
+        meta.isOptional = false;
+      }
+      matchedRombels.forEach(r => {
+        if (r.jurNorm && r.jurNorm !== 'semua') meta.observedJurNorms.add(r.jurNorm);
+      });
+      extractJurusanHintFromMapel(rawName).forEach(jh => meta.observedJurNorms.add(jh));
+    };
+
+    // 1. Dari Target Mapel Wajib kustom
+    customTargets.forEach(rawM => {
+      const fam = normalizeMapelFamily(rawM);
+      touchMapel(fam, rawM, gradeRombels, true);
+    });
+
+    // 2. Dari paket soal yang menjangkau minimal 1 rombel di tingkat ini
+    parsedPakets.forEach(pp => {
+      const matched = gradeRombels.filter(r =>
+        checkKelasMatch(pp.pk.kelas, r.nama).match && hasJurusanOverlap(pp.pk.jurusan, r.jurusan)
+      );
+      if (matched.length > 0) {
+        touchMapel(pp.fam, pp.pBase, matched, false);
+      }
+    });
+
+    // 3. Dari penugasan guru yang menjangkau minimal 1 rombel di tingkat ini
+    parsedAssignments.forEach(asg => {
+      const matched = gradeRombels.filter(r =>
+        checkKelasMatch(asg.tingkat, r.nama).match && hasJurusanOverlap(asg.jurusan, r.jurusan)
+      );
+      if (matched.length > 0) {
+        touchMapel(asg.fam, asg.rawMapel, matched, false);
+      }
+    });
+
+    // Finalisasi klasifikasi Umum vs Kejuruan per kolom mapel
+    const mapelColumns = Array.from(mapelMeta.values()).map(meta => {
+      const hintJurs = extractJurusanHintFromMapel(meta.rawSample);
+      const isCommon = !meta.isVocational && (
+        meta.isCustom ||
+        KESIAPAN_COMMON_MAPEL_FAMS.has(meta.fam) ||
+        meta.observedJurNorms.size >= 2
+      );
+      const applicableJurNorms = hintJurs.size > 0 ? hintJurs : meta.observedJurNorms;
+      return {
+        ...meta,
+        isCommon: isCommon && hintJurs.size === 0,
+        applicableJurNorms
+      };
+    });
+
+    // Urutkan kolom: Umum dulu, lalu Kejuruan, lalu Agama minoritas opsional
+    mapelColumns.sort((a, b) => {
+      const rank = (m) => m.isOptional ? 3 : (m.isCommon ? 1 : 2);
+      if (rank(a) !== rank(b)) return rank(a) - rank(b);
+      return a.label.localeCompare(b.label, 'id', { sensitivity: 'base' });
+    });
+
+    // Evaluasi setiap sel (Rombel x Mapel)
+    let gradeMissingCount = 0;
+    let gradeZeroCount = 0;
+    let gradeConflictCount = 0;
+    let gradeIncompleteRombels = 0;
+
+    const rombelRows = gradeRombels.map(r => {
+      const cells = [];
+      let requiredCount = 0;
+      let readyCount = 0;
+      let missingList = [];
+      let zeroList = [];
+      let noPaketList = [];
+      let conflictList = [];
+
+      mapelColumns.forEach(col => {
+        const applies = col.isCommon || col.isOptional || col.applicableJurNorms.has(r.jurNorm);
+        if (!applies) {
+          cells.push({ col, state: 'NA' });
+          return;
+        }
+
+        const matchedPakets = parsedPakets.filter(pp =>
+          pp.fam === col.fam &&
+          checkKelasMatch(pp.pk.kelas, r.nama).match &&
+          hasJurusanOverlap(pp.pk.jurusan, r.jurusan)
+        );
+
+        const matchedAsg = parsedAssignments.filter(asg =>
+          asg.fam === col.fam &&
+          checkKelasMatch(asg.tingkat, r.nama).match &&
+          hasJurusanOverlap(asg.jurusan, r.jurusan)
+        );
+
+        // Hitung guru unik dari penugasan & pemilik paket
+        const uniqueGuruNames = new Set();
+        matchedAsg.forEach(a => uniqueGuruNames.add(a.guruName));
+        matchedPakets.forEach(pp => { if (pp.ownerName) uniqueGuruNames.add(pp.ownerName); });
+
+        // Paket terbaik (soal terbanyak)
+        const sortedPk = [...matchedPakets].sort((a, b) => b.soalCount - a.soalCount);
+        const bestPk = sortedPk[0] || null;
+        const filledPkCount = sortedPk.filter(x => x.soalCount > 0).length;
+
+        const isConflict = uniqueGuruNames.size > 1 || (matchedAsg.length > 1 && new Set(matchedAsg.map(a => String(a.guruId))).size > 1) || filledPkCount > 1;
+
+        if (!col.isOptional) requiredCount++;
+
+        let state = 'MISSING';
+        if (isConflict) {
+          state = 'CONFLICT';
+          conflictList.push({ label: col.label, gurus: Array.from(uniqueGuruNames) });
+          gradeConflictCount++;
+        } else if (bestPk && bestPk.soalCount > 0) {
+          state = 'READY';
+          if (!col.isOptional) readyCount++;
+        } else if (bestPk && bestPk.soalCount === 0) {
+          state = 'ZERO_SOAL';
+          if (!col.isOptional) {
+            zeroList.push({ label: col.label, guru: bestPk.ownerName || (matchedAsg[0]?.guruName || '-') });
+            gradeZeroCount++;
+          }
+        } else if (matchedAsg.length > 0) {
+          state = 'NO_PAKET';
+          if (!col.isOptional) {
+            noPaketList.push({ label: col.label, guru: matchedAsg[0].guruName });
+            gradeZeroCount++;
+          }
+        } else if (col.isOptional) {
+          state = 'OPTIONAL';
+        } else {
+          state = 'MISSING';
+          missingList.push(col.label);
+          gradeMissingCount++;
+        }
+
+        cells.push({
+          col,
+          state,
+          soalCount: bestPk ? bestPk.soalCount : 0,
+          paketId: bestPk ? bestPk.pk.id : null,
+          paketName: bestPk ? bestPk.pk.nama_paket : '',
+          guruId: matchedAsg[0] ? matchedAsg[0].guruId : null,
+          guruName: Array.from(uniqueGuruNames).join(', ') || '-'
+        });
+      });
+
+      const hasIssues = missingList.length > 0 || zeroList.length > 0 || noPaketList.length > 0 || conflictList.length > 0;
+      if (hasIssues) gradeIncompleteRombels++;
+
+      return {
+        rombel: r,
+        cells,
+        requiredCount,
+        readyCount,
+        missingList,
+        zeroList,
+        noPaketList,
+        conflictList,
+        hasIssues
+      };
+    });
+
+    byGrade[grade] = {
+      grade,
+      rombels: rombelRows,
+      columns: mapelColumns,
+      missingCount: gradeMissingCount,
+      zeroCount: gradeZeroCount,
+      conflictCount: gradeConflictCount,
+      incompleteRombels: gradeIncompleteRombels,
+      totalIssues: gradeMissingCount + gradeZeroCount + gradeConflictCount
+    };
+  });
+
+  return byGrade;
+}
+
+function updateKesiapanSidebarBadge() {
+  const navBadge = document.getElementById('nav-badge-kesiapan');
+  if (!navBadge || isGuruMode()) return;
+  try {
+    const guruRows = buildKesiapanGuruAnalysis();
+    const noMapel = guruRows.filter(r => r.status === 'NO_MAPEL').length;
+    const noPaket = guruRows.filter(r => r.status === 'NO_PAKET').length;
+    const count = noMapel + noPaket;
+    if (count > 0) {
+      navBadge.innerText = String(count);
+      navBadge.title = `${noMapel} guru belum atur mapel, ${noPaket} belum ada paket`;
+      navBadge.classList.remove('d-none');
+    } else {
+      navBadge.classList.add('d-none');
+    }
+  } catch (e) {}
+}
+
+async function loadKesiapanMonitoring(forceRefresh = false) {
+  if (isGuruMode()) return;
+
+  const banner = document.getElementById('kesiapan-sync-banner');
+  const syncText = document.getElementById('kesiapan-sync-text');
+  const btnRefresh = document.getElementById('btn-refresh-kesiapan');
+  if (btnRefresh) btnRefresh.disabled = true;
+  if (banner) {
+    banner.classList.remove('d-none');
+    banner.classList.add('d-flex');
+  }
+
+  try {
+    if (forceRefresh || !allGuru.length || !allPaketUnfiltered.length || !allKelas.length) {
+      if (syncText) syncText.innerText = 'Menyegarkan data guru, paket soal, kelas, dan peserta...';
+      const [gRes, pkRes, kRes, jRes, pRes] = await Promise.all([
+        DB.getGuruList(),
+        DB.getPaketList(),
+        DB.getKelasList(),
+        DB.getJurusanList(),
+        allPeserta.length > 0 && !forceRefresh ? Promise.resolve(allPeserta) : DB.getPesertaList()
+      ]);
+      allGuru = gRes || [];
+      allPaketUnfiltered = pkRes || [];
+      allPaket = allPaketUnfiltered;
+      allKelas = kRes || [];
+      allJurusan = jRes || [];
+      allPeserta = pRes || [];
+    }
+
+    if (syncText) syncText.innerText = 'Menghitung jumlah butir soal aktif untuk setiap paket ujian...';
+    await hydrateAllPaketSoalCounts(forceRefresh);
+
+    // Populate dropdown jurusan di Monitoring Kelas
+    const selJur = document.getElementById('kesiapan-kelas-jurusan');
+    if (selJur) {
+      const prev = selJur.value;
+      const jurList = getAllAvailableJurusanNames();
+      selJur.innerHTML = '<option value="">Semua Jurusan</option>' +
+        jurList.map(j => `<option value="${escapeAttr(j)}">${escapeHtml(j)}</option>`).join('');
+      if (prev && jurList.includes(prev)) selJur.value = prev;
+    }
+
+    recomputeAndRenderKesiapan();
+
+    const updatedEl = document.getElementById('kesiapan-last-updated');
+    if (updatedEl) {
+      const nowStr = new Date().toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+      updatedEl.innerHTML = `<i class="bi bi-check-circle-fill text-success me-1"></i>Terakhir dicek: <strong>${nowStr}</strong>`;
+    }
+  } catch (err) {
+    console.error('Gagal loadKesiapanMonitoring:', err);
+    Swal.fire('Gagal Memuat Monitoring', err.message || 'Terjadi kesalahan saat menganalisis kesiapan.', 'error');
+  } finally {
+    if (banner) {
+      banner.classList.add('d-none');
+      banner.classList.remove('d-flex');
+    }
+    if (btnRefresh) btnRefresh.disabled = false;
+  }
+}
+
+function recomputeAndRenderKesiapan() {
+  const guruRows = buildKesiapanGuruAnalysis();
+  const kelasByGrade = buildKesiapanKelasAnalysis();
+
+  const guruNoMapel = guruRows.filter(r => r.status === 'NO_MAPEL').length;
+  const guruNoSoal = guruRows.filter(r => r.status === 'NO_PAKET' || r.status === 'ZERO_SOAL').length;
+  const guruReady = guruRows.filter(r => r.status === 'READY').length;
+  const guruIssuesTotal = guruNoMapel + guruNoSoal;
+
+  const totalIncompleteRombels = ['X', 'XI', 'XII'].reduce((acc, g) => acc + (kelasByGrade[g]?.incompleteRombels || 0), 0);
+  const totalRombels = ['X', 'XI', 'XII'].reduce((acc, g) => acc + (kelasByGrade[g]?.rombels.length || 0), 0);
+
+  kesiapanLastSnapshot = {
+    guruRows,
+    kelasByGrade,
+    summary: { guruNoMapel, guruNoSoal, guruReady, guruIssuesTotal, totalIncompleteRombels, totalRombels }
+  };
+
+  // Jika tingkat yang sedang dipilih tidak memiliki rombel, otomatis pilih tingkat pertama yang punya rombel
+  if ((kelasByGrade[kesiapanSelectedTingkat]?.rombels.length || 0) === 0) {
+    const firstNonEmpty = ['X', 'XI', 'XII'].find(g => (kelasByGrade[g]?.rombels.length || 0) > 0);
+    if (firstNonEmpty) kesiapanSelectedTingkat = firstNonEmpty;
+  }
+
+  // Update 4 KPI Cards
+  const elNoMapel = document.getElementById('kesiapan-stat-guru-nomapel');
+  const elNoSoal = document.getElementById('kesiapan-stat-guru-nosoal');
+  const elSiap = document.getElementById('kesiapan-stat-guru-siap');
+  const elKelasKurang = document.getElementById('kesiapan-stat-kelas-kurang');
+  const elKelasKurangSub = document.getElementById('kesiapan-stat-kelas-kurang-sub');
+
+  if (elNoMapel) elNoMapel.innerText = guruNoMapel;
+  if (elNoSoal) elNoSoal.innerText = guruNoSoal;
+  if (elSiap) elSiap.innerText = `${guruReady} / ${guruRows.length}`;
+  if (elKelasKurang) elKelasKurang.innerText = `${totalIncompleteRombels} / ${totalRombels}`;
+  if (elKelasKurangSub) {
+    const totalMissingCells = ['X', 'XI', 'XII'].reduce((acc, g) => acc + (kelasByGrade[g]?.missingCount || 0), 0);
+    elKelasKurangSub.innerText = totalMissingCells > 0
+      ? `${totalMissingCells} slot mapel kelas masih kosong`
+      : 'Cek kelas dengan soal masih 0 / tabrakan';
+  }
+
+  // Update badges pada sub-tab & sidebar
+  const bGuru = document.getElementById('badge-subtab-guru-issues');
+  if (bGuru) {
+    bGuru.innerText = guruIssuesTotal;
+    bGuru.className = `badge ms-1 rounded-pill ${guruIssuesTotal > 0 ? 'bg-danger' : 'bg-success'}`;
+  }
+  const bKelas = document.getElementById('badge-subtab-kelas-issues');
+  if (bKelas) {
+    bKelas.innerText = totalIncompleteRombels;
+    bKelas.className = `badge ms-1 rounded-pill ${totalIncompleteRombels > 0 ? 'bg-danger' : 'bg-success'}`;
+  }
+  const navBadge = document.getElementById('nav-badge-kesiapan');
+  if (navBadge) {
+    if (guruIssuesTotal > 0) {
+      navBadge.innerText = guruIssuesTotal;
+      navBadge.classList.remove('d-none');
+    } else {
+      navBadge.classList.add('d-none');
+    }
+  }
+
+  // Update badges pada tombol Tingkat X / XI / XII
+  ['X', 'XI', 'XII'].forEach(g => {
+    const bEl = document.getElementById(`badge-tingkat-${g}`);
+    if (bEl) {
+      const gd = kelasByGrade[g];
+      const inc = gd ? gd.incompleteRombels : 0;
+      const tot = gd ? gd.rombels.length : 0;
+      bEl.innerText = tot === 0 ? '0 kelas' : (inc > 0 ? `${inc} belum lengkap` : `✓ ${tot} siap`);
+      bEl.className = `badge ms-1 ${inc > 0 ? 'bg-danger text-white' : 'bg-success-subtle text-success'}`;
+    }
+  });
+
+  renderKesiapanGuruTable();
+  renderKesiapanKelasMatrix();
+}
+
+function switchKesiapanSubTab(subTab) {
+  kesiapanActiveSubTab = subTab === 'kelas' ? 'kelas' : 'guru';
+  const pGuru = document.getElementById('kesiapan-panel-guru');
+  const pKelas = document.getElementById('kesiapan-panel-kelas');
+  const bGuru = document.getElementById('btn-subtab-kesiapan-guru');
+  const bKelas = document.getElementById('btn-subtab-kesiapan-kelas');
+
+  if (kesiapanActiveSubTab === 'guru') {
+    if (pGuru) pGuru.classList.remove('d-none');
+    if (pKelas) pKelas.classList.add('d-none');
+    if (bGuru) bGuru.classList.add('active');
+    if (bKelas) bKelas.classList.remove('active');
+  } else {
+    if (pGuru) pGuru.classList.add('d-none');
+    if (pKelas) pKelas.classList.remove('d-none');
+    if (bGuru) bGuru.classList.remove('active');
+    if (bKelas) bKelas.classList.add('active');
+  }
+}
+
+function jumpKesiapanFilter(subTab, filterVal) {
+  switchKesiapanSubTab(subTab);
+  if (subTab === 'guru') {
+    const sel = document.getElementById('kesiapan-guru-status');
+    if (sel) sel.value = filterVal;
+    renderKesiapanGuruTable();
+  } else {
+    const chk = document.getElementById('kesiapan-kelas-only-issues');
+    if (chk) chk.checked = (filterVal === 'ISSUES');
+    // Pilih tingkat pertama yang punya masalah
+    if (kesiapanLastSnapshot) {
+      const targetG = ['X', 'XI', 'XII'].find(g => (kesiapanLastSnapshot.kelasByGrade[g]?.incompleteRombels || 0) > 0);
+      if (targetG) selectKesiapanTingkat(targetG);
+      else renderKesiapanKelasMatrix();
+    }
+  }
+}
+
+function selectKesiapanTingkat(tingkat) {
+  kesiapanSelectedTingkat = tingkat;
+  const pills = document.querySelectorAll('#kesiapan-tingkat-pills button[data-tingkat]');
+  pills.forEach(btn => {
+    const isAct = btn.getAttribute('data-tingkat') === tingkat;
+    btn.classList.toggle('btn-primary', isAct);
+    btn.classList.toggle('btn-outline-primary', !isAct);
+  });
+  renderKesiapanKelasMatrix();
+}
+
+function renderKesiapanGuruTable() {
+  const tbody = document.getElementById('tbody-kesiapan-guru');
+  if (!tbody) return;
+  if (!kesiapanLastSnapshot) {
+    tbody.innerHTML = `<tr><td colspan="6" class="text-center py-4 text-muted">Belum ada data. Klik "Refresh & Hitung Soal".</td></tr>`;
+    return;
+  }
+
+  const q = (document.getElementById('kesiapan-guru-search')?.value || '').toLowerCase().trim();
+  const statusFilter = document.getElementById('kesiapan-guru-status')?.value || 'ISSUES';
+
+  const filtered = kesiapanLastSnapshot.guruRows.filter(row => {
+    if (statusFilter === 'ISSUES' && row.status === 'READY') return false;
+    if (statusFilter === 'NO_MAPEL' && row.status !== 'NO_MAPEL') return false;
+    if (statusFilter === 'NO_PAKET' && row.status !== 'NO_PAKET') return false;
+    if (statusFilter === 'ZERO_SOAL' && row.status !== 'ZERO_SOAL') return false;
+    if (statusFilter === 'READY' && row.status !== 'READY') return false;
+
+    if (q) {
+      const hay = [
+        row.nama,
+        row.username,
+        row.legacyMapelStr,
+        ...row.penugasan.map(p => `${p.mapel} ${p.tingkat} ${p.jurusan}`),
+        ...row.pakets.map(p => `${p.nama_paket} ${p.kelas} ${p.jurusan}`)
+      ].join(' ').toLowerCase();
+      if (!hay.includes(q)) return false;
+    }
+    return true;
+  });
+
+  if (filtered.length === 0) {
+    const msg = statusFilter === 'ISSUES'
+      ? '🎉 Luar biasa! Seluruh guru sudah mengatur mapel dan mengisi soal pada paket ujiannya.'
+      : 'Tidak ada data guru yang sesuai dengan filter pencarian.';
+    tbody.innerHTML = `<tr><td colspan="6" class="text-center py-4 text-muted">${msg}</td></tr>`;
+    return;
+  }
+
+  tbody.innerHTML = filtered.map((row, idx) => {
+    let statusBadge = '';
+    if (row.status === 'NO_MAPEL') {
+      statusBadge = `<span class="badge bg-danger text-white rounded-pill px-2 py-1"><i class="bi bi-x-circle-fill me-1"></i>Belum Atur Mapel</span>`;
+    } else if (row.status === 'NO_PAKET') {
+      statusBadge = `<span class="badge bg-warning text-dark rounded-pill px-2 py-1"><i class="bi bi-folder-x me-1"></i>Belum Ada Paket</span>`;
+    } else if (row.status === 'ZERO_SOAL') {
+      const subText = row.unmatchedPenugasan.length > 0
+        ? `${row.filledPakets.length}/${row.pakets.length + row.unmatchedPenugasan.length} Terisi`
+        : `${row.filledPakets.length}/${row.pakets.length} Paket Terisi`;
+      statusBadge = `
+        <span class="badge bg-warning-subtle text-dark border border-warning rounded-pill px-2 py-1">
+          <i class="bi bi-hourglass-split text-warning-emphasis me-1"></i>Soal Masih 0 / Kurang
+        </span>
+        <div class="small text-muted mt-1" style="font-size: 0.72rem;">${subText}</div>
+      `;
+    } else {
+      statusBadge = `
+        <span class="badge bg-success-subtle text-success border border-success-subtle rounded-pill px-2 py-1">
+          <i class="bi bi-check-circle-fill me-1"></i>Siap Ujian
+        </span>
+        <div class="small text-success fw-semibold mt-1" style="font-size: 0.72rem;">${row.totalSoal} total soal</div>
+      `;
+    }
+
+    let mapelHtml = '';
+    if (row.penugasan.length > 0) {
+      mapelHtml = row.penugasan.map(p => {
+        const kTxt = (p.tingkat && p.tingkat.toUpperCase() !== 'SEMUA') ? p.tingkat.replace(/TINGKAT:/gi, 'Tingkat ') : 'Semua Kelas';
+        return `<div class="small mb-1"><span class="fw-semibold text-dark">${escapeHtml(p.mapel)}</span> <span class="badge bg-light text-secondary border" style="font-size: 0.68rem;">${escapeHtml(kTxt)}</span></div>`;
+      }).join('');
+    } else if (row.legacyMapelStr) {
+      mapelHtml = `<div class="small text-dark">${escapeHtml(row.legacyMapelStr)}</div>`;
+    } else {
+      mapelHtml = `<span class="text-danger small fst-italic"><i class="bi bi-exclamation-circle me-1"></i>Belum mengatur mapel</span>`;
+    }
+
+    let paketHtml = '';
+    if (row.pakets.length > 0) {
+      paketHtml = row.pakets.map(pk => {
+        const sc = getPaketSoalCountSafe(pk);
+        const pName = getCleanPaketName(pk.nama_paket, pk.kelas, pk.jurusan);
+        const bCls = sc > 0 ? 'bg-success-subtle text-success border-success-subtle' : 'bg-danger-subtle text-danger border-danger-subtle';
+        return `
+          <button type="button" class="badge border ${bCls} text-decoration-none me-1 mb-1 d-inline-flex align-items-center gap-1 kesiapan-cell-btn"
+            style="font-size: 0.7rem;" onclick="openPaketFromKesiapan('${escapeAttr(pk.id)}')" title="Klik untuk membuka paket ini di Bank Soal">
+            <span>${escapeHtml(pName)}</span>
+            <strong class="ms-1">(${sc} soal)</strong>
+          </button>
+        `;
+      }).join('');
+    }
+    if (row.unmatchedPenugasan.length > 0) {
+      paketHtml += row.unmatchedPenugasan.map(u => `
+        <span class="badge bg-warning-subtle text-dark border border-warning me-1 mb-1" style="font-size: 0.7rem;">
+          <i class="bi bi-exclamation-triangle me-1"></i>${escapeHtml(u.mapel)} (Belum ada paket)
+        </span>
+      `).join('');
+    }
+    if (!paketHtml) {
+      paketHtml = `<span class="text-muted small fst-italic">Belum ada paket soal</span>`;
+    }
+
+    const firstEmptyOrAnyPk = row.emptyPakets[0] || row.pakets[0] || null;
+    const actionBtnHtml = `
+      <div class="d-flex justify-content-center gap-1 flex-wrap">
+        <button type="button" class="btn btn-sm btn-outline-primary rounded-pill px-2 py-0 fw-semibold" style="font-size: 0.75rem;"
+          onclick="openPenugasanGuruModal('${escapeAttr(row.id)}')" title="Atur / Tambah Mata Pelajaran Guru">
+          <i class="bi bi-journal-plus me-1"></i>Atur Mapel
+        </button>
+        ${firstEmptyOrAnyPk ? `
+          <button type="button" class="btn btn-sm btn-outline-secondary rounded-pill px-2 py-0" style="font-size: 0.75rem;"
+            onclick="openPaketFromKesiapan('${escapeAttr(firstEmptyOrAnyPk.id)}')" title="Buka Paket di Bank Soal">
+            <i class="bi bi-box-arrow-up-right"></i>
+          </button>
+        ` : ''}
+      </div>
+    `;
+
+    return `
+      <tr>
+        <td class="text-center text-muted fw-semibold">${idx + 1}</td>
+        <td>
+          <div class="fw-bold text-dark">${escapeHtml(row.nama)}</div>
+          <span class="badge bg-light text-secondary border font-monospace" style="font-size: 0.7rem;">${escapeHtml(row.username || '-')}</span>
+        </td>
+        <td>${statusBadge}</td>
+        <td>${mapelHtml}</td>
+        <td>${paketHtml}</td>
+        <td class="text-center">${actionBtnHtml}</td>
+      </tr>
+    `;
+  }).join('');
+}
+
+function renderKesiapanCustomTargetsList() {
+  const lbl = document.getElementById('kesiapan-target-tingkat-label');
+  if (lbl) lbl.innerText = `Tingkat ${kesiapanSelectedTingkat}`;
+  const container = document.getElementById('list-custom-target-mapel');
+  if (!container) return;
+
+  const list = getKesiapanCustomTargets(kesiapanSelectedTingkat);
+  if (list.length === 0) {
+    container.innerHTML = `<span class="small text-muted fst-italic">Belum ada target mapel wajib tambahan untuk Tingkat ${kesiapanSelectedTingkat}.</span>`;
+    return;
+  }
+  container.innerHTML = list.map((m, idx) => `
+    <span class="badge bg-primary-subtle text-primary border border-primary-subtle d-inline-flex align-items-center gap-1 px-2 py-1">
+      <span>${escapeHtml(m)}</span>
+      <button type="button" class="btn-close" style="font-size: 0.5rem;" onclick="removeCustomTargetMapel('${escapeAttr(kesiapanSelectedTingkat)}', ${idx})" title="Hapus target mapel ini"></button>
+    </span>
+  `).join('');
+}
+
+function renderKesiapanKelasMatrix() {
+  renderKesiapanCustomTargetsList();
+
+  const thead = document.getElementById('thead-kesiapan-kelas');
+  const tbody = document.getElementById('tbody-kesiapan-kelas');
+  const summaryBox = document.getElementById('kesiapan-kelas-summary-box');
+  if (!thead || !tbody) return;
+
+  if (!kesiapanLastSnapshot) {
+    tbody.innerHTML = `<tr><td class="text-center py-4 text-muted">Belum ada data. Klik "Refresh & Hitung Soal".</td></tr>`;
+    return;
+  }
+
+  const gradeData = kesiapanLastSnapshot.kelasByGrade[kesiapanSelectedTingkat];
+  const selJur = (document.getElementById('kesiapan-kelas-jurusan')?.value || '').toUpperCase().trim();
+  const selJurNorm = selJur ? normalizeJurAlias(selJur) : '';
+  const onlyIssues = Boolean(document.getElementById('kesiapan-kelas-only-issues')?.checked);
+
+  if (!gradeData || gradeData.rombels.length === 0) {
+    thead.innerHTML = `<tr><th class="sticky-col px-3 py-2">Kelas / Rombel</th></tr>`;
+    tbody.innerHTML = `<tr><td class="text-center py-4 text-muted">Belum ada data rombel kelas untuk <strong>Tingkat ${kesiapanSelectedTingkat}</strong> (pastikan Data Kelas / Peserta sudah diinput).</td></tr>`;
+    if (summaryBox) summaryBox.innerHTML = '';
+    return;
+  }
+
+  const visibleRombels = gradeData.rombels.filter(rr => {
+    if (selJurNorm && rr.rombel.jurNorm !== selJurNorm) return false;
+    if (onlyIssues && !rr.hasIssues) return false;
+    return true;
+  });
+
+  // Saring kolom mapel agar jika filter jurusan aktif, hanya tampilkan mapel umum + mapel jurusan tersebut
+  const visibleCols = gradeData.columns.filter(col => {
+    if (!selJurNorm) return true;
+    return col.isCommon || col.isOptional || col.applicableJurNorms.has(selJurNorm);
+  });
+
+  // Ringkasan cepat kelas bermasalah di tingkat ini
+  if (summaryBox) {
+    const problemRombels = gradeData.rombels.filter(rr => {
+      if (selJurNorm && rr.rombel.jurNorm !== selJurNorm) return false;
+      return rr.hasIssues;
+    });
+
+    if (problemRombels.length === 0) {
+      summaryBox.innerHTML = `
+        <div class="alert alert-success border-success-subtle py-2 px-3 small mb-0 d-flex align-items-center gap-2">
+          <i class="bi bi-check-circle-fill fs-5 text-success"></i>
+          <div><strong>Lengkap &amp; Siap!</strong> Semua rombel di <strong>Tingkat ${kesiapanSelectedTingkat}</strong>${selJur ? ` (${escapeHtml(selJur)})` : ''} sudah mendapatkan seluruh mapel dan paket soalnya sudah terisi.</div>
+        </div>
+      `;
+    } else {
+      const itemsHtml = problemRombels.map(rr => {
+        const parts = [];
+        if (rr.missingList.length > 0) parts.push(`<span class="text-danger fw-semibold">❌ Belum dapat: ${escapeHtml(rr.missingList.join(', '))}</span>`);
+        if (rr.noPaketList.length > 0) parts.push(`<span class="text-warning-emphasis fw-semibold">🟠 Belum ada paket: ${escapeHtml(rr.noPaketList.map(x => x.label).join(', '))}</span>`);
+        if (rr.zeroList.length > 0) parts.push(`<span class="text-warning-emphasis">⚠️ 0 soal: ${escapeHtml(rr.zeroList.map(x => `${x.label} (${x.guru})`).join(', '))}</span>`);
+        if (rr.conflictList.length > 0) parts.push(`<span class="text-danger fw-bold">🔥 Ganda: ${escapeHtml(rr.conflictList.map(x => x.label).join(', '))}</span>`);
+        return `<li class="mb-1"><strong>${escapeHtml(rr.rombel.nama)}</strong> <span class="text-muted">(${rr.rombel.siswaCount} siswa)</span>: ${parts.join(' &bull; ')}</li>`;
+      }).join('');
+
+      summaryBox.innerHTML = `
+        <div class="alert alert-danger border-danger-subtle bg-danger-subtle text-dark py-2 px-3 small mb-0">
+          <div class="fw-bold text-danger mb-1">
+            <i class="bi bi-exclamation-triangle-fill me-1"></i>
+            Ditemukan ${problemRombels.length} Rombel Belum Lengkap di Tingkat ${kesiapanSelectedTingkat}${selJur ? ` (${escapeHtml(selJur)})` : ''}:
+          </div>
+          <ul class="mb-0 ps-3" style="max-height: 150px; overflow-y: auto;">${itemsHtml}</ul>
+        </div>
+      `;
+    }
+  }
+
+  // Render header matriks
+  thead.innerHTML = `
+    <tr>
+      <th class="sticky-col px-3 py-2" style="min-width: 150px;">Kelas / Rombel</th>
+      <th class="text-center px-2 py-2" style="min-width: 85px;">Siap</th>
+      ${visibleCols.map(col => {
+        const typeBadge = col.isOptional
+          ? `<span class="badge bg-light text-muted border d-block mt-1" style="font-size: 0.6rem;">Agama Opsional</span>`
+          : (col.isCommon
+            ? `<span class="badge bg-primary-subtle text-primary d-block mt-1" style="font-size: 0.6rem;">Umum${col.isCustom ? ' • Wajib' : ''}</span>`
+            : `<span class="badge bg-info-subtle text-dark d-block mt-1" style="font-size: 0.6rem;">Kejuruan (${escapeHtml(Array.from(col.applicableJurNorms).join(', ').toUpperCase())})</span>`);
+        return `<th class="text-center px-2 py-2" style="min-width: 118px; font-size: 0.76rem; line-height: 1.25;">${escapeHtml(col.label)}${typeBadge}</th>`;
+      }).join('')}
+    </tr>
+  `;
+
+  if (visibleRombels.length === 0) {
+    tbody.innerHTML = `<tr><td colspan="${visibleCols.length + 2}" class="text-center py-4 text-muted">Tidak ada rombel yang cocok dengan filter saat ini.</td></tr>`;
+    return;
+  }
+
+  const visibleColFams = new Set(visibleCols.map(c => c.fam));
+
+  tbody.innerHTML = visibleRombels.map(rr => {
+    const pct = rr.requiredCount > 0 ? Math.round((rr.readyCount / rr.requiredCount) * 100) : 100;
+    const progressCls = rr.missingList.length > 0 || rr.conflictList.length > 0
+      ? 'bg-danger'
+      : (rr.zeroList.length > 0 || rr.noPaketList.length > 0 ? 'bg-warning text-dark' : 'bg-success');
+
+    const cellsHtml = rr.cells.filter(c => visibleColFams.has(c.col.fam)).map(cell => {
+      if (cell.state === 'NA' || cell.state === 'OPTIONAL') {
+        return `<td class="text-center text-muted bg-light-subtle" style="font-size: 0.72rem;" title="${cell.state === 'OPTIONAL' ? 'Mapel agama minoritas (opsional)' : 'Bukan mapel jurusan kelas ini'}">—</td>`;
+      }
+      if (cell.state === 'READY') {
+        return `
+          <td class="text-center p-1 bg-success-subtle kesiapan-cell-btn"
+            onclick="${cell.paketId ? `openPaketFromKesiapan('${escapeAttr(cell.paketId)}')` : ''}"
+            title="Siap: ${escapeAttr(cell.paketName)} • Guru: ${escapeAttr(cell.guruName)} (${cell.soalCount} soal). Klik untuk buka paket.">
+            <div class="fw-bold text-success" style="font-size: 0.74rem;">✅ ${cell.soalCount} soal</div>
+            <div class="text-truncate text-muted mx-auto" style="max-width: 110px; font-size: 0.65rem;">${escapeHtml(cell.guruName)}</div>
+          </td>
+        `;
+      }
+      if (cell.state === 'ZERO_SOAL') {
+        return `
+          <td class="text-center p-1 bg-warning-subtle kesiapan-cell-btn"
+            onclick="${cell.paketId ? `openPaketFromKesiapan('${escapeAttr(cell.paketId)}')` : ''}"
+            title="Paket ada tapi masih 0 soal • Guru: ${escapeAttr(cell.guruName)}. Klik untuk buka paket.">
+            <div class="fw-bold text-warning-emphasis" style="font-size: 0.74rem;">⚠️ 0 soal</div>
+            <div class="text-truncate text-dark mx-auto" style="max-width: 110px; font-size: 0.65rem;">${escapeHtml(cell.guruName)}</div>
+          </td>
+        `;
+      }
+      if (cell.state === 'NO_PAKET') {
+        return `
+          <td class="text-center p-1 bg-warning-subtle kesiapan-cell-btn"
+            onclick="${cell.guruId ? `openPenugasanGuruModal('${escapeAttr(cell.guruId)}')` : ''}"
+            title="Guru sudah ditugaskan (${escapeAttr(cell.guruName)}), tapi paket soalnya belum terbentuk. Klik untuk cek penugasan.">
+            <div class="fw-bold text-warning-emphasis" style="font-size: 0.72rem;">🟠 0 paket</div>
+            <div class="text-truncate text-dark mx-auto" style="max-width: 110px; font-size: 0.65rem;">${escapeHtml(cell.guruName)}</div>
+          </td>
+        `;
+      }
+      if (cell.state === 'CONFLICT') {
+        return `
+          <td class="text-center p-1 bg-danger text-white"
+            title="TABRAKAN: Lebih dari 1 guru/paket aktif untuk ${escapeAttr(cell.col.label)} di ${escapeAttr(rr.rombel.nama)} (${escapeAttr(cell.guruName)})">
+            <div class="fw-bold" style="font-size: 0.74rem;">🔥 Ganda</div>
+            <div class="text-truncate mx-auto" style="max-width: 110px; font-size: 0.64rem;">${escapeHtml(cell.guruName)}</div>
+          </td>
+        `;
+      }
+      return `
+        <td class="text-center p-1 bg-danger-subtle"
+          title="BELUM DAPAT MAPEL: Belum ada guru maupun paket ${escapeAttr(cell.col.label)} untuk kelas ${escapeAttr(rr.rombel.nama)}">
+          <div class="fw-bold text-danger" style="font-size: 0.74rem;">❌ Kosong</div>
+          <div class="text-danger-emphasis" style="font-size: 0.63rem;">Belum ada guru</div>
+        </td>
+      `;
+    }).join('');
+
+    return `
+      <tr>
+        <td class="sticky-col px-3 py-2">
+          <div class="fw-bold text-dark">${escapeHtml(rr.rombel.nama)}</div>
+          <div class="small text-muted" style="font-size: 0.7rem;">${escapeHtml(rr.rombel.jurusan)} &bull; ${rr.rombel.siswaCount} siswa</div>
+        </td>
+        <td class="text-center px-2">
+          <span class="badge ${progressCls} rounded-pill" style="font-size: 0.72rem;">${rr.readyCount}/${rr.requiredCount}</span>
+          <div class="text-muted" style="font-size: 0.65rem;">${pct}%</div>
+        </td>
+        ${cellsHtml}
+      </tr>
+    `;
+  }).join('');
+}
+
+function openPaketFromKesiapan(paketId) {
+  if (!paketId) return;
+  switchTab('soal');
+  setTimeout(() => {
+    selectPaket(paketId);
+  }, 80);
+}
+
+async function copyKesiapanWaRecap(mode = 'auto') {
+  if (!kesiapanLastSnapshot) {
+    await loadKesiapanMonitoring(false);
+  }
+  if (!kesiapanLastSnapshot) return;
+
+  const targetMode = mode === 'auto' ? kesiapanActiveSubTab : mode;
+  const tgl = new Date().toLocaleDateString('id-ID', { day: '2-digit', month: 'long', year: 'numeric' });
+  let text = '';
+
+  if (targetMode === 'guru') {
+    const rows = kesiapanLastSnapshot.guruRows;
+    const noMapel = rows.filter(r => r.status === 'NO_MAPEL');
+    const noPaket = rows.filter(r => r.status === 'NO_PAKET');
+    const zeroSoal = rows.filter(r => r.status === 'ZERO_SOAL');
+    const ready = rows.filter(r => r.status === 'READY');
+
+    text += `📋 *REKAP KESIAPAN GURU CBT SMKN 1 LEMPUING*\n`;
+    text += `📅 Tanggal: ${tgl}\n`;
+    text += `✅ Siap Ujian: *${ready.length} / ${rows.length} Guru*\n\n`;
+
+    if (noMapel.length > 0) {
+      text += `🔴 *BELUM MENGATUR MAPEL (${noMapel.length} Guru):*\n`;
+      noMapel.forEach((r, i) => {
+        text += `${i + 1}. ${r.nama} (user: ${r.username})\n`;
+      });
+      text += `\n`;
+    }
+    if (noPaket.length > 0) {
+      text += `🟠 *MAPEL ADA, BELUM ADA PAKET SOAL (${noPaket.length} Guru):*\n`;
+      noPaket.forEach((r, i) => {
+        const mNames = r.penugasan.map(p => p.mapel).join(', ') || r.legacyMapelStr;
+        text += `${i + 1}. ${r.nama} — ${mNames}\n`;
+      });
+      text += `\n`;
+    }
+    if (zeroSoal.length > 0) {
+      text += `🟡 *PAKET SOAL MASIH 0 SOAL / BELUM LENGKAP (${zeroSoal.length} Guru):*\n`;
+      zeroSoal.forEach((r, i) => {
+        const kosongNames = r.emptyPakets.map(p => getCleanPaketName(p.nama_paket, p.kelas, p.jurusan));
+        r.unmatchedPenugasan.forEach(u => kosongNames.push(`${u.mapel} (belum ada paket)`));
+        text += `${i + 1}. ${r.nama} — [${r.filledPakets.length}/${r.pakets.length + r.unmatchedPenugasan.length} terisi] Belum diisi: ${kosongNames.join('; ')}\n`;
+      });
+      text += `\n`;
+    }
+    if (noMapel.length === 0 && noPaket.length === 0 && zeroSoal.length === 0) {
+      text += `🎉 *Seluruh guru sudah lengkap mengatur mapel dan mengisi soal ujian!*\n`;
+    } else {
+      text += `Mohon Bapak/Ibu Guru yang tercantum di atas segera melengkapi penugasan mapel / input butir soal di portal CBT. Terima kasih 🙏`;
+    }
+  } else {
+    text += `📋 *REKAP KESIAPAN MAPEL PER KELAS CBT SMKN 1 LEMPUING*\n`;
+    text += `📅 Tanggal: ${tgl}\n\n`;
+    let anyProblem = false;
+
+    ['X', 'XI', 'XII'].forEach(g => {
+      const gd = kesiapanLastSnapshot.kelasByGrade[g];
+      if (!gd || gd.rombels.length === 0) return;
+      const probs = gd.rombels.filter(rr => rr.hasIssues);
+      if (probs.length === 0) {
+        text += `✅ *Tingkat ${g}*: Semua ${gd.rombels.length} kelas sudah lengkap!\n`;
+        return;
+      }
+      anyProblem = true;
+      text += `⚠️ *Tingkat ${g} (${probs.length}/${gd.rombels.length} kelas belum lengkap):*\n`;
+      probs.forEach(rr => {
+        const det = [];
+        if (rr.missingList.length > 0) det.push(`❌ Belum ada mapel: ${rr.missingList.join(', ')}`);
+        if (rr.noPaketList.length > 0) det.push(`🟠 Belum ada paket: ${rr.noPaketList.map(x => x.label).join(', ')}`);
+        if (rr.zeroList.length > 0) det.push(`⚠️ 0 soal: ${rr.zeroList.map(x => `${x.label} (${x.guru})`).join(', ')}`);
+        if (rr.conflictList.length > 0) det.push(`🔥 Ganda: ${rr.conflictList.map(x => x.label).join(', ')}`);
+        text += `• *${rr.rombel.nama}*: ${det.join(' | ')}\n`;
+      });
+      text += `\n`;
+    });
+
+    if (!anyProblem) {
+      text += `\n🎉 *Semua kelas X, XI, dan XII sudah mendapatkan seluruh paket ujian dan soal siap!*`;
+    }
+  }
+
+  try {
+    await navigator.clipboard.writeText(text);
+    Swal.fire({
+      icon: 'success',
+      title: 'Rekap WA Berhasil Disalin!',
+      text: 'Silakan langsung Paste (Ctrl+V) di Grup WhatsApp Guru / Panitia.',
+      timer: 2200,
+      showConfirmButton: false
+    });
+  } catch (err) {
+    // Fallback textarea copy
+    const ta = document.createElement('textarea');
+    ta.value = text;
+    document.body.appendChild(ta);
+    ta.select();
+    document.execCommand('copy');
+    document.body.removeChild(ta);
+    Swal.fire({
+      icon: 'success',
+      title: 'Rekap WA Disalin!',
+      text: 'Silakan tempel di WhatsApp.',
+      timer: 2000,
+      showConfirmButton: false
+    });
+  }
+}
+
+function exportKesiapanExcel() {
+  if (!kesiapanLastSnapshot) {
+    Swal.fire('Data Belum Siap', 'Silakan tunggu atau klik "Refresh & Hitung Soal" terlebih dahulu.', 'info');
+    return;
+  }
+  if (typeof XLSX === 'undefined') {
+    Swal.fire('Library Excel Belum Siap', 'SheetJS (XLSX) belum termuat di halaman.', 'error');
+    return;
+  }
+
+  const wb = XLSX.utils.book_new();
+  const statusLabelMap = {
+    NO_MAPEL: 'Belum Atur Mapel',
+    NO_PAKET: 'Belum Ada Paket Soal',
+    ZERO_SOAL: 'Soal Masih 0 / Belum Lengkap',
+    READY: 'Siap Ujian'
+  };
+
+  // Sheet 1: Kesiapan Guru
+  const guruSheetData = [
+    ['No', 'Nama Lengkap Guru', 'Username', 'Status Kesiapan', 'Penugasan Mapel', 'Jumlah Paket', 'Paket Terisi Soal', 'Paket Masih 0 Soal', 'Total Butir Soal', 'Rincian Paket']
+  ];
+  kesiapanLastSnapshot.guruRows.forEach((r, idx) => {
+    const mapelTxt = r.penugasan.length > 0
+      ? r.penugasan.map(p => `${p.mapel} (${p.tingkat || 'Semua'})`).join('; ')
+      : (r.legacyMapelStr || '-');
+    const paketTxt = r.pakets.map(p => `${getCleanPaketName(p.nama_paket, p.kelas, p.jurusan)} [${getPaketSoalCountSafe(p)} soal]`).join('; ') || '-';
+    guruSheetData.push([
+      idx + 1,
+      r.nama,
+      r.username,
+      statusLabelMap[r.status] || r.status,
+      mapelTxt,
+      r.pakets.length,
+      r.filledPakets.length,
+      r.emptyPakets.length,
+      r.totalSoal,
+      paketTxt
+    ]);
+  });
+  const wsGuru = XLSX.utils.aoa_to_sheet(guruSheetData);
+  XLSX.utils.book_append_sheet(wb, wsGuru, 'Kesiapan Guru');
+
+  // Sheet 2..4: Matriks per Tingkat (X, XI, XII)
+  ['X', 'XI', 'XII'].forEach(g => {
+    const gd = kesiapanLastSnapshot.kelasByGrade[g];
+    if (!gd || gd.rombels.length === 0) return;
+
+    const header = ['Kelas / Rombel', 'Jurusan', 'Jml Siswa', 'Siap/Target', ...gd.columns.map(c => c.label)];
+    const aoa = [header];
+
+    gd.rombels.forEach(rr => {
+      const row = [
+        rr.rombel.nama,
+        rr.rombel.jurusan,
+        rr.rombel.siswaCount,
+        `${rr.readyCount}/${rr.requiredCount}`
+      ];
+      rr.cells.forEach(cell => {
+        if (cell.state === 'NA' || cell.state === 'OPTIONAL') row.push('-');
+        else if (cell.state === 'READY') row.push(`SIAP (${cell.soalCount} soal - ${cell.guruName})`);
+        else if (cell.state === 'ZERO_SOAL') row.push(`0 SOAL (${cell.guruName})`);
+        else if (cell.state === 'NO_PAKET') row.push(`BELUM ADA PAKET (${cell.guruName})`);
+        else if (cell.state === 'CONFLICT') row.push(`GANDA (${cell.guruName})`);
+        else row.push('BELUM DAPAT MAPEL');
+      });
+      aoa.push(row);
+    });
+
+    const wsG = XLSX.utils.aoa_to_sheet(aoa);
+    XLSX.utils.book_append_sheet(wb, wsG, `Kelas Tingkat ${g}`);
+  });
+
+  const todayStr = new Date().toISOString().split('T')[0];
+  XLSX.writeFile(wb, `Monitoring_Kesiapan_CBT_${todayStr}.xlsx`);
+}
+
 // Bind to window
+window.loadKesiapanMonitoring = loadKesiapanMonitoring;
+window.switchKesiapanSubTab = switchKesiapanSubTab;
+window.jumpKesiapanFilter = jumpKesiapanFilter;
+window.selectKesiapanTingkat = selectKesiapanTingkat;
+window.renderKesiapanGuruTable = renderKesiapanGuruTable;
+window.renderKesiapanKelasMatrix = renderKesiapanKelasMatrix;
+window.addCustomTargetMapel = addCustomTargetMapel;
+window.removeCustomTargetMapel = removeCustomTargetMapel;
+window.openPaketFromKesiapan = openPaketFromKesiapan;
+window.copyKesiapanWaRecap = copyKesiapanWaRecap;
+window.exportKesiapanExcel = exportKesiapanExcel;
 window.switchTab = switchTab;
 window.loadDashboardStats = loadDashboardStats;
 window.exportPesertaData = exportPesertaData;
