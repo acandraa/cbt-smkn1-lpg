@@ -266,17 +266,28 @@ function findAllActivePaketsForStudent(allPaket, profile) {
       const jurusanMatch = (pJurusan === "" || pJurusan === "semua" || jurParts.includes('semua') || jurParts.includes(studentJurusan));
       const kelasResult = checkKelasMatch(p.kelas, studentKelas);
 
-      if (jurusanMatch && kelasResult.match) {
+      // Pengaman Distribusi: Jika rombel siswa cocok persis (specificity === 3, misal "X TKJ 1"),
+      // tetap nyatakan cocok meskipun guru lupa mencentang jurusan "TKJ" pada paket soal tersebut!
+      if ((jurusanMatch || kelasResult.specificity === 3) && kelasResult.match) {
         let score = 0;
-        if (pJurusan && pJurusan !== "semua" && !jurParts.includes('semua') && jurParts.includes(studentJurusan)) score += 4;
+        if ((pJurusan && pJurusan !== "semua" && !jurParts.includes('semua') && jurParts.includes(studentJurusan)) || kelasResult.specificity === 3) {
+          score += 4;
+        }
         score += kelasResult.specificity;
-        matching.push({ ...p, matchScore: score });
+        const soalCount = Number(p.total_soal !== undefined ? p.total_soal : (p.soal_count || 0)) || 0;
+        matching.push({ ...p, matchScore: score, _soalCount: soalCount });
       }
     }
   }
 
-  // Prioritaskan yang memiliki skor kecocokan tertinggi
-  matching.sort((a, b) => b.matchScore - a.matchScore);
+  // Prioritaskan paket yang sudah berisi soal (> 0 soal), lalu skor kecocokan tertinggi
+  matching.sort((a, b) => {
+    const aHasSoal = a._soalCount > 0 ? 1 : 0;
+    const bHasSoal = b._soalCount > 0 ? 1 : 0;
+    if (bHasSoal !== aHasSoal) return bHasSoal - aHasSoal;
+    if (b.matchScore !== a.matchScore) return b.matchScore - a.matchScore;
+    return b._soalCount - a._soalCount;
+  });
   return matching;
 }
 
@@ -419,6 +430,33 @@ async function updateDashboardForSelectedPaket(activePaket) {
     questions = await DB.getSoalByPaket(activePaket.id);
   } catch (e) {
     console.warn("Gagal getSoalByPaket:", e);
+  }
+
+  // Pengaman Anti-Paket Ganda Kosong:
+  // Jika paket yang terpilih ternyata 0 soal padahal ada kandidat paket kembar lain yang aktif dan berisi soal (> 0),
+  // otomatis alihkan ke paket yang berisi soal agar siswa tidak terjebak di paket kosong!
+  if ((!questions || questions.length === 0) && candidateActivePakets && candidateActivePakets.length > 1) {
+    const isAgama = isAgamaPaket(activePaket.nama_paket);
+    const activeCat = isAgama ? detectAgamaCategory(activePaket.nama_paket) : null;
+    for (const alt of candidateActivePakets) {
+      if (String(alt.id) === String(activePaket.id)) continue;
+      if (isAgama) {
+        const altCat = detectAgamaCategory(alt.nama_paket);
+        if (!altCat || !activeCat || altCat.key !== activeCat.key) continue;
+      } else if (isAgamaPaket(alt.nama_paket)) {
+        continue;
+      }
+      try {
+        const altQuestions = await DB.getSoalByPaket(alt.id);
+        if (Array.isArray(altQuestions) && altQuestions.length > 0) {
+          activePaket = alt;
+          currentActivePaket = alt;
+          questions = altQuestions;
+          if (mapelEl) mapelEl.innerText = activePaket.nama_paket;
+          break;
+        }
+      } catch (e) {}
+    }
   }
 
   totalSoalCount = questions.length;

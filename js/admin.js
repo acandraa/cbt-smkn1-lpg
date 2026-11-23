@@ -2551,18 +2551,23 @@ async function paksaSelesaiUjian(id, name) {
 
       let activePaket = null;
       let bestScore = -1;
-      const studentJurusan = (p.jurusan || "").toLowerCase().trim();
+      const studentJurusan = normalizeJurAlias(p.jurusan);
       const studentKelas = (p.kelas || "").toLowerCase().trim();
 
       for (const pk of allPaket) {
         let pkJurusan = (pk.jurusan || "").toLowerCase().trim();
-        const jurusanMatch = (pkJurusan === "" || pkJurusan === "semua" || pkJurusan === studentJurusan);
+        const jurParts = pkJurusan.split(',').map(x => normalizeJurAlias(x)).filter(Boolean);
+        const jurusanMatch = (pkJurusan === "" || pkJurusan === "semua" || jurParts.includes('semua') || jurParts.includes(studentJurusan));
         const kelasResult = checkKelasMatch(pk.kelas, studentKelas);
 
-        if (jurusanMatch && kelasResult.match) {
+        if ((jurusanMatch || kelasResult.specificity === 3) && kelasResult.match) {
           let score = 0;
-          if (pkJurusan && pkJurusan !== "semua" && pkJurusan === studentJurusan) score += 4;
+          if ((pkJurusan && pkJurusan !== "semua" && !jurParts.includes('semua') && jurParts.includes(studentJurusan)) || kelasResult.specificity === 3) {
+            score += 4;
+          }
           score += kelasResult.specificity;
+          const soalCount = Number(pk.total_soal !== undefined ? pk.total_soal : (pk.soal_count || 0)) || 0;
+          if (soalCount > 0) score += 100; // utamakan paket yang sudah berisi soal
           if (score > bestScore) {
             bestScore = score;
             activePaket = pk;
@@ -3700,6 +3705,27 @@ async function savePenugasanGuru() {
       }
     }
 
+    // Pengaman Otomatis Rombel -> Jurusan:
+    // Jika guru memilih rombel spesifik (misal "X TKJ 1" atau "XII TKRO 1") dan tidak memilih "Semua Jurusan",
+    // pastikan jurusan dari rombel tersebut ("TKJ", "TKRO") otomatis ikut disertakan agar siswa di rombel itu tidak terblokir!
+    if (tingkat && jurusan) {
+      const jurSet = new Set(jurusan.split(',').map(s => s.trim().toUpperCase()).filter(Boolean));
+      const knownJurNorms = new Set(Array.from(jurSet).map(normalizeJurAlias));
+      tingkat.split(',').map(s => s.trim().toUpperCase()).filter(Boolean).forEach(kTok => {
+        if (kTok.startsWith('TINGKAT:')) return;
+        const parts = kTok.split(/[\s\-_]+/);
+        if (parts.length >= 2 && ['X', 'XI', 'XII', '10', '11', '12'].includes(parts[0])) {
+          const rombelJur = parts[1];
+          const normRJ = normalizeJurAlias(rombelJur);
+          if (rombelJur && !knownJurNorms.has(normRJ)) {
+            jurSet.add(rombelJur);
+            knownJurNorms.add(normRJ);
+          }
+        }
+      });
+      jurusan = Array.from(jurSet).join(', ');
+    }
+
     penugasanList.push({ mapel, tingkat, jurusan });
   });
 
@@ -3740,61 +3766,150 @@ async function savePenugasanGuru() {
     // Lepaskan paket yang sebelumnya tidak sengaja terikat bersama guru lain
     updatedPaketIds = updatedPaketIds.filter(pid => !otherGuruPaketIds.has(String(pid)));
 
-    if (autoCreatePaket && penugasanList.length > 0) {
-      const sourcePakets = (allPaketUnfiltered && allPaketUnfiltered.length > 0) ? allPaketUnfiltered : (allPaket || []);
+    if (autoCreatePaket) {
+      let sourcePakets = (allPaketUnfiltered && allPaketUnfiltered.length > 0) ? allPaketUnfiltered : (allPaket || []);
+      if (sourcePakets.length === 0) {
+        try {
+          const fetched = await DB.getPaketList();
+          if (Array.isArray(fetched)) {
+            allPaketUnfiltered = fetched;
+            sourcePakets = fetched;
+          }
+        } catch (e) {}
+      }
+
       const shortGuruName = String(g.nama_lengkap || g.username || '')
         .replace(/^(bpk\.?|ibu\.?|drs\.?|dr\.?|ir\.?|hj\.?|h\.?)\s+/i, '')
         .split(/[,\s]+/)[0]
         .trim();
 
+      // Daftar paket eksklusif milik guru ini yang sudah ada di Bank Soal
+      const myOwnPakets = sourcePakets.filter(p =>
+        updatedPaketIds.includes(String(p.id)) && !otherGuruPaketIds.has(String(p.id))
+      );
+      const claimedPaketIds = new Set();
+
+      const buildTargetPaketName = (item) => {
+        let newName = item.mapel;
+        const kParts = (item.tingkat || '').split(',').map(s => s.trim()).filter(Boolean);
+        if (kParts.length === 1) {
+          const single = kParts[0];
+          newName += ` - ${single.toUpperCase().startsWith('TINGKAT:') ? `Tingkat ${single.split(':')[1]}` : single}`;
+        } else if (kParts.length > 1) {
+          const firstT = kParts[0].split(/[\s\-_]+/)[0].toUpperCase();
+          if (kParts.every(k => k.split(/[\s\-_]+/)[0].toUpperCase() === firstT) && ['X', 'XI', 'XII', '10', '11', '12'].includes(firstT)) {
+            newName += ` - Kelas ${firstT}`;
+          } else {
+            newName += ` (${kParts.length} Kelas)`;
+          }
+        }
+
+        const jParts = (item.jurusan || '').split(',').map(s => s.trim()).filter(Boolean);
+        if (jParts.length === 1) {
+          newName += ` (${jParts[0]})`;
+        } else if (jParts.length === 2) {
+          newName += ` (${jParts.join(', ')})`;
+        }
+
+        const duplicateOtherGuru = sourcePakets.some(p =>
+          !updatedPaketIds.includes(String(p.id)) &&
+          String(p.nama_paket || '').trim().toLowerCase() === newName.trim().toLowerCase()
+        );
+        if (duplicateOtherGuru && shortGuruName) {
+          newName += ` [${shortGuruName}]`;
+        }
+        return newName;
+      };
+
+      const extractGradesSet = (rawKelas) => {
+        const parsed = parseCleanKelasTokens(rawKelas);
+        const gSet = new Set(parsed.grades);
+        parsed.rombels.forEach(r => {
+          const gTok = r.split(/[\s\-_]+/)[0];
+          if (['X', 'XI', 'XII', '10', '11', '12'].includes(gTok)) gSet.add(gTok);
+        });
+        return gSet;
+      };
+
       for (const item of penugasanList) {
         const jVal = item.jurusan || '';
+        const newName = buildTargetPaketName(item);
+        const itemFam = normalizeMapelFamily(item.mapel);
+        const itemGrades = extractGradesSet(item.tingkat);
 
-        // HANYA cari kecocokan di paket MILIK GURU INI SENDIRI (tidak boleh memakai ulang paket milik guru lain!)
-        const myOwnPakets = sourcePakets.filter(p =>
-          updatedPaketIds.includes(String(p.id)) && !otherGuruPaketIds.has(String(p.id))
-        );
-        const existingPaket = myOwnPakets.find(p => {
+        // Cari paket milik guru ini yang belum diklaim baris lain untuk di-UPDATE langsung di Bank Soal
+        const availableOwn = myOwnPakets.filter(p => !claimedPaketIds.has(String(p.id)));
+
+        // Prioritas 1: Cocok persis (mapel + kelas + jurusan)
+        let matchedPaket = availableOwn.find(p => {
           const pName = String(p.nama_paket || '').toLowerCase();
           const mName = item.mapel.toLowerCase();
           const pJ = String(p.jurusan || '').toUpperCase();
           const pK = String(p.kelas || '').toUpperCase();
-          const matchM = pName.includes(mName);
+          const matchM = pName.includes(mName) || normalizeMapelFamily(p.nama_paket.split(' - ')[0].split(' (')[0]) === itemFam;
           const matchJ = (!jVal && (!pJ || pJ === 'SEMUA')) || (pJ === jVal.toUpperCase());
           const matchK = (!item.tingkat && (!pK || pK === 'SEMUA')) || (pK === item.tingkat.toUpperCase());
           return matchM && matchJ && matchK;
         });
 
-        if (!existingPaket) {
-          let newName = item.mapel;
-          const kParts = (item.tingkat || '').split(',').map(s => s.trim()).filter(Boolean);
-          if (kParts.length === 1) {
-            const single = kParts[0];
-            newName += ` - ${single.toUpperCase().startsWith('TINGKAT:') ? `Tingkat ${single.split(':')[1]}` : single}`;
-          } else if (kParts.length > 1) {
-            const firstT = kParts[0].split(/[\s\-_]+/)[0].toUpperCase();
-            if (kParts.every(k => k.split(/[\s\-_]+/)[0].toUpperCase() === firstT) && ['X', 'XI', 'XII', '10', '11', '12'].includes(firstT)) {
-              newName += ` - Kelas ${firstT}`;
-            } else {
-              newName += ` (${kParts.length} Kelas)`;
+        // Prioritas 2: Mapel sama & tingkat/kelas beririsan (utamakan paket yang sudah berisi soal > 0)
+        if (!matchedPaket) {
+          const sameMapelAndGrade = availableOwn.filter(p => {
+            const pBase = String(p.nama_paket || '').split(' - ')[0].split(' (')[0].trim();
+            const pFam = normalizeMapelFamily(pBase);
+            const sameM = (pFam && pFam === itemFam) || String(p.nama_paket || '').toLowerCase().includes(item.mapel.toLowerCase());
+            if (!sameM) return false;
+            if (getOverlappingClasses(p.kelas, item.tingkat).length > 0) return true;
+            const pGrades = extractGradesSet(p.kelas);
+            for (const gTok of itemGrades) {
+              if (pGrades.has(gTok)) return true;
             }
-          }
-
-          const jParts = (item.jurusan || '').split(',').map(s => s.trim()).filter(Boolean);
-          if (jParts.length === 1) {
-            newName += ` (${jParts[0]})`;
-          } else if (jParts.length === 2) {
-            newName += ` (${jParts.join(', ')})`;
-          }
-
-          // Jika sudah ada paket guru lain dengan nama yang sama persis, tambahkan penanda nama guru agar mudah dibedakan
-          const duplicateNameExists = sourcePakets.some(p =>
-            String(p.nama_paket || '').trim().toLowerCase() === newName.trim().toLowerCase()
+            return itemGrades.size === 0 && pGrades.size === 0;
+          });
+          sameMapelAndGrade.sort((a, b) =>
+            (Number(b.total_soal || b.soal_count || 0) - Number(a.total_soal || a.soal_count || 0))
           );
-          if (duplicateNameExists && shortGuruName) {
-            newName += ` [${shortGuruName}]`;
-          }
+          matchedPaket = sameMapelAndGrade[0] || null;
+        }
 
+        // Prioritas 3: Mapel sama (jika guru mengganti tingkat kelas pada satu-satunya paket mapel tersebut)
+        if (!matchedPaket) {
+          const sameMapelOnly = availableOwn.filter(p => {
+            const pBase = String(p.nama_paket || '').split(' - ')[0].split(' (')[0].trim();
+            const pFam = normalizeMapelFamily(pBase);
+            return (pFam && pFam === itemFam) || String(p.nama_paket || '').toLowerCase().includes(item.mapel.toLowerCase());
+          });
+          sameMapelOnly.sort((a, b) =>
+            (Number(b.total_soal || b.soal_count || 0) - Number(a.total_soal || a.soal_count || 0))
+          );
+          matchedPaket = sameMapelOnly[0] || null;
+        }
+
+        if (matchedPaket) {
+          const pidStr = String(matchedPaket.id);
+          claimedPaketIds.add(pidStr);
+          if (!updatedPaketIds.includes(pidStr)) updatedPaketIds.push(pidStr);
+
+          // Sinkronkan perubahan Nama Paket, Kelas, atau Jurusan langsung ke paket tersebut di Bank Soal
+          const curK = String(matchedPaket.kelas || '').trim();
+          const curJ = String(matchedPaket.jurusan || '').trim();
+          const nextK = String(item.tingkat || '').trim();
+          const nextJ = String(jVal || '').trim();
+          const curName = String(matchedPaket.nama_paket || '').trim();
+
+          if (curK.toUpperCase() !== nextK.toUpperCase() || curJ.toUpperCase() !== nextJ.toUpperCase() || curName !== newName) {
+            await DB.savePaket(pidStr, {
+              nama_paket: newName,
+              jurusan: nextJ || null,
+              kelas: nextK || null,
+              jadwal_mulai: matchedPaket.jadwal_mulai || null,
+              jadwal_selesai: matchedPaket.jadwal_selesai || null
+            });
+            matchedPaket.nama_paket = newName;
+            matchedPaket.jurusan = nextJ || null;
+            matchedPaket.kelas = nextK || null;
+          }
+        } else {
           const created = await DB.savePaket('', {
             nama_paket: newName,
             jurusan: jVal || null,
@@ -3804,14 +3919,33 @@ async function savePenugasanGuru() {
           });
 
           if (created && created.id) {
-            if (!updatedPaketIds.includes(String(created.id))) {
-              updatedPaketIds.push(String(created.id));
+            const cId = String(created.id);
+            claimedPaketIds.add(cId);
+            if (!updatedPaketIds.includes(cId)) {
+              updatedPaketIds.push(cId);
             }
             sourcePakets.push(created);
           }
-        } else {
-          if (!updatedPaketIds.includes(String(existingPaket.id))) {
-            updatedPaketIds.push(String(existingPaket.id));
+        }
+      }
+
+      // Bersihkan otomatis paket ganda / paket yatim milik guru ini di Bank Soal yang tidak terpakai & masih kosong (0 soal)
+      const unclaimedOwnPakets = myOwnPakets.filter(p => !claimedPaketIds.has(String(p.id)));
+      for (const oldPk of unclaimedOwnPakets) {
+        const oldId = String(oldPk.id);
+        let soalCount = Number(oldPk.total_soal !== undefined ? oldPk.total_soal : (oldPk.soal_count || 0)) || 0;
+        if (soalCount === 0 && oldPk.total_soal === undefined && typeof DB.getSoalByPaket === 'function') {
+          try {
+            const qList = await DB.getSoalByPaket(oldId);
+            soalCount = Array.isArray(qList) ? qList.length : 0;
+          } catch (e) {}
+        }
+        if (soalCount === 0) {
+          try {
+            await DB.deletePaket(oldId);
+            updatedPaketIds = updatedPaketIds.filter(id => id !== oldId);
+          } catch (e) {
+            console.warn('Gagal hapus paket yatim kosong:', oldId, e);
           }
         }
       }
