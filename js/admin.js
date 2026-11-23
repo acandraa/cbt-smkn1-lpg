@@ -5715,11 +5715,19 @@ const MATH_SUPERSCRIPT_MAP = {
   'O': 'ᴼ', 'P': 'ᴾ', 'R': 'ᴿ', 'T': 'ᵀ', 'U': 'ᵁ', 'V': 'ⱽ', 'W': 'ᵂ'
 };
 
+const MATH_SUPERSCRIPT_REVERSE_MAP = Object.fromEntries(
+  Object.entries(MATH_SUPERSCRIPT_MAP).map(([k, v]) => [v, k])
+);
+
 const MATH_SUBSCRIPT_MAP = {
   '0': '₀', '1': '₁', '2': '₂', '3': '₃', '4': '₄',
   '5': '₅', '6': '₆', '7': '₇', '8': '₈', '9': '₉',
   '+': '₊', '-': '₋', '=': '₌', '(': '₍', ')': '₎'
 };
+
+const MATH_SUBSCRIPT_REVERSE_MAP = Object.fromEntries(
+  Object.entries(MATH_SUBSCRIPT_MAP).map(([k, v]) => [v, k])
+);
 
 function toUnicodeSuperscript(expStr) {
   const chars = Array.from(String(expStr || ''));
@@ -5727,8 +5735,13 @@ function toUnicodeSuperscript(expStr) {
   const mapped = [];
   for (const ch of chars) {
     if (ch === ' ') continue;
-    if (!MATH_SUPERSCRIPT_MAP[ch]) return null;
-    mapped.push(MATH_SUPERSCRIPT_MAP[ch]);
+    if (MATH_SUPERSCRIPT_MAP[ch]) {
+      mapped.push(MATH_SUPERSCRIPT_MAP[ch]);
+    } else if (MATH_SUPERSCRIPT_REVERSE_MAP[ch]) {
+      mapped.push(ch);
+    } else {
+      return null;
+    }
   }
   return mapped.join('');
 }
@@ -5739,8 +5752,13 @@ function toUnicodeSubscript(subStr) {
   const mapped = [];
   for (const ch of chars) {
     if (ch === ' ') continue;
-    if (!MATH_SUBSCRIPT_MAP[ch]) return null;
-    mapped.push(MATH_SUBSCRIPT_MAP[ch]);
+    if (MATH_SUBSCRIPT_MAP[ch]) {
+      mapped.push(MATH_SUBSCRIPT_MAP[ch]);
+    } else if (MATH_SUBSCRIPT_REVERSE_MAP[ch]) {
+      mapped.push(ch);
+    } else {
+      return null;
+    }
   }
   return mapped.join('');
 }
@@ -5751,29 +5769,39 @@ function formatMathExponents(text) {
   if (!s) return '';
 
   // 1. Konversi tag HTML <sup>...</sup> dan <sub>...</sub> menjadi karakter Unicode pangkat/subskrip
-  s = s.replace(/<\s*sup\s*>([\s\S]*?)<\s*\/\s*sup\s*>/gi, (m, inner) => {
+  s = s.replace(/<\s*sup\b[^>]*>([\s\S]*?)<\s*\/\s*sup\s*>/gi, (m, inner) => {
     const sup = toUnicodeSuperscript(inner.replace(/<[^>]+>/g, '').trim());
     return sup !== null ? sup : m;
   });
-  s = s.replace(/<\s*sub\s*>([\s\S]*?)<\s*\/\s*sub\s*>/gi, (m, inner) => {
+  s = s.replace(/<\s*sub\b[^>]*>([\s\S]*?)<\s*\/\s*sub\s*>/gi, (m, inner) => {
     const sub = toUnicodeSubscript(inner.replace(/<[^>]+>/g, '').trim());
     return sub !== null ? sub : m;
   });
 
   // Pisahkan tag HTML (seperti <img src="...">) agar atribut di dalam tag tidak ikut diubah
   const parts = s.split(/(<[^>]+>)/g);
+  const baseCharClass = '[A-Za-z0-9\\)\\]\\u00B2\\u00B3\\u00B9\\u2070-\\u209F\\u03C0]';
+  const reBraced = new RegExp(`(${baseCharClass})[ \\t]*\\^[ \\t]*\\{([0-9+\\-=()a-zA-Z\\/\\s]+)\\}`, 'g');
+  const reParen = new RegExp(`(${baseCharClass})[ \\t]*\\^[ \\t]*\\(([0-9+\\-=a-zA-Z\\/\\s]+)\\)`, 'g');
+  const reDirect = new RegExp(`(${baseCharClass})[ \\t]*\\^[ \\t]*([+\\-]?\\d+(?:\\/\\d+)?(?:[a-zA-Z](?![a-zA-Z]))?|[a-zA-Z](?![a-zA-Z]))`, 'g');
+  const reSubBraced = new RegExp(`(${baseCharClass})_\\{([0-9+\\-=()]+)\\}`, 'g');
+
   for (let i = 0; i < parts.length; i++) {
     const seg = parts[i];
     if (!seg || (seg.startsWith('<') && seg.endsWith('>'))) continue;
 
     let t = seg;
 
-    // Bersihkan LaTeX inline sederhana bila AI mengeluarkan $2^2$ atau \times
+    // Bersihkan pembungkus LaTeX ($...$, \(...\), \[...\]) dan simbol matematika umum
     t = t
-      .replace(/\$([^$\n]{1,60})\$/g, (m, inner) => {
-        if (/[\^_\\]/.test(inner)) return inner;
+      .replace(/\\\(([\s\S]*?)\\\)/g, '$1')
+      .replace(/\\\[([\s\S]*?)\\\]/g, '$1')
+      .replace(/\$([^$\n]{1,120})\$/g, (m, inner) => {
+        if (/[\^_\\0-9+\-=*/()]/.test(inner)) return inner;
         return m;
       })
+      .replace(/\\frac\s*\{([^{}]+)\}\s*\{([^{}]+)\}/g, '($1/$2)')
+      .replace(/\\sqrt\s*\{([^{}]+)\}/g, '√($1)')
       .replace(/\\times\b/g, '×')
       .replace(/\\div\b/g, '÷')
       .replace(/\\pm\b/g, '±')
@@ -5784,34 +5812,67 @@ function formatMathExponents(text) {
       .replace(/\\pi\b/g, 'π')
       .replace(/\^\\circ\b|\\degree\b/g, '°');
 
-    // A. Pangkat dengan kurung kurawal: 2^{10}, 10^{-5}, x^{n+1}
-    t = t.replace(/([A-Za-z0-9\)\]])\^\{([0-9+\-=()a-zA-Z\/\s]+)\}/g, (m, base, exp) => {
-      const sup = toUnicodeSuperscript(exp);
-      return sup !== null ? `${base}${sup}` : m;
-    });
+    // Jalankan hingga 3 putaran agar pangkat bertingkat seperti (2^3)^4 atau 2^2^3 terkonversi tuntas
+    for (let pass = 0; pass < 3; pass++) {
+      const before = t;
+      t = t.replace(reBraced, (m, base, exp) => {
+        const sup = toUnicodeSuperscript(exp);
+        return sup !== null ? `${base}${sup}` : m;
+      });
+      t = t.replace(reParen, (m, base, exp) => {
+        const sup = toUnicodeSuperscript(exp);
+        return sup !== null ? `${base}${sup}` : m;
+      });
+      t = t.replace(reDirect, (m, base, exp) => {
+        const sup = toUnicodeSuperscript(exp);
+        return sup !== null ? `${base}${sup}` : m;
+      });
+      t = t.replace(reSubBraced, (m, base, sub) => {
+        const conv = toUnicodeSubscript(sub);
+        return conv !== null ? `${base}${conv}` : m;
+      });
+      if (t === before) break;
+    }
 
-    // B. Pangkat dengan tanda kurung biasa: 2^(x+1), 10^(-3), 8^(1/3)
-    t = t.replace(/([A-Za-z0-9\)\]])\^\(([0-9+\-=a-zA-Z\/\s]+)\)/g, (m, base, exp) => {
-      const sup = toUnicodeSuperscript(exp);
-      return sup !== null ? `${base}${sup}` : m;
-    });
-
-    // C. Pangkat langsung: 2^2, x^3, 10^-5, (a+b)^2, cm^2, m^3, 2^n
-    t = t.replace(/([A-Za-z0-9\)\]])\^([+\-]?\d+(?:\/\d+)?|[a-zA-Z](?![a-zA-Z]))/g, (m, base, exp) => {
-      const sup = toUnicodeSuperscript(exp);
-      return sup !== null ? `${base}${sup}` : m;
-    });
-
-    // D. Subskrip kurung kurawal: x_{1}, H_{2}O
-    t = t.replace(/([A-Za-z0-9\)\]])_\{([0-9+\-=()]+)\}/g, (m, base, sub) => {
-      const conv = toUnicodeSubscript(sub);
-      return conv !== null ? `${base}${conv}` : m;
-    });
+    // Bersihkan koma liar di akhir opsi angka berpangkat dari AI (contoh: "3¹," -> "3¹")
+    if (/^[0-9a-zA-Z\s+\-×÷()⁰¹²³⁴⁵⁶⁷⁸⁹⁺⁻⁼⁽⁾ᐟ]+,$/.test(t.trim()) && /[⁰¹²³⁴⁵⁶⁷⁸⁹]/.test(t)) {
+      t = t.replace(/,\s*$/, '');
+    }
 
     parts[i] = t;
   }
 
   return parts.join('');
+}
+
+// Merender teks soal/opsi ke HTML dengan tag <sup>...</sup> dan <sub>...</sub> asli
+// agar seluruh angka pangkat (2², 3⁵, 10⁻⁵, (2³)⁴) tampil seragam, tajam, dan tidak mengecil/rusak di semua font
+function renderMathHtml(rawText) {
+  if (rawText === null || rawText === undefined) return '';
+  const normalized = formatMathExponents(String(rawText));
+  if (!normalized) return '';
+
+  const supChars = Object.values(MATH_SUPERSCRIPT_MAP).join('');
+  const subChars = Object.values(MATH_SUBSCRIPT_MAP).join('');
+  const supRegex = new RegExp(`[${supChars.replace(/[\\\]^-]/g, '\\$&')}]+`, 'g');
+  const subRegex = new RegExp(`[${subChars.replace(/[\\\]^-]/g, '\\$&')}]+`, 'g');
+
+  // Pisahkan tag HTML aman (<img ...>, <br>) jika ada, sedangkan teks biasa di-escape lalu diubah ke <sup>/<sub>
+  const tokens = normalized.split(/(<\s*img\b[^>]*>|<\s*br\s*\/?>)/gi);
+  return tokens.map(tok => {
+    if (!tok) return '';
+    if (/^<\s*(img\b|br\b)/i.test(tok)) return tok;
+    let esc = escapeHtml(tok);
+    esc = esc.replace(supRegex, (match) => {
+      const ascii = Array.from(match).map(ch => MATH_SUPERSCRIPT_REVERSE_MAP[ch] || ch).join('');
+      return `<sup>${escapeHtml(ascii)}</sup>`;
+    });
+    esc = esc.replace(subRegex, (match) => {
+      const ascii = Array.from(match).map(ch => MATH_SUBSCRIPT_REVERSE_MAP[ch] || ch).join('');
+      return `<sub>${escapeHtml(ascii)}</sub>`;
+    });
+    return esc;
+  }).join('');
 }
 
 let lastFocusedSoalFieldId = 'crud-soal-pertanyaan';
@@ -5827,11 +5888,34 @@ function initSoalMathInputs() {
     'crud-soal-opsid',
     'crud-soal-opsie'
   ];
+  // Regex konversi live saat guru mengetik spasi atau tanda baca setelah pangkat (cth: "2^2 " -> "2² ")
+  const liveCaretRegex = /([A-Za-z0-9\)\]])\^([+\-]?\d+|[a-zA-Z])([\s,;:.?!+\-*/=)\]])$/;
+
   fieldIds.forEach(fid => {
     const el = document.getElementById(fid);
     if (!el) return;
     el.addEventListener('focus', () => {
       lastFocusedSoalFieldId = fid;
+    });
+    el.addEventListener('input', () => {
+      const pos = typeof el.selectionStart === 'number' ? el.selectionStart : null;
+      if (pos === null) return;
+      const beforeCursor = el.value.slice(0, pos);
+      if (liveCaretRegex.test(beforeCursor)) {
+        const replacedBefore = formatMathExponents(beforeCursor);
+        if (replacedBefore !== beforeCursor) {
+          const afterCursor = el.value.slice(pos);
+          el.value = replacedBefore + afterCursor;
+          const newPos = replacedBefore.length;
+          try { el.setSelectionRange(newPos, newPos); } catch (e) {}
+        }
+      }
+    });
+    el.addEventListener('paste', () => {
+      setTimeout(() => {
+        const formatted = formatMathExponents(el.value);
+        if (formatted !== el.value) el.value = formatted;
+      }, 10);
     });
     // Otomatis ubah 2^2 -> 2² saat guru selesai mengetik di kolom tersebut (blur)
     el.addEventListener('blur', () => {
@@ -5841,6 +5925,15 @@ function initSoalMathInputs() {
       }
     });
   });
+
+  const wordRawEl = document.getElementById('word-raw-input');
+  if (wordRawEl) {
+    wordRawEl.addEventListener('blur', () => {
+      const formatted = formatMathExponents(wordRawEl.value);
+      if (formatted !== wordRawEl.value) wordRawEl.value = formatted;
+    });
+  }
+
   soalMathInputsInitialized = true;
 }
 
@@ -5893,18 +5986,18 @@ function renderSoalList(list) {
 
     let optionsHtml = `
       <div class="row g-2 small mt-2">
-        <div class="col-md-6"><strong>A.</strong> ${formatMathExponents(s.opsi_a)}</div>
-        <div class="col-md-6"><strong>B.</strong> ${formatMathExponents(s.opsi_b)}</div>
+        <div class="col-md-6"><strong>A.</strong> ${renderMathHtml(s.opsi_a)}</div>
+        <div class="col-md-6"><strong>B.</strong> ${renderMathHtml(s.opsi_b)}</div>
     `;
 
     if (!isBs) {
       optionsHtml += `
-        <div class="col-md-6"><strong>C.</strong> ${formatMathExponents(s.opsi_c || '-')}</div>
-        <div class="col-md-6"><strong>D.</strong> ${formatMathExponents(s.opsi_d || '-')}</div>
+        <div class="col-md-6"><strong>C.</strong> ${renderMathHtml(s.opsi_c || '-')}</div>
+        <div class="col-md-6"><strong>D.</strong> ${renderMathHtml(s.opsi_d || '-')}</div>
       `;
       if (s.opsi_e) {
         optionsHtml += `
-          <div class="col-md-6"><strong>E.</strong> ${formatMathExponents(s.opsi_e)}</div>
+          <div class="col-md-6"><strong>E.</strong> ${renderMathHtml(s.opsi_e)}</div>
         `;
       }
     }
@@ -5918,7 +6011,7 @@ function renderSoalList(list) {
             <span class="badge bg-secondary mb-2">Bobot: ${s.bobot || 1}</span>
             ${isBs ? `<span class="badge bg-info mb-2 text-dark">Benar / Salah</span>` : ''}
             ${hasImg}
-            <h6 class="fw-semibold text-dark mt-1" style="white-space: pre-wrap;">${formatMathExponents(s.pertanyaan)}</h6>
+            <h6 class="fw-semibold text-dark mt-1" style="white-space: pre-wrap;">${renderMathHtml(s.pertanyaan)}</h6>
             ${optionsHtml}
             <div class="text-success small mt-2 font-heading fw-bold">
               <i class="bi bi-check-circle-fill me-1"></i> Kunci Jawaban: Opsi ${s.jawaban_benar}
@@ -6261,7 +6354,7 @@ function exportPaketSoalWord() {
     const optsHtml = opts.map(o => `
       <tr>
         <td style="width: 24px; vertical-align: top; font-weight: bold;">${o.key}.</td>
-        <td style="vertical-align: top;">${formatMathExponents(o.val)}</td>
+        <td style="vertical-align: top;">${renderMathHtml(o.val)}</td>
       </tr>
     `).join('');
 
@@ -6271,7 +6364,7 @@ function exportPaketSoalWord() {
           <tr>
             <td style="width: 28px; vertical-align: top; font-weight: bold;">${no}.</td>
             <td style="vertical-align: top;">
-              <div style="margin-bottom: 6px;">${formatMathExponents(s.pertanyaan || '')}</div>
+              <div style="margin-bottom: 6px;">${renderMathHtml(s.pertanyaan || '')}</div>
               <table style="width: 100%; border-collapse: collapse; margin-left: 4px;">
                 ${optsHtml}
               </table>
@@ -7134,12 +7227,12 @@ function renderImportPreviewSoal(data) {
     html += `
       <tr>
         <td>${r.nomor}</td>
-        <td class="text-truncate" style="max-width: 150px;">${r.pertanyaan}</td>
-        <td>${r.opsi_a}</td>
-        <td>${r.opsi_b}</td>
-        <td>${r.opsi_c || '-'}</td>
-        <td>${r.opsi_d || '-'}</td>
-        <td>${r.opsi_e || '-'}</td>
+        <td class="text-truncate" style="max-width: 150px;">${renderMathHtml(r.pertanyaan)}</td>
+        <td>${renderMathHtml(r.opsi_a)}</td>
+        <td>${renderMathHtml(r.opsi_b)}</td>
+        <td>${renderMathHtml(r.opsi_c || '-')}</td>
+        <td>${renderMathHtml(r.opsi_d || '-')}</td>
+        <td>${renderMathHtml(r.opsi_e || '-')}</td>
         <td class="text-center font-heading fw-bold">${r.jawaban_benar}</td>
         <td class="text-center">${r.bobot}</td>
       </tr>
@@ -7753,7 +7846,7 @@ function renderWordPreview() {
       return `
         <div class="p-1 px-2 rounded mb-1 small d-flex align-items-center gap-2 ${optClass}" style="font-size: 0.82rem;">
           <span class="badge ${isCorrect ? 'bg-success text-white' : 'bg-secondary text-white'}" style="font-size: 0.72rem;">${letter}</span>
-          <span>${escapeHtml(text)}</span>
+          <span>${renderMathHtml(text)}</span>
         </div>
       `;
     }).join('');
@@ -7780,7 +7873,7 @@ function renderWordPreview() {
           </div>
         </div>
         <div class="card-body p-3">
-          <div class="fw-semibold text-dark mb-2" style="white-space: pre-line; font-size: 0.9rem;">${escapeHtml(q.pertanyaan)}</div>
+          <div class="fw-semibold text-dark mb-2" style="white-space: pre-line; font-size: 0.9rem;">${renderMathHtml(q.pertanyaan)}</div>
           <div class="ps-1">
             ${optionsHtml}
           </div>
@@ -8100,7 +8193,7 @@ ${materi ? `4. Gunakan materi/referensi berikut sebagai acuan utama:\n"""\n${mat
 6. Pilihan jawaban harus masuk akal, logis, tidak ambigu, dan mendidik.
 7. Tentukan kunci jawaban_benar secara akurat (pilih salah satu huruf: "A", "B", "C", "D", atau "E").
 8. Bobot setiap butir soal bernilai 1.
-9. Untuk penulisan bilangan berpangkat / eksponen / rumus kimia / satuan persegi atau kubik, JANGAN gunakan tanda topi seperti 2^2, x^3, 10^-5, cm^2, atau LaTeX $2^2$, melainkan WAJIB tulis langsung dengan karakter pangkat/subskrip Unicode asli seperti 2², x³, 10⁻⁵, cm², m³, H₂O, CO₂.
+9. Untuk penulisan bilangan berpangkat / eksponen / satuan persegi atau kubik, tulis dengan jelas (misal 3^5, 2^2, (2^3)^4, 10^-5, x^2, cm^2) dan JANGAN menambahkan tanda baca koma di akhir teks pilihan jawaban (contoh salah: "3¹," -> contoh benar: "3^1").
 
 PENTING:
 Keluarkan output HANYA berupa JSON Array murni tanpa format markdown seperti \`\`\`json.
@@ -8265,32 +8358,32 @@ function renderAiSoalPreview() {
             </button>
           </div>
         </div>
-        <p class="mb-2 fw-semibold text-dark" style="white-space: pre-wrap;">${escapeHtml(q.pertanyaan)}</p>
+        <p class="mb-2 fw-semibold text-dark" style="white-space: pre-wrap;">${renderMathHtml(q.pertanyaan)}</p>
         <div class="row g-2 small">
           <div class="col-md-6">
             <div class="p-2 border rounded ${q.jawaban_benar === 'A' ? 'border-success bg-success-subtle fw-bold text-success' : 'bg-light'}">
-              <strong>A.</strong> ${escapeHtml(q.opsi_a)}
+              <strong>A.</strong> ${renderMathHtml(q.opsi_a)}
             </div>
           </div>
           <div class="col-md-6">
             <div class="p-2 border rounded ${q.jawaban_benar === 'B' ? 'border-success bg-success-subtle fw-bold text-success' : 'bg-light'}">
-              <strong>B.</strong> ${escapeHtml(q.opsi_b)}
+              <strong>B.</strong> ${renderMathHtml(q.opsi_b)}
             </div>
           </div>
           <div class="col-md-6">
             <div class="p-2 border rounded ${q.jawaban_benar === 'C' ? 'border-success bg-success-subtle fw-bold text-success' : 'bg-light'}">
-              <strong>C.</strong> ${escapeHtml(q.opsi_c)}
+              <strong>C.</strong> ${renderMathHtml(q.opsi_c)}
             </div>
           </div>
           <div class="col-md-6">
             <div class="p-2 border rounded ${q.jawaban_benar === 'D' ? 'border-success bg-success-subtle fw-bold text-success' : 'bg-light'}">
-              <strong>D.</strong> ${escapeHtml(q.opsi_d)}
+              <strong>D.</strong> ${renderMathHtml(q.opsi_d)}
             </div>
           </div>
           ${q.opsi_e ? `
           <div class="col-md-6">
             <div class="p-2 border rounded ${q.jawaban_benar === 'E' ? 'border-success bg-success-subtle fw-bold text-success' : 'bg-light'}">
-              <strong>E.</strong> ${escapeHtml(q.opsi_e)}
+              <strong>E.</strong> ${renderMathHtml(q.opsi_e)}
             </div>
           </div>
           ` : ''}

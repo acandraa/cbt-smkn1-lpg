@@ -906,14 +906,23 @@ const EXAM_SUBSCRIPT_MAP = {
   '+': '₊', '-': '₋', '=': '₌', '(': '₍', ')': '₎'
 };
 
+const EXAM_SUPERSCRIPT_REVERSE_MAP = Object.fromEntries(
+  Object.entries(EXAM_SUPERSCRIPT_MAP).map(([k, v]) => [v, k])
+);
+
+const EXAM_SUBSCRIPT_REVERSE_MAP = Object.fromEntries(
+  Object.entries(EXAM_SUBSCRIPT_MAP).map(([k, v]) => [v, k])
+);
+
 function toUnicodeSuperUjian(expStr) {
   const chars = Array.from(String(expStr || ''));
   if (chars.length === 0) return '';
   const mapped = [];
   for (const ch of chars) {
     if (ch === ' ') continue;
-    if (!EXAM_SUPERSCRIPT_MAP[ch]) return null;
-    mapped.push(EXAM_SUPERSCRIPT_MAP[ch]);
+    if (EXAM_SUPERSCRIPT_MAP[ch]) mapped.push(EXAM_SUPERSCRIPT_MAP[ch]);
+    else if (EXAM_SUPERSCRIPT_REVERSE_MAP[ch]) mapped.push(ch);
+    else return null;
   }
   return mapped.join('');
 }
@@ -924,10 +933,20 @@ function toUnicodeSubUjian(subStr) {
   const mapped = [];
   for (const ch of chars) {
     if (ch === ' ') continue;
-    if (!EXAM_SUBSCRIPT_MAP[ch]) return null;
-    mapped.push(EXAM_SUBSCRIPT_MAP[ch]);
+    if (EXAM_SUBSCRIPT_MAP[ch]) mapped.push(EXAM_SUBSCRIPT_MAP[ch]);
+    else if (EXAM_SUBSCRIPT_REVERSE_MAP[ch]) mapped.push(ch);
+    else return null;
   }
   return mapped.join('');
+}
+
+function escapeHtmlUjian(str) {
+  return String(str || '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#039;');
 }
 
 function formatMathExponentsUjian(text) {
@@ -935,18 +954,21 @@ function formatMathExponentsUjian(text) {
   let s = String(text);
   if (!s) return '';
 
-  // Konversi tag <sup>...</sup> dan <sub>...</sub> jika ada
-  s = s.replace(/<\s*sup\s*>([\s\S]*?)<\s*\/\s*sup\s*>/gi, (m, inner) => {
-    const sup = toUnicodeSuperUjian(inner.trim());
+  s = s.replace(/<\s*sup\b[^>]*>([\s\S]*?)<\s*\/\s*sup\s*>/gi, (m, inner) => {
+    const sup = toUnicodeSuperUjian(inner.replace(/<[^>]+>/g, '').trim());
     return sup !== null ? sup : inner;
   });
-  s = s.replace(/<\s*sub\s*>([\s\S]*?)<\s*\/\s*sub\s*>/gi, (m, inner) => {
-    const sub = toUnicodeSubUjian(inner.trim());
+  s = s.replace(/<\s*sub\b[^>]*>([\s\S]*?)<\s*\/\s*sub\s*>/gi, (m, inner) => {
+    const sub = toUnicodeSubUjian(inner.replace(/<[^>]+>/g, '').trim());
     return sub !== null ? sub : inner;
   });
 
-  // Bersihkan token LaTeX sederhana bila ada
   s = s
+    .replace(/\\\(([\s\S]*?)\\\)/g, '$1')
+    .replace(/\\\[([\s\S]*?)\\\]/g, '$1')
+    .replace(/\$([^$\n]{1,120})\$/g, (m, inner) => (/[\^_\\0-9+\-=*/()]/.test(inner) ? inner : m))
+    .replace(/\\frac\s*\{([^{}]+)\}\s*\{([^{}]+)\}/g, '($1/$2)')
+    .replace(/\\sqrt\s*\{([^{}]+)\}/g, '√($1)')
     .replace(/\\times\b/g, '×')
     .replace(/\\div\b/g, '÷')
     .replace(/\\pm\b/g, '±')
@@ -957,31 +979,58 @@ function formatMathExponentsUjian(text) {
     .replace(/\\pi\b/g, 'π')
     .replace(/\^\\circ\b|\\degree\b/g, '°');
 
-  // 1. Pangkat dengan kurung kurawal: 2^{10}, 10^{-5}, x^{n+1}
-  s = s.replace(/([A-Za-z0-9\)\]])\^\{([0-9+\-=()a-zA-Z\/\s]+)\}/g, (m, base, exp) => {
-    const sup = toUnicodeSuperUjian(exp);
-    return sup !== null ? `${base}${sup}` : m;
-  });
+  const baseCharClass = '[A-Za-z0-9\\)\\]\\u00B2\\u00B3\\u00B9\\u2070-\\u209F\\u03C0]';
+  const reBraced = new RegExp(`(${baseCharClass})[ \\t]*\\^[ \\t]*\\{([0-9+\\-=()a-zA-Z\\/\\s]+)\\}`, 'g');
+  const reParen = new RegExp(`(${baseCharClass})[ \\t]*\\^[ \\t]*\\(([0-9+\\-=a-zA-Z\\/\\s]+)\\)`, 'g');
+  const reDirect = new RegExp(`(${baseCharClass})[ \\t]*\\^[ \\t]*([+\\-]?\\d+(?:\\/\\d+)?(?:[a-zA-Z](?![a-zA-Z]))?|[a-zA-Z](?![a-zA-Z]))`, 'g');
+  const reSubBraced = new RegExp(`(${baseCharClass})_\\{([0-9+\\-=()]+)\\}`, 'g');
 
-  // 2. Pangkat dengan tanda kurung biasa: 2^(x+1), 10^(-3), 8^(1/3)
-  s = s.replace(/([A-Za-z0-9\)\]])\^\(([0-9+\-=a-zA-Z\/\s]+)\)/g, (m, base, exp) => {
-    const sup = toUnicodeSuperUjian(exp);
-    return sup !== null ? `${base}${sup}` : m;
-  });
+  for (let pass = 0; pass < 3; pass++) {
+    const before = s;
+    s = s.replace(reBraced, (m, base, exp) => {
+      const sup = toUnicodeSuperUjian(exp);
+      return sup !== null ? `${base}${sup}` : m;
+    });
+    s = s.replace(reParen, (m, base, exp) => {
+      const sup = toUnicodeSuperUjian(exp);
+      return sup !== null ? `${base}${sup}` : m;
+    });
+    s = s.replace(reDirect, (m, base, exp) => {
+      const sup = toUnicodeSuperUjian(exp);
+      return sup !== null ? `${base}${sup}` : m;
+    });
+    s = s.replace(reSubBraced, (m, base, sub) => {
+      const conv = toUnicodeSubUjian(sub);
+      return conv !== null ? `${base}${conv}` : m;
+    });
+    if (s === before) break;
+  }
 
-  // 3. Pangkat langsung: 2^2, x^3, 10^-5, (a+b)^2, cm^2, m^3, 2^n
-  s = s.replace(/([A-Za-z0-9\)\]])\^([+\-]?\d+(?:\/\d+)?|[a-zA-Z](?![a-zA-Z]))/g, (m, base, exp) => {
-    const sup = toUnicodeSuperUjian(exp);
-    return sup !== null ? `${base}${sup}` : m;
-  });
-
-  // 4. Subskrip dengan kurung kurawal: x_{1}, H_{2}O
-  s = s.replace(/([A-Za-z0-9\)\]])_\{([0-9+\-=()]+)\}/g, (m, base, sub) => {
-    const conv = toUnicodeSubUjian(sub);
-    return conv !== null ? `${base}${conv}` : m;
-  });
+  if (/^[0-9a-zA-Z\s+\-×÷()⁰¹²³⁴⁵⁶⁷⁸⁹⁺⁻⁼⁽⁾ᐟ]+,$/.test(s.trim()) && /[⁰¹²³⁴⁵⁶⁷⁸⁹]/.test(s)) {
+    s = s.replace(/,\s*$/, '');
+  }
 
   return s;
+}
+
+function renderMathHtmlUjian(rawText) {
+  const norm = formatMathExponentsUjian(rawText);
+  if (!norm) return '';
+  const supChars = Object.values(EXAM_SUPERSCRIPT_MAP).join('');
+  const subChars = Object.values(EXAM_SUBSCRIPT_MAP).join('');
+  const supRegex = new RegExp(`[${supChars.replace(/[\\\]^-]/g, '\\$&')}]+`, 'g');
+  const subRegex = new RegExp(`[${subChars.replace(/[\\\]^-]/g, '\\$&')}]+`, 'g');
+
+  let esc = escapeHtmlUjian(norm);
+  esc = esc.replace(supRegex, (match) => {
+    const ascii = Array.from(match).map(ch => EXAM_SUPERSCRIPT_REVERSE_MAP[ch] || ch).join('');
+    return `<sup>${escapeHtmlUjian(ascii)}</sup>`;
+  });
+  esc = esc.replace(subRegex, (match) => {
+    const ascii = Array.from(match).map(ch => EXAM_SUBSCRIPT_REVERSE_MAP[ch] || ch).join('');
+    return `<sub>${escapeHtmlUjian(ascii)}</sub>`;
+  });
+  return esc;
 }
 
 function renderQuestion() {
@@ -989,7 +1038,7 @@ function renderQuestion() {
 
   const s = allQuestions[currentIndex];
   document.getElementById('exam-soal-index').innerText = `Soal ${currentIndex + 1} dari ${totalSoalCount}`;
-  document.getElementById('exam-pertanyaan').innerText = `${s.nomor || (currentIndex + 1)}. ${formatMathExponentsUjian(s.pertanyaan)}`;
+  document.getElementById('exam-pertanyaan').innerHTML = `${escapeHtmlUjian(s.nomor || (currentIndex + 1))}. ${renderMathHtmlUjian(s.pertanyaan)}`;
 
   const imgEl = document.getElementById('exam-gambar');
   if (s.gambar) {
@@ -1009,14 +1058,14 @@ function renderQuestion() {
   const activeAns = savedAnswers[s.id] ? savedAnswers[s.id].jawaban : null;
   const isBs = !s.opsi_c && !s.opsi_d;
   const optionList = [
-    { key: 'A', label: formatMathExponentsUjian(s.opsi_a) },
-    { key: 'B', label: formatMathExponentsUjian(s.opsi_b) }
+    { key: 'A', label: renderMathHtmlUjian(s.opsi_a) },
+    { key: 'B', label: renderMathHtmlUjian(s.opsi_b) }
   ];
 
   if (!isBs) {
-    if (s.opsi_c) optionList.push({ key: 'C', label: formatMathExponentsUjian(s.opsi_c) });
-    if (s.opsi_d) optionList.push({ key: 'D', label: formatMathExponentsUjian(s.opsi_d) });
-    if (s.opsi_e) optionList.push({ key: 'E', label: formatMathExponentsUjian(s.opsi_e) });
+    if (s.opsi_c) optionList.push({ key: 'C', label: renderMathHtmlUjian(s.opsi_c) });
+    if (s.opsi_d) optionList.push({ key: 'D', label: renderMathHtmlUjian(s.opsi_d) });
+    if (s.opsi_e) optionList.push({ key: 'E', label: renderMathHtmlUjian(s.opsi_e) });
   }
 
   optionList.forEach(opt => {
