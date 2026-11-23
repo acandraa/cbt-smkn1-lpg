@@ -4241,6 +4241,30 @@ async function cleanupOrphanAndDuplicatePakets() {
           });
         }
 
+        // Jika di paket milik guru belum ada, cari dari seluruh paket di Bank Soal yang belum diklaim guru lain
+        if (candidates.length === 0) {
+          const unassignedGlobal = allPaketUnfiltered.filter(p => p && p.id && !allOwnedPaketIds.has(String(p.id)) && !claimedIds.has(String(p.id)));
+          candidates = unassignedGlobal.filter(p => {
+            const pBase = String(p.nama_paket || '').split(' - ')[0].split(' (')[0].trim();
+            const pFam = normalizeMapelFamily(pBase);
+            const sameM = (pFam && pFam === itemFam) || String(p.nama_paket || '').toLowerCase().includes(String(item.mapel || '').toLowerCase());
+            if (!sameM) return false;
+            if (getOverlappingClasses(p.kelas, item.tingkat).length > 0) return true;
+            const pGrades = extractGradesSet(p.kelas);
+            for (const gTok of itemGrades) {
+              if (pGrades.has(gTok)) return true;
+            }
+            return itemGrades.size === 0 && pGrades.size === 0;
+          });
+          if (candidates.length === 0) {
+            candidates = unassignedGlobal.filter(p => {
+              const pBase = String(p.nama_paket || '').split(' - ')[0].split(' (')[0].trim();
+              const pFam = normalizeMapelFamily(pBase);
+              return (pFam && pFam === itemFam) || String(p.nama_paket || '').toLowerCase().includes(String(item.mapel || '').toLowerCase());
+            });
+          }
+        }
+
         candidates.sort((a, b) => {
           const scA = Number(a.total_soal !== undefined ? a.total_soal : (a.soal_count || 0)) || 0;
           const scB = Number(b.total_soal !== undefined ? b.total_soal : (b.soal_count || 0)) || 0;
@@ -5604,6 +5628,13 @@ function openPrintInNewTab(html) {
 
 async function loadPaket() {
   try {
+    if (!allGuru || allGuru.length === 0) {
+      try {
+        allGuru = await DB.getGuruList() || [];
+      } catch (e) {
+        console.warn('Gagal memuat daftar guru di loadPaket:', e);
+      }
+    }
     const rawPaket = await DB.getPaketList();
     allPaketUnfiltered = rawPaket || [];
 
@@ -5834,28 +5865,127 @@ function renderPaketList(list) {
 
   // MODE ADMIN: Kelompokkan Paket Soal sebagai Folder Accordion berdasarkan Nama Guru
   const guruList = Array.isArray(allGuru) ? allGuru : [];
+  if (guruList.length === 0 && typeof DB !== 'undefined' && typeof DB.getGuruList === 'function' && !window._fetchingGuruForPaketList) {
+    window._fetchingGuruForPaketList = true;
+    DB.getGuruList().then(res => {
+      allGuru = Array.isArray(res) ? res : [];
+      window._fetchingGuruForPaketList = false;
+      renderPaketList(list);
+    }).catch(e => {
+      window._fetchingGuruForPaketList = false;
+      console.warn('Gagal memuat guru di renderPaketList:', e);
+    });
+  }
+
   const paketById = new Map();
   filtered.forEach(p => paketById.set(String(p.id), p));
 
   const assignedPaketIds = new Set();
-  const groups = [];
-
-  // 1. Bangun grup untuk setiap guru terdaftar
+  const guruPaketsMap = new Map();
   guruList.forEach(g => {
+    guruPaketsMap.set(String(g.id || g.username), []);
+  });
+
+  // Tahap 1: Tautkan paket yang secara eksplisit tercatat di g.paket_ids
+  guruList.forEach(g => {
+    const gKey = String(g.id || g.username);
     let pids = [];
     if (Array.isArray(g.paket_ids)) pids = g.paket_ids;
     else if (typeof g.paket_ids === 'string' && g.paket_ids.trim()) {
       try { pids = JSON.parse(g.paket_ids) || []; } catch (e) {}
     }
 
-    const guruPakets = [];
     pids.forEach(pid => {
       const pk = paketById.get(String(pid));
       if (pk) {
-        guruPakets.push(pk);
+        guruPaketsMap.get(gKey).push(pk);
         assignedPaketIds.add(String(pid));
       }
     });
+  });
+
+  // Tahap 2: Smart Assignment Fallback (Pencocokan Cerdas Penugasan Mapel & Rombel)
+  // Untuk paket-paket yang belum tertaut via ID eksplisit, pasangkan ke guru yang mengampu mapel & rombel tersebut
+  filtered.forEach(pk => {
+    const pkIdStr = String(pk.id);
+    if (assignedPaketIds.has(pkIdStr)) return;
+
+    const pClean = getCleanPaketName(pk.nama_paket, pk.kelas, pk.jurusan);
+    const pBase = (pClean.split(' - ')[0] || pk.nama_paket || '').split(' (')[0].trim();
+    const pFam = typeof normalizeMapelFamily === 'function' ? normalizeMapelFamily(pBase) : pBase.toLowerCase();
+
+    let bestGuru = null;
+    let bestScore = -1;
+
+    guruList.forEach(g => {
+      let pList = [];
+      if (Array.isArray(g.penugasan_mapel)) pList = g.penugasan_mapel;
+      else if (typeof g.penugasan_mapel === 'string' && g.penugasan_mapel.trim()) {
+        try { const dec = JSON.parse(g.penugasan_mapel); if (Array.isArray(dec)) pList = dec; } catch (e) {}
+      }
+
+      // 2a. Evaluasi dari penugasan_mapel
+      for (const item of pList) {
+        const itemMapel = (item.mapel || '').trim();
+        const itemFam = typeof normalizeMapelFamily === 'function' ? normalizeMapelFamily(itemMapel) : itemMapel.toLowerCase();
+        const sameMapel = (pFam && itemFam && pFam === itemFam) ||
+          String(pk.nama_paket || '').toLowerCase().includes(itemMapel.toLowerCase()) ||
+          itemMapel.toLowerCase().includes(pBase.toLowerCase());
+        if (!sameMapel) continue;
+
+        const jurMatch = typeof hasJurusanOverlap === 'function' ? hasJurusanOverlap(pk.jurusan, item.jurusan) : true;
+        if (!jurMatch) continue;
+
+        const overlaps = typeof getOverlappingClasses === 'function' ? getOverlappingClasses(pk.kelas, item.tingkat) : [];
+        let score = 10;
+        if (overlaps.length > 0) score += 20;
+        if (String(pk.kelas || '').trim().toUpperCase() === String(item.tingkat || '').trim().toUpperCase()) score += 50;
+
+        if (score > bestScore) {
+          bestScore = score;
+          bestGuru = g;
+        }
+      }
+
+      // 2b. Evaluasi dari mapel_diampu legacy jika belum ada kecocokan tinggi
+      if (bestScore < 30 && g.mapel_diampu) {
+        const gMapels = String(g.mapel_diampu).split(/[,;/|]+/).map(s => s.trim()).filter(Boolean);
+        for (const m of gMapels) {
+          const mFam = typeof normalizeMapelFamily === 'function' ? normalizeMapelFamily(m) : m.toLowerCase();
+          const sameM = (pFam && mFam && pFam === mFam) ||
+            String(pk.nama_paket || '').toLowerCase().includes(m.toLowerCase()) ||
+            m.toLowerCase().includes(pBase.toLowerCase());
+          if (!sameM) continue;
+
+          const jurMatch = typeof hasJurusanOverlap === 'function' ? hasJurusanOverlap(pk.jurusan, g.jurusan_diampu) : true;
+          if (!jurMatch) continue;
+
+          const overlaps = typeof getOverlappingClasses === 'function' ? getOverlappingClasses(pk.kelas, g.kelas_diampu) : [];
+          let score = 5;
+          if (overlaps.length > 0) score += 15;
+          if (score > bestScore) {
+            bestScore = score;
+            bestGuru = g;
+          }
+        }
+      }
+    });
+
+    if (bestGuru && bestScore > 0) {
+      const gKey = String(bestGuru.id || bestGuru.username);
+      if (guruPaketsMap.has(gKey)) {
+        guruPaketsMap.get(gKey).push(pk);
+        assignedPaketIds.add(pkIdStr);
+      }
+    }
+  });
+
+  const groups = [];
+
+  // 1. Bangun grup untuk setiap guru terdaftar
+  guruList.forEach(g => {
+    const gKey = String(g.id || g.username);
+    const guruPakets = guruPaketsMap.get(gKey) || [];
 
     const namaGuru = g.nama_lengkap || g.username || 'Guru';
     const usernameGuru = g.username || '';
@@ -5874,15 +6004,22 @@ function renderPaketList(list) {
       });
     }
 
-    // Tampilkan folder guru jika punya paket yg cocok, ATAU jika admin secara spesifik mengetik nama guru tsb
-    if (visiblePakets.length > 0 || (searchQ && teacherMatchesSearch && !selJurusan && !selKelas)) {
+    // Tampilkan folder guru jika punya paket yg cocok, ATAU jika admin mencari spesifik guru tsb, ATAU tanpa filter jika guru memiliki penugasan
+    const hasPenugasan = Boolean(g.mapel_diampu || (Array.isArray(g.penugasan_mapel) ? g.penugasan_mapel.length > 0 : Boolean(g.penugasan_mapel)));
+    if (visiblePakets.length > 0 || (searchQ && teacherMatchesSearch && !selJurusan && !selKelas) || (!searchQ && !selJurusan && !selKelas && hasPenugasan)) {
       const mapelNames = Array.from(new Set(
         visiblePakets.map(p => {
           const clean = getCleanPaketName(p.nama_paket, p.kelas, p.jurusan);
           return clean.split(' - ')[0].trim();
         }).filter(Boolean)
       ));
-      const fallbackMapel = String(g.mapel_diampu || '').trim();
+      let pList = [];
+      if (Array.isArray(g.penugasan_mapel)) pList = g.penugasan_mapel;
+      else if (typeof g.penugasan_mapel === 'string' && g.penugasan_mapel.trim()) {
+        try { const dec = JSON.parse(g.penugasan_mapel); if (Array.isArray(dec)) pList = dec; } catch (e) {}
+      }
+      const penugasanMapelNames = pList.map(p => p.mapel).filter(Boolean);
+      const fallbackMapel = penugasanMapelNames.length > 0 ? penugasanMapelNames.join(', ') : String(g.mapel_diampu || '').trim();
       const mapelPreview = mapelNames.length > 0 ? mapelNames.join(', ') : (fallbackMapel || 'Belum ada mapel');
 
       groups.push({
@@ -7211,7 +7348,13 @@ function getPaketOwnerNameMap() {
     (allPaket || []).forEach(pk => { if (pk && pk.id) map.set(String(pk.id), guruName); });
     return map;
   }
-  (allGuru || []).forEach(g => {
+  const gurus = Array.isArray(allGuru) ? allGuru : [];
+  const pakets = Array.isArray(allPaketUnfiltered) && allPaketUnfiltered.length > 0
+    ? allPaketUnfiltered
+    : (Array.isArray(allPaket) ? allPaket : []);
+
+  // 1. Explicit paket_ids
+  gurus.forEach(g => {
     const gName = g.nama_lengkap || g.username || '';
     if (!gName) return;
     let pids = [];
@@ -7223,6 +7366,73 @@ function getPaketOwnerNameMap() {
       if (pid && !map.has(String(pid))) map.set(String(pid), gName);
     });
   });
+
+  // 2. Smart fallback untuk paket yang belum tertaut via explicit ID
+  pakets.forEach(pk => {
+    if (!pk || !pk.id) return;
+    const pkIdStr = String(pk.id);
+    if (map.has(pkIdStr)) return;
+
+    const pClean = getCleanPaketName(pk.nama_paket, pk.kelas, pk.jurusan);
+    const pBase = (pClean.split(' - ')[0] || pk.nama_paket || '').split(' (')[0].trim();
+    const pFam = typeof normalizeMapelFamily === 'function' ? normalizeMapelFamily(pBase) : pBase.toLowerCase();
+
+    let bestGuruName = '';
+    let bestScore = -1;
+
+    gurus.forEach(g => {
+      const gName = g.nama_lengkap || g.username || '';
+      if (!gName) return;
+
+      let pList = [];
+      if (Array.isArray(g.penugasan_mapel)) pList = g.penugasan_mapel;
+      else if (typeof g.penugasan_mapel === 'string' && g.penugasan_mapel.trim()) {
+        try { const dec = JSON.parse(g.penugasan_mapel); if (Array.isArray(dec)) pList = dec; } catch (e) {}
+      }
+
+      for (const item of pList) {
+        const itemFam = typeof normalizeMapelFamily === 'function' ? normalizeMapelFamily(item.mapel) : (item.mapel || '').toLowerCase();
+        const sameMapel = (pFam && itemFam && pFam === itemFam) ||
+          String(pk.nama_paket || '').toLowerCase().includes(String(item.mapel || '').toLowerCase()) ||
+          String(item.mapel || '').toLowerCase().includes(pBase.toLowerCase());
+        if (!sameMapel) continue;
+
+        const jurMatch = typeof hasJurusanOverlap === 'function' ? hasJurusanOverlap(pk.jurusan, item.jurusan) : true;
+        if (!jurMatch) continue;
+
+        const overlaps = typeof getOverlappingClasses === 'function' ? getOverlappingClasses(pk.kelas, item.tingkat) : [];
+        let score = 10;
+        if (overlaps.length > 0) score += 20;
+        if (String(pk.kelas || '').trim().toUpperCase() === String(item.tingkat || '').trim().toUpperCase()) score += 50;
+
+        if (score > bestScore) {
+          bestScore = score;
+          bestGuruName = gName;
+        }
+      }
+
+      if (bestScore < 30 && g.mapel_diampu) {
+        const gFam = typeof normalizeMapelFamily === 'function' ? normalizeMapelFamily(g.mapel_diampu) : (g.mapel_diampu || '').toLowerCase();
+        if ((pFam && gFam && pFam === gFam) || String(pk.nama_paket || '').toLowerCase().includes(String(g.mapel_diampu).toLowerCase())) {
+          const jurMatch = typeof hasJurusanOverlap === 'function' ? hasJurusanOverlap(pk.jurusan, g.jurusan_diampu) : true;
+          if (jurMatch) {
+            const overlaps = typeof getOverlappingClasses === 'function' ? getOverlappingClasses(pk.kelas, g.kelas_diampu) : [];
+            let score = 5;
+            if (overlaps.length > 0) score += 15;
+            if (score > bestScore) {
+              bestScore = score;
+              bestGuruName = gName;
+            }
+          }
+        }
+      }
+    });
+
+    if (bestGuruName && bestScore > 0) {
+      map.set(pkIdStr, bestGuruName);
+    }
+  });
+
   return map;
 }
 

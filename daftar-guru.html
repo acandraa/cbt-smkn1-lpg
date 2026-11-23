@@ -336,9 +336,9 @@
   <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   
-  <script src="js/config.js?v=74"></script>
-  <script src="js/supabase-config.js?v=74"></script>
-  <script src="js/db-adapter.js?v=74"></script>
+  <script src="js/config.js?v=75"></script>
+  <script src="js/supabase-config.js?v=75"></script>
+  <script src="js/db-adapter.js?v=75"></script>
 
   <script>
     let allGuruList = [];
@@ -530,25 +530,81 @@
           }).catch(err => console.warn('Self-heal paket_ids gagal:', err));
         }
 
-        const paketBadges = validPaketIds.length > 0
-          ? validPaketIds.map(pid => {
-              const pk = allPaketMap.get(String(pid));
-              if (!pk) return '';
+        let paketBadges = '';
+        if (validPaketIds.length > 0) {
+          paketBadges = validPaketIds.map(pid => {
+            const pk = allPaketMap.get(String(pid));
+            if (!pk) return '';
+            const pName = getCleanPaketName(pk.nama_paket, pk.kelas, pk.jurusan);
+            return `
+              <span class="badge bg-primary-subtle text-primary border border-primary-subtle me-1 mb-1 d-inline-flex align-items-center gap-1" style="font-size: 0.72rem;">
+                <i class="bi bi-journal-check"></i>
+                <span>${escapeHtml(pName)}</span>
+                <button type="button" class="btn-close" style="font-size: 0.48rem; width: 0.5rem; height: 0.5rem;"
+                  onclick="quickDeleteGuruPaket('${escapeAttr(g.id)}', '${escapeAttr(pid)}', '${escapeAttr(pName)}')"
+                  title="Hapus paket soal ini"></button>
+              </span>
+            `;
+          }).filter(Boolean).join('');
+        } else {
+          // Fallback dinamis: tampilkan paket yang otomatis cocok dengan tugas mengajar guru
+          const dynamicMatched = [];
+          if (penugasanList.length > 0) {
+            penugasanList.forEach(item => {
+              const itemFam = normalizeMapelFamily(item.mapel);
+              allPaketList.forEach(pk => {
+                const pClean = getCleanPaketName(pk.nama_paket, pk.kelas, pk.jurusan);
+                const pBase = (pClean.split(' - ')[0] || pk.nama_paket || '').split(' (')[0].trim();
+                const pFam = normalizeMapelFamily(pBase);
+                const sameM = (pFam && itemFam && pFam === itemFam) ||
+                  String(pk.nama_paket || '').toLowerCase().includes(String(item.mapel || '').toLowerCase()) ||
+                  String(item.mapel || '').toLowerCase().includes(pBase.toLowerCase());
+                if (!sameM) return;
+                if (!hasJurusanOverlap(pk.jurusan, item.jurusan)) return;
+                if (getOverlappingClasses(pk.kelas, item.tingkat).length === 0) return;
+                if (!dynamicMatched.some(m => String(m.id) === String(pk.id))) {
+                  dynamicMatched.push(pk);
+                }
+              });
+            });
+          } else if (g.mapel_diampu) {
+            const gMapels = String(g.mapel_diampu).split(/[,;/|]+/).map(s => s.trim()).filter(Boolean);
+            gMapels.forEach(m => {
+              const mFam = normalizeMapelFamily(m);
+              allPaketList.forEach(pk => {
+                const pClean = getCleanPaketName(pk.nama_paket, pk.kelas, pk.jurusan);
+                const pBase = (pClean.split(' - ')[0] || pk.nama_paket || '').split(' (')[0].trim();
+                const pFam = normalizeMapelFamily(pBase);
+                const sameM = (pFam && mFam && pFam === mFam) ||
+                  String(pk.nama_paket || '').toLowerCase().includes(m.toLowerCase()) ||
+                  m.toLowerCase().includes(pBase.toLowerCase());
+                if (!sameM) return;
+                if (!hasJurusanOverlap(pk.jurusan, g.jurusan_diampu)) return;
+                if (getOverlappingClasses(pk.kelas, g.kelas_diampu).length === 0) return;
+                if (!dynamicMatched.some(m => String(m.id) === String(pk.id))) {
+                  dynamicMatched.push(pk);
+                }
+              });
+            });
+          }
+
+          if (dynamicMatched.length > 0) {
+            paketBadges = dynamicMatched.map(pk => {
               const pName = getCleanPaketName(pk.nama_paket, pk.kelas, pk.jurusan);
               return `
-                <span class="badge bg-primary-subtle text-primary border border-primary-subtle me-1 mb-1 d-inline-flex align-items-center gap-1" style="font-size: 0.72rem;">
-                  <i class="bi bi-journal-check"></i>
+                <span class="badge bg-info-subtle text-dark border border-info-subtle me-1 mb-1 d-inline-flex align-items-center gap-1" style="font-size: 0.72rem;" title="Terhubung otomatis via penugasan mapel (Klik 'Bersihkan & Sinkronkan Paket' untuk simpan permanen)">
+                  <i class="bi bi-magic text-primary"></i>
                   <span>${escapeHtml(pName)}</span>
-                  <button type="button" class="btn-close" style="font-size: 0.48rem; width: 0.5rem; height: 0.5rem;"
-                    onclick="quickDeleteGuruPaket('${escapeAttr(g.id)}', '${escapeAttr(pid)}', '${escapeAttr(pName)}')"
-                    title="Hapus paket soal ini"></button>
                 </span>
               `;
-            }).filter(Boolean).join('')
-          : `<span class="badge bg-light text-muted border" style="font-size: 0.72rem;"><i class="bi bi-magic me-1"></i>Otomatis</span>`;
+            }).join('');
+          } else {
+            paketBadges = `<span class="badge bg-light text-muted border" style="font-size: 0.72rem;"><i class="bi bi-magic me-1"></i>Otomatis</span>`;
+          }
+        }
 
         // 3. Tombol Aksi (+ Tambah Mapel & Login Guru)
-        const loginUrl = `login-admin.html?v=74&role=guru&username=${encodeURIComponent(g.username || '')}`;
+        const loginUrl = `login-admin.html?v=75&role=guru&username=${encodeURIComponent(g.username || '')}`;
 
         return `
           <tr>
@@ -1525,6 +1581,30 @@
                 const pFam = normalizeMapelFamily(pBase);
                 return (pFam && pFam === itemFam) || String(p.nama_paket || '').toLowerCase().includes(String(item.mapel || '').toLowerCase());
               });
+            }
+
+            // Jika di paket guru belum ada, cari dari seluruh paket di Bank Soal yang belum diklaim guru lain
+            if (candidates.length === 0) {
+              const unassignedGlobal = allPaketList.filter(p => p && p.id && !allOwnedPaketIds.has(String(p.id)) && !claimedIds.has(String(p.id)));
+              candidates = unassignedGlobal.filter(p => {
+                const pBase = String(p.nama_paket || '').split(' - ')[0].split(' (')[0].trim();
+                const pFam = normalizeMapelFamily(pBase);
+                const sameM = (pFam && pFam === itemFam) || String(p.nama_paket || '').toLowerCase().includes(String(item.mapel || '').toLowerCase());
+                if (!sameM) return false;
+                if (getOverlappingClasses(p.kelas, item.tingkat).length > 0) return true;
+                const pGrades = extractGradesSet(p.kelas);
+                for (const gTok of itemGrades) {
+                  if (pGrades.has(gTok)) return true;
+                }
+                return itemGrades.size === 0 && pGrades.size === 0;
+              });
+              if (candidates.length === 0) {
+                candidates = unassignedGlobal.filter(p => {
+                  const pBase = String(p.nama_paket || '').split(' - ')[0].split(' (')[0].trim();
+                  const pFam = normalizeMapelFamily(pBase);
+                  return (pFam && pFam === itemFam) || String(p.nama_paket || '').toLowerCase().includes(String(item.mapel || '').toLowerCase());
+                });
+              }
             }
 
             candidates.sort((a, b) => {
