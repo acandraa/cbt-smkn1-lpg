@@ -5702,6 +5702,182 @@ async function loadSoal() {
   }
 }
 
+const MATH_SUPERSCRIPT_MAP = {
+  '0': '⁰', '1': '¹', '2': '²', '3': '³', '4': '⁴',
+  '5': '⁵', '6': '⁶', '7': '⁷', '8': '⁸', '9': '⁹',
+  '+': '⁺', '-': '⁻', '=': '⁼', '(': '⁽', ')': '⁾', '/': 'ᐟ',
+  'a': 'ᵃ', 'b': 'ᵇ', 'c': 'ᶜ', 'd': 'ᵈ', 'e': 'ᵉ', 'f': 'ᶠ',
+  'g': 'ᵍ', 'h': 'ʰ', 'i': 'ⁱ', 'j': 'ʲ', 'k': 'ᵏ', 'l': 'ˡ',
+  'm': 'ᵐ', 'n': 'ⁿ', 'o': 'ᵒ', 'p': 'ᵖ', 'r': 'ʳ', 's': 'ˢ',
+  't': 'ᵗ', 'u': 'ᵘ', 'v': 'ᵛ', 'w': 'ʷ', 'x': 'ˣ', 'y': 'ʸ', 'z': 'ᶻ',
+  'A': 'ᴬ', 'B': 'ᴮ', 'D': 'ᴰ', 'E': 'ᴱ', 'G': 'ᴳ', 'H': 'ᴴ',
+  'I': 'ᴵ', 'J': 'ᴶ', 'K': 'ᴷ', 'L': 'ᴸ', 'M': 'ᴹ', 'N': 'ᴺ',
+  'O': 'ᴼ', 'P': 'ᴾ', 'R': 'ᴿ', 'T': 'ᵀ', 'U': 'ᵁ', 'V': 'ⱽ', 'W': 'ᵂ'
+};
+
+const MATH_SUBSCRIPT_MAP = {
+  '0': '₀', '1': '₁', '2': '₂', '3': '₃', '4': '₄',
+  '5': '₅', '6': '₆', '7': '₇', '8': '₈', '9': '₉',
+  '+': '₊', '-': '₋', '=': '₌', '(': '₍', ')': '₎'
+};
+
+function toUnicodeSuperscript(expStr) {
+  const chars = Array.from(String(expStr || ''));
+  if (chars.length === 0) return '';
+  const mapped = [];
+  for (const ch of chars) {
+    if (ch === ' ') continue;
+    if (!MATH_SUPERSCRIPT_MAP[ch]) return null;
+    mapped.push(MATH_SUPERSCRIPT_MAP[ch]);
+  }
+  return mapped.join('');
+}
+
+function toUnicodeSubscript(subStr) {
+  const chars = Array.from(String(subStr || ''));
+  if (chars.length === 0) return '';
+  const mapped = [];
+  for (const ch of chars) {
+    if (ch === ' ') continue;
+    if (!MATH_SUBSCRIPT_MAP[ch]) return null;
+    mapped.push(MATH_SUBSCRIPT_MAP[ch]);
+  }
+  return mapped.join('');
+}
+
+function formatMathExponents(text) {
+  if (text === null || text === undefined) return '';
+  let s = String(text);
+  if (!s) return '';
+
+  // 1. Konversi tag HTML <sup>...</sup> dan <sub>...</sub> menjadi karakter Unicode pangkat/subskrip
+  s = s.replace(/<\s*sup\s*>([\s\S]*?)<\s*\/\s*sup\s*>/gi, (m, inner) => {
+    const sup = toUnicodeSuperscript(inner.replace(/<[^>]+>/g, '').trim());
+    return sup !== null ? sup : m;
+  });
+  s = s.replace(/<\s*sub\s*>([\s\S]*?)<\s*\/\s*sub\s*>/gi, (m, inner) => {
+    const sub = toUnicodeSubscript(inner.replace(/<[^>]+>/g, '').trim());
+    return sub !== null ? sub : m;
+  });
+
+  // Pisahkan tag HTML (seperti <img src="...">) agar atribut di dalam tag tidak ikut diubah
+  const parts = s.split(/(<[^>]+>)/g);
+  for (let i = 0; i < parts.length; i++) {
+    const seg = parts[i];
+    if (!seg || (seg.startsWith('<') && seg.endsWith('>'))) continue;
+
+    let t = seg;
+
+    // Bersihkan LaTeX inline sederhana bila AI mengeluarkan $2^2$ atau \times
+    t = t
+      .replace(/\$([^$\n]{1,60})\$/g, (m, inner) => {
+        if (/[\^_\\]/.test(inner)) return inner;
+        return m;
+      })
+      .replace(/\\times\b/g, '×')
+      .replace(/\\div\b/g, '÷')
+      .replace(/\\pm\b/g, '±')
+      .replace(/\\leq?\b/g, '≤')
+      .replace(/\\geq?\b/g, '≥')
+      .replace(/\\neq?\b/g, '≠')
+      .replace(/\\cdot\b/g, '·')
+      .replace(/\\pi\b/g, 'π')
+      .replace(/\^\\circ\b|\\degree\b/g, '°');
+
+    // A. Pangkat dengan kurung kurawal: 2^{10}, 10^{-5}, x^{n+1}
+    t = t.replace(/([A-Za-z0-9\)\]])\^\{([0-9+\-=()a-zA-Z\/\s]+)\}/g, (m, base, exp) => {
+      const sup = toUnicodeSuperscript(exp);
+      return sup !== null ? `${base}${sup}` : m;
+    });
+
+    // B. Pangkat dengan tanda kurung biasa: 2^(x+1), 10^(-3), 8^(1/3)
+    t = t.replace(/([A-Za-z0-9\)\]])\^\(([0-9+\-=a-zA-Z\/\s]+)\)/g, (m, base, exp) => {
+      const sup = toUnicodeSuperscript(exp);
+      return sup !== null ? `${base}${sup}` : m;
+    });
+
+    // C. Pangkat langsung: 2^2, x^3, 10^-5, (a+b)^2, cm^2, m^3, 2^n
+    t = t.replace(/([A-Za-z0-9\)\]])\^([+\-]?\d+(?:\/\d+)?|[a-zA-Z](?![a-zA-Z]))/g, (m, base, exp) => {
+      const sup = toUnicodeSuperscript(exp);
+      return sup !== null ? `${base}${sup}` : m;
+    });
+
+    // D. Subskrip kurung kurawal: x_{1}, H_{2}O
+    t = t.replace(/([A-Za-z0-9\)\]])_\{([0-9+\-=()]+)\}/g, (m, base, sub) => {
+      const conv = toUnicodeSubscript(sub);
+      return conv !== null ? `${base}${conv}` : m;
+    });
+
+    parts[i] = t;
+  }
+
+  return parts.join('');
+}
+
+let lastFocusedSoalFieldId = 'crud-soal-pertanyaan';
+let soalMathInputsInitialized = false;
+
+function initSoalMathInputs() {
+  if (soalMathInputsInitialized) return;
+  const fieldIds = [
+    'crud-soal-pertanyaan',
+    'crud-soal-opsia',
+    'crud-soal-opsib',
+    'crud-soal-opsic',
+    'crud-soal-opsid',
+    'crud-soal-opsie'
+  ];
+  fieldIds.forEach(fid => {
+    const el = document.getElementById(fid);
+    if (!el) return;
+    el.addEventListener('focus', () => {
+      lastFocusedSoalFieldId = fid;
+    });
+    // Otomatis ubah 2^2 -> 2² saat guru selesai mengetik di kolom tersebut (blur)
+    el.addEventListener('blur', () => {
+      const formatted = formatMathExponents(el.value);
+      if (formatted !== el.value) {
+        el.value = formatted;
+      }
+    });
+  });
+  soalMathInputsInitialized = true;
+}
+
+function insertMathSymbol(symbol) {
+  initSoalMathInputs();
+  const target = document.getElementById(lastFocusedSoalFieldId) || document.getElementById('crud-soal-pertanyaan');
+  if (!target) return;
+
+  const start = typeof target.selectionStart === 'number' ? target.selectionStart : target.value.length;
+  const end = typeof target.selectionEnd === 'number' ? target.selectionEnd : target.value.length;
+  const val = target.value || '';
+
+  target.value = val.slice(0, start) + symbol + val.slice(end);
+  target.focus();
+  const nextCursor = start + symbol.length;
+  try {
+    target.setSelectionRange(nextCursor, nextCursor);
+  } catch (e) {}
+}
+
+function convertAllSoalFormExponents() {
+  const fieldIds = [
+    'crud-soal-pertanyaan',
+    'crud-soal-opsia',
+    'crud-soal-opsib',
+    'crud-soal-opsic',
+    'crud-soal-opsid',
+    'crud-soal-opsie'
+  ];
+  fieldIds.forEach(fid => {
+    const el = document.getElementById(fid);
+    if (el && el.value) {
+      el.value = formatMathExponents(el.value);
+    }
+  });
+}
+
 function renderSoalList(list) {
   const container = document.getElementById('soal-list-container');
   container.innerHTML = '';
@@ -5717,18 +5893,18 @@ function renderSoalList(list) {
 
     let optionsHtml = `
       <div class="row g-2 small mt-2">
-        <div class="col-md-6"><strong>A.</strong> ${s.opsi_a}</div>
-        <div class="col-md-6"><strong>B.</strong> ${s.opsi_b}</div>
+        <div class="col-md-6"><strong>A.</strong> ${formatMathExponents(s.opsi_a)}</div>
+        <div class="col-md-6"><strong>B.</strong> ${formatMathExponents(s.opsi_b)}</div>
     `;
 
     if (!isBs) {
       optionsHtml += `
-        <div class="col-md-6"><strong>C.</strong> ${s.opsi_c || '-'}</div>
-        <div class="col-md-6"><strong>D.</strong> ${s.opsi_d || '-'}</div>
+        <div class="col-md-6"><strong>C.</strong> ${formatMathExponents(s.opsi_c || '-')}</div>
+        <div class="col-md-6"><strong>D.</strong> ${formatMathExponents(s.opsi_d || '-')}</div>
       `;
       if (s.opsi_e) {
         optionsHtml += `
-          <div class="col-md-6"><strong>E.</strong> ${s.opsi_e}</div>
+          <div class="col-md-6"><strong>E.</strong> ${formatMathExponents(s.opsi_e)}</div>
         `;
       }
     }
@@ -5742,7 +5918,7 @@ function renderSoalList(list) {
             <span class="badge bg-secondary mb-2">Bobot: ${s.bobot || 1}</span>
             ${isBs ? `<span class="badge bg-info mb-2 text-dark">Benar / Salah</span>` : ''}
             ${hasImg}
-            <h6 class="fw-semibold text-dark mt-1" style="white-space: pre-wrap;">${s.pertanyaan}</h6>
+            <h6 class="fw-semibold text-dark mt-1" style="white-space: pre-wrap;">${formatMathExponents(s.pertanyaan)}</h6>
             ${optionsHtml}
             <div class="text-success small mt-2 font-heading fw-bold">
               <i class="bi bi-check-circle-fill me-1"></i> Kunci Jawaban: Opsi ${s.jawaban_benar}
@@ -5799,6 +5975,8 @@ function handleImageUpload(e) {
 }
 
 function openSoalForm() {
+  initSoalMathInputs();
+  lastFocusedSoalFieldId = 'crud-soal-pertanyaan';
   document.getElementById('soalFormTitle').innerText = "Tambah Soal Baru";
   document.getElementById('form-soal-crud').reset();
   document.getElementById('soal-id').value = "";
@@ -5823,6 +6001,8 @@ function openSoalForm() {
 }
 
 function editSoal(id) {
+  initSoalMathInputs();
+  lastFocusedSoalFieldId = 'crud-soal-pertanyaan';
   const s = allSoal.find(item => item.id === id);
   if (!s) return;
 
@@ -5830,13 +6010,13 @@ function editSoal(id) {
   document.getElementById('soal-id').value = s.id;
   document.getElementById('crud-soal-nomor').value = s.nomor;
   document.getElementById('crud-soal-bobot').value = s.bobot;
-  document.getElementById('crud-soal-pertanyaan').value = s.pertanyaan;
-  document.getElementById('crud-soal-opsia').value = s.opsi_a;
-  document.getElementById('crud-soal-opsib').value = s.opsi_b;
-  document.getElementById('crud-soal-opsic').value = s.opsi_c || "";
-  document.getElementById('crud-soal-opsid').value = s.opsi_d || "";
+  document.getElementById('crud-soal-pertanyaan').value = formatMathExponents(s.pertanyaan);
+  document.getElementById('crud-soal-opsia').value = formatMathExponents(s.opsi_a);
+  document.getElementById('crud-soal-opsib').value = formatMathExponents(s.opsi_b);
+  document.getElementById('crud-soal-opsic').value = formatMathExponents(s.opsi_c || "");
+  document.getElementById('crud-soal-opsid').value = formatMathExponents(s.opsi_d || "");
   const elOpsiE = document.getElementById('crud-soal-opsie');
-  if (elOpsiE) elOpsiE.value = s.opsi_e || "";
+  if (elOpsiE) elOpsiE.value = formatMathExponents(s.opsi_e || "");
   
   if (s.gambar) {
     document.getElementById('crud-soal-gambar-preview').src = s.gambar;
@@ -5875,12 +6055,12 @@ async function handleSoalCrudSubmit(e) {
   const id = document.getElementById('soal-id').value;
   const no = parseInt(document.getElementById('crud-soal-nomor').value);
   const bobot = parseInt(document.getElementById('crud-soal-bobot').value);
-  const q = document.getElementById('crud-soal-pertanyaan').value.trim();
-  const oa = document.getElementById('crud-soal-opsia').value.trim();
-  const ob = document.getElementById('crud-soal-opsib').value.trim();
-  const oc = document.getElementById('crud-soal-opsic').value.trim();
-  const od = document.getElementById('crud-soal-opsid').value.trim();
-  const oe = (document.getElementById('crud-soal-opsie')?.value || '').trim();
+  const q = formatMathExponents(document.getElementById('crud-soal-pertanyaan').value.trim());
+  const oa = formatMathExponents(document.getElementById('crud-soal-opsia').value.trim());
+  const ob = formatMathExponents(document.getElementById('crud-soal-opsib').value.trim());
+  const oc = formatMathExponents(document.getElementById('crud-soal-opsic').value.trim());
+  const od = formatMathExponents(document.getElementById('crud-soal-opsid').value.trim());
+  const oe = formatMathExponents((document.getElementById('crud-soal-opsie')?.value || '').trim());
   const ans = document.getElementById('crud-soal-jawaban').value;
   const gambar = document.getElementById('crud-soal-gambar-base64').value;
 
@@ -5938,7 +6118,7 @@ async function deleteSoal(id, nomor) {
 
 function htmlToPlainTextForExport(rawHtml) {
   if (rawHtml === null || rawHtml === undefined) return '';
-  let str = String(rawHtml);
+  let str = formatMathExponents(String(rawHtml));
   // Ganti tag gambar menjadi label ringkas agar tidak melebihi batas sel Excel (32.767 karakter)
   str = str.replace(/<img\b[^>]*>/gi, ' [Gambar] ');
   // Pertahankan jeda baris dari tag blok/br
@@ -6081,7 +6261,7 @@ function exportPaketSoalWord() {
     const optsHtml = opts.map(o => `
       <tr>
         <td style="width: 24px; vertical-align: top; font-weight: bold;">${o.key}.</td>
-        <td style="vertical-align: top;">${o.val}</td>
+        <td style="vertical-align: top;">${formatMathExponents(o.val)}</td>
       </tr>
     `).join('');
 
@@ -6091,7 +6271,7 @@ function exportPaketSoalWord() {
           <tr>
             <td style="width: 28px; vertical-align: top; font-weight: bold;">${no}.</td>
             <td style="vertical-align: top;">
-              <div style="margin-bottom: 6px;">${s.pertanyaan || ''}</div>
+              <div style="margin-bottom: 6px;">${formatMathExponents(s.pertanyaan || '')}</div>
               <table style="width: 100%; border-collapse: collapse; margin-left: 4px;">
                 ${optsHtml}
               </table>
@@ -7220,10 +7400,29 @@ function handleWordFile(file) {
   const reader = new FileReader();
   reader.onload = function(e) {
     const arrayBuffer = e.target.result;
-    mammoth.extractRawText({ arrayBuffer: arrayBuffer })
+    // Gunakan convertToHtml terlebih dahulu agar format Superscript (pangkat 2²) & Subscript (H₂O) asli dari Microsoft Word tidak hilang
+    const extractPromise = (typeof mammoth.convertToHtml === 'function')
+      ? mammoth.convertToHtml({ arrayBuffer: arrayBuffer }).then(function(htmlRes) {
+          let html = htmlRes.value || '';
+          if (!html) return mammoth.extractRawText({ arrayBuffer: arrayBuffer });
+          // Ubah <sup>...</sup> dan <sub>...</sub> menjadi karakter pangkat/subskrip Unicode
+          html = formatMathExponents(html);
+          html = html
+            .replace(/<br\s*\/?>/gi, '\n')
+            .replace(/<\/(p|div|li|tr|h[1-6])>/gi, '\n');
+          const tmp = document.createElement('div');
+          tmp.innerHTML = html;
+          const text = (tmp.textContent || tmp.innerText || '').replace(/\n{3,}/g, '\n\n').trim();
+          return { value: text };
+        }).catch(function() {
+          return mammoth.extractRawText({ arrayBuffer: arrayBuffer });
+        })
+      : mammoth.extractRawText({ arrayBuffer: arrayBuffer });
+
+    extractPromise
       .then(function(result) {
         Swal.close();
-        const extractedText = (result.value || '').trim();
+        const extractedText = formatMathExponents((result.value || '').trim());
         if (!extractedText) {
           Swal.fire('Berkas Kosong', 'Tidak ditemukan teks pada berkas Word yang diunggah.', 'warning');
           return;
@@ -7448,6 +7647,16 @@ function parseWordQuestions(rawText) {
   if (curQ && curQ.pertanyaan && (curQ.opsi_a || curQ.opsi_b)) {
     questions.push(curQ);
   }
+
+  // Konversi otomatis penulisan pangkat seperti 2^2 -> 2², x^3 -> x³ pada hasil ekstraksi Word/teks
+  questions.forEach(q => {
+    q.pertanyaan = formatMathExponents(q.pertanyaan);
+    q.opsi_a = formatMathExponents(q.opsi_a);
+    q.opsi_b = formatMathExponents(q.opsi_b);
+    q.opsi_c = formatMathExponents(q.opsi_c);
+    q.opsi_d = formatMathExponents(q.opsi_d);
+    q.opsi_e = formatMathExponents(q.opsi_e);
+  });
 
   return questions;
 }
@@ -7891,6 +8100,7 @@ ${materi ? `4. Gunakan materi/referensi berikut sebagai acuan utama:\n"""\n${mat
 6. Pilihan jawaban harus masuk akal, logis, tidak ambigu, dan mendidik.
 7. Tentukan kunci jawaban_benar secara akurat (pilih salah satu huruf: "A", "B", "C", "D", atau "E").
 8. Bobot setiap butir soal bernilai 1.
+9. Untuk penulisan bilangan berpangkat / eksponen / rumus kimia / satuan persegi atau kubik, JANGAN gunakan tanda topi seperti 2^2, x^3, 10^-5, cm^2, atau LaTeX $2^2$, melainkan WAJIB tulis langsung dengan karakter pangkat/subskrip Unicode asli seperti 2², x³, 10⁻⁵, cm², m³, H₂O, CO₂.
 
 PENTING:
 Keluarkan output HANYA berupa JSON Array murni tanpa format markdown seperti \`\`\`json.
@@ -7978,12 +8188,12 @@ Setiap elemen array harus berupa objek JSON dengan struktur kunci berikut:
     aiGeneratedQuestions = parsedQuestions.map((q, idx) => ({
       selected: true,
       nomor: idx + 1,
-      pertanyaan: q.pertanyaan || '',
-      opsi_a: q.opsi_a || '',
-      opsi_b: q.opsi_b || '',
-      opsi_c: q.opsi_c || '',
-      opsi_d: q.opsi_d || '',
-      opsi_e: q.opsi_e || '',
+      pertanyaan: formatMathExponents(q.pertanyaan || ''),
+      opsi_a: formatMathExponents(q.opsi_a || ''),
+      opsi_b: formatMathExponents(q.opsi_b || ''),
+      opsi_c: formatMathExponents(q.opsi_c || ''),
+      opsi_d: formatMathExponents(q.opsi_d || ''),
+      opsi_e: formatMathExponents(q.opsi_e || ''),
       jawaban_benar: (q.jawaban_benar || 'A').toUpperCase().trim(),
       bobot: parseInt(q.bobot) || 1
     }));
@@ -8256,3 +8466,6 @@ window.deleteWordQuestion = deleteWordQuestion;
 window.saveWordImportedData = saveWordImportedData;
 window.quickDeleteGuruPaket = quickDeleteGuruPaket;
 window.updatePenugasanConflictWarning = updatePenugasanConflictWarning;
+window.formatMathExponents = formatMathExponents;
+window.insertMathSymbol = insertMathSymbol;
+window.convertAllSoalFormExponents = convertAllSoalFormExponents;

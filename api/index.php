@@ -475,7 +475,7 @@ try {
                     }
                     $penugasanMapel = [];
                     if (!empty($fresh['penugasan_mapel'])) {
-                        $decodedP = json_decode((string)$fresh['penugasan_mapel'], true);
+                        $decodedP = json_decode((string)$fresh['penugasan_mapel'], true);          
                         if (is_array($decodedP)) $penugasanMapel = $decodedP;
                     }
                     $gSession = [

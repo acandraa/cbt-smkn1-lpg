@@ -172,14 +172,18 @@ const ExcelHelpers = {
             const no = parseInt(row[idx['Nomor']]);
             const bobot = row[idx['Bobot']] !== undefined ? parseInt(row[idx['Bobot']]) : 1;
 
+            const fmtMath = (typeof window !== 'undefined' && typeof window.formatMathExponents === 'function')
+              ? window.formatMathExponents
+              : (v => v);
+
             soalList.push({
               nomor: isNaN(no) ? i : no,
-              pertanyaan: row[idx['Pertanyaan']] ? row[idx['Pertanyaan']].toString().trim() : '',
-              opsi_a: row[idx['Opsi A']] ? row[idx['Opsi A']].toString().trim() : '',
-              opsi_b: row[idx['Opsi B']] ? row[idx['Opsi B']].toString().trim() : '',
-              opsi_c: (idx['Opsi C'] !== -1 && row[idx['Opsi C']]) ? row[idx['Opsi C']].toString().trim() : '',
-              opsi_d: (idx['Opsi D'] !== -1 && row[idx['Opsi D']]) ? row[idx['Opsi D']].toString().trim() : '',
-              opsi_e: (idx['Opsi E'] !== -1 && row[idx['Opsi E']]) ? row[idx['Opsi E']].toString().trim() : '',
+              pertanyaan: row[idx['Pertanyaan']] ? fmtMath(row[idx['Pertanyaan']].toString().trim()) : '',
+              opsi_a: row[idx['Opsi A']] ? fmtMath(row[idx['Opsi A']].toString().trim()) : '',
+              opsi_b: row[idx['Opsi B']] ? fmtMath(row[idx['Opsi B']].toString().trim()) : '',
+              opsi_c: (idx['Opsi C'] !== -1 && row[idx['Opsi C']]) ? fmtMath(row[idx['Opsi C']].toString().trim()) : '',
+              opsi_d: (idx['Opsi D'] !== -1 && row[idx['Opsi D']]) ? fmtMath(row[idx['Opsi D']].toString().trim()) : '',
+              opsi_e: (idx['Opsi E'] !== -1 && row[idx['Opsi E']]) ? fmtMath(row[idx['Opsi E']].toString().trim()) : '',
               jawaban_benar: row[idx['Jawaban Benar']] ? row[idx['Jawaban Benar']].toString().trim().toUpperCase() : '',
               bobot: isNaN(bobot) ? 1 : bobot
             });

@@ -1697,9 +1697,38 @@ Jawaban: B"></textarea>
               </div>
             </div>
             <div class="mb-3">
-              <label for="crud-soal-pertanyaan" class="form-label fw-semibold">Pertanyaan</label>
+              <div class="d-flex justify-content-between align-items-center flex-wrap gap-1 mb-1">
+                <label for="crud-soal-pertanyaan" class="form-label fw-semibold mb-0">Pertanyaan</label>
+                <small class="text-muted" style="font-size: 0.75rem;">
+                  <i class="bi bi-magic text-primary me-1"></i>Ketik <code>2^2</code> atau <code>x^3</code> otomatis berubah jadi <strong>2²</strong>, <strong>x³</strong>
+                </small>
+              </div>
+              <!-- Toolbar Cepat Pangkat & Simbol Matematika (berlaku untuk Pertanyaan maupun Opsi A-E yang sedang aktif) -->
+              <div class="d-flex flex-wrap align-items-center gap-1 p-1 px-2 mb-2 bg-light border rounded-2" id="math-symbol-toolbar">
+                <span class="text-muted fw-semibold me-1" style="font-size: 0.72rem;">Pangkat & Simbol:</span>
+                <button type="button" class="btn btn-outline-secondary btn-sm py-0 px-2" style="font-size: 0.78rem;" onmousedown="event.preventDefault(); insertMathSymbol('²')" title="Pangkat 2 (Kuadrat)">x²</button>
+                <button type="button" class="btn btn-outline-secondary btn-sm py-0 px-2" style="font-size: 0.78rem;" onmousedown="event.preventDefault(); insertMathSymbol('³')" title="Pangkat 3 (Kubik)">x³</button>
+                <button type="button" class="btn btn-outline-secondary btn-sm py-0 px-2" style="font-size: 0.78rem;" onmousedown="event.preventDefault(); insertMathSymbol('⁴')" title="Pangkat 4">x⁴</button>
+                <button type="button" class="btn btn-outline-secondary btn-sm py-0 px-2" style="font-size: 0.78rem;" onmousedown="event.preventDefault(); insertMathSymbol('ⁿ')" title="Pangkat n">xⁿ</button>
+                <button type="button" class="btn btn-outline-secondary btn-sm py-0 px-2" style="font-size: 0.78rem;" onmousedown="event.preventDefault(); insertMathSymbol('⁻¹')" title="Pangkat -1">x⁻¹</button>
+                <button type="button" class="btn btn-outline-secondary btn-sm py-0 px-2" style="font-size: 0.78rem;" onmousedown="event.preventDefault(); insertMathSymbol('₁')" title="Subskrip 1">x₁</button>
+                <button type="button" class="btn btn-outline-secondary btn-sm py-0 px-2" style="font-size: 0.78rem;" onmousedown="event.preventDefault(); insertMathSymbol('₂')" title="Subskrip 2 (cth: H₂O)">x₂</button>
+                <span class="text-muted mx-1">|</span>
+                <button type="button" class="btn btn-outline-secondary btn-sm py-0 px-2" style="font-size: 0.78rem;" onmousedown="event.preventDefault(); insertMathSymbol('√')" title="Akar Kuadrat">√</button>
+                <button type="button" class="btn btn-outline-secondary btn-sm py-0 px-2" style="font-size: 0.78rem;" onmousedown="event.preventDefault(); insertMathSymbol('π')" title="Pi">π</button>
+                <button type="button" class="btn btn-outline-secondary btn-sm py-0 px-2" style="font-size: 0.78rem;" onmousedown="event.preventDefault(); insertMathSymbol('×')" title="Kali">×</button>
+                <button type="button" class="btn btn-outline-secondary btn-sm py-0 px-2" style="font-size: 0.78rem;" onmousedown="event.preventDefault(); insertMathSymbol('÷')" title="Bagi">÷</button>
+                <button type="button" class="btn btn-outline-secondary btn-sm py-0 px-2" style="font-size: 0.78rem;" onmousedown="event.preventDefault(); insertMathSymbol('±')" title="Kurang Lebih">±</button>
+                <button type="button" class="btn btn-outline-secondary btn-sm py-0 px-2" style="font-size: 0.78rem;" onmousedown="event.preventDefault(); insertMathSymbol('≤')" title="Kurang dari atau sama dengan">≤</button>
+                <button type="button" class="btn btn-outline-secondary btn-sm py-0 px-2" style="font-size: 0.78rem;" onmousedown="event.preventDefault(); insertMathSymbol('≥')" title="Lebih dari atau sama dengan">≥</button>
+                <button type="button" class="btn btn-outline-secondary btn-sm py-0 px-2" style="font-size: 0.78rem;" onmousedown="event.preventDefault(); insertMathSymbol('≠')" title="Tidak sama dengan">≠</button>
+                <button type="button" class="btn btn-outline-secondary btn-sm py-0 px-2" style="font-size: 0.78rem;" onmousedown="event.preventDefault(); insertMathSymbol('°')" title="Derajat">°</button>
+                <button type="button" class="btn btn-outline-primary btn-sm py-0 px-2 ms-auto fw-semibold" style="font-size: 0.74rem;" onclick="convertAllSoalFormExponents()" title="Ubah semua tulisan pangkat seperti 2^2 menjadi 2² di seluruh kolom soal & opsi">
+                  <i class="bi bi-magic me-1"></i>Rapikan Pangkat (2^2 → 2²)
+                </button>
+              </div>
               <textarea class="form-control" id="crud-soal-pertanyaan" rows="4"
-                placeholder="Tulis soal ujian di sini..." required></textarea>
+                placeholder="Tulis soal ujian di sini... (ketik 2^2 otomatis menjadi 2²)" required></textarea>
             </div>
 
             <div class="mb-3">
@@ -2077,13 +2106,13 @@ Jawaban: B"></textarea>
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 
   <!-- CBT Modules -->
-  <script src="js/config.js?v=67"></script>
-  <script src="js/supabase-config.js?v=67"></script>
-  <script src="js/db-adapter.js?v=67"></script>
-  <script src="js/auth.js?v=67"></script>
-  <script src="js/excel-helpers.js?v=67"></script>
-  <script src="js/templates.js?v=67"></script>
-  <script src="js/admin.js?v=67"></script>
+  <script src="js/config.js?v=68"></script>
+  <script src="js/supabase-config.js?v=68"></script>
+  <script src="js/db-adapter.js?v=68"></script>
+  <script src="js/auth.js?v=68"></script>
+  <script src="js/excel-helpers.js?v=68"></script>
+  <script src="js/templates.js?v=68"></script>
+  <script src="js/admin.js?v=68"></script>
   <script>
     // Dark mode logic
     const themeToggleBtn = document.getElementById('theme-toggle-admin');
