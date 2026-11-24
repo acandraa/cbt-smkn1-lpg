@@ -419,6 +419,7 @@ const DB = {
   async _writePaketCatalogToSysRow(client, paketList) {
     const target = client || window.supabaseClient;
     if (!target) return false;
+    await this.ensureAdminAuth(target);
     return await this.executeWithAdminAuth(target, async (c) => {
       const slim = (Array.isArray(paketList) ? paketList : [])
         .filter(p => p && p.id)
@@ -508,6 +509,7 @@ const DB = {
   async _writeMasterCatalogToSysRow(client, catalog) {
     const target = client || window.supabaseClient;
     if (!target) return false;
+    await this.ensureAdminAuth(target);
     return await this.executeWithAdminAuth(target, async (c) => {
       const payload = {
         id: this.MASTER_SYS_ROW_ID,
@@ -654,6 +656,7 @@ const DB = {
   async _writeGuruToSysRow(client, guruList) {
     const target = client || window.supabaseClient;
     if (!target) return false;
+    await this.ensureAdminAuth(target);
     return await this.executeWithAdminAuth(target, async (c) => {
       const payload = {
         id: this.GURU_SYS_ROW_ID,

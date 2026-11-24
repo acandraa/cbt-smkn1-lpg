@@ -195,47 +195,55 @@ function isPaketAllowedForGuru(paket) {
   const pkId = String(paket.id || '');
   const allowedIds = getGuruAllowedPaketIds();
 
-  // 1. ISOLASI KETAT PER AKUN GURU:
-  //    Jika guru sudah memiliki daftar paket_ids khusus miliknya, HANYA paket tersebut yang ditampilkan.
-  //    Mencegah soal bercampur dengan guru lain yang mengampu mata pelajaran sama (misal sama-sama Bahasa Indonesia).
-  if (allowedIds.length > 0) {
-    return allowedIds.includes(pkId);
+  // 1. Jika paket secara eksplisit sudah ada di paket_ids milik guru ini, langsung izinkan!
+  if (allowedIds.length > 0 && allowedIds.includes(pkId)) {
+    return true;
   }
 
-  // 2. Untuk akun lama (belum memiliki paket_ids), tetap TOLAK paket yang sudah dimiliki guru lain
+  // 2. Tolak paket yang secara eksplisit sudah dimiliki oleh guru lain
   const otherOwned = getOtherGuruOwnedPaketIds();
   if (otherOwned.has(pkId)) {
     return false;
   }
 
-  // 3. Cek apakah cocok dengan salah satu Penugasan Mapel (Multi-Mapel & Tingkat)
+  // 3. Tetap cek Penugasan Mapel (Multi-Mapel & Tingkat) meskipun paket_ids baru terisi sebagian
+  //    (mencegah mapel lain milik guru ini hilang saat mengedit salah satu paket dari dalam!)
   const penugasanList = getGuruPenugasanList();
   if (penugasanList.length > 0) {
+    const pkClean = getCleanPaketName(paket.nama_paket, paket.kelas, paket.jurusan);
+    const pkBase = (pkClean.split(' - ')[0] || paket.nama_paket || '').split(' (')[0].trim();
+    const pkFam = typeof normalizeMapelFamily === 'function' ? normalizeMapelFamily(pkBase) : pkBase.toLowerCase();
     const pkNama = String(paket.nama_paket || '').toLowerCase().trim();
     const pkJurusan = String(paket.jurusan || '').trim().toUpperCase();
     const pkKelas = String(paket.kelas || '').trim().toUpperCase();
 
     const matchAny = penugasanList.some(item => {
-      const itemMapel = String(item.mapel || '').toLowerCase().trim();
+      const itemMapel = String(item.mapel || '').trim();
       if (!itemMapel) return false;
-      const mapelMatch = pkNama.includes(itemMapel) || itemMapel.includes(pkNama);
+      const itemFam = typeof normalizeMapelFamily === 'function' ? normalizeMapelFamily(itemMapel) : itemMapel.toLowerCase();
+      const mapelMatch = (pkFam && itemFam && pkFam === itemFam) ||
+        pkNama.includes(itemMapel.toLowerCase()) ||
+        itemMapel.toLowerCase().includes(pkBase.toLowerCase());
       if (!mapelMatch) return false;
 
       // Cek jurusan
-      const itemJurusan = String(item.jurusan || '').trim().toUpperCase();
-      if (itemJurusan && itemJurusan !== 'SEMUA') {
-        const allowedJurusans = itemJurusan.split(',').map(s => s.trim().toUpperCase()).filter(Boolean);
-        if (allowedJurusans.length > 0 && pkJurusan && pkJurusan !== 'SEMUA') {
+      if (typeof hasJurusanOverlap === 'function') {
+        if (!hasJurusanOverlap(paket.jurusan, item.jurusan)) return false;
+      } else {
+        const itemJurusan = String(item.jurusan || '').trim().toUpperCase();
+        if (itemJurusan && itemJurusan !== 'SEMUA' && pkJurusan && pkJurusan !== 'SEMUA') {
+          const allowedJurusans = itemJurusan.split(',').map(s => s.trim().toUpperCase()).filter(Boolean);
           const pkJurParts = pkJurusan.split(',').map(s => s.trim().toUpperCase()).filter(Boolean);
-          const jurOverlap = pkJurParts.some(j => allowedJurusans.includes(j));
-          if (!jurOverlap) return false;
+          if (allowedJurusans.length > 0 && !pkJurParts.some(j => allowedJurusans.includes(j))) return false;
         }
       }
 
       // Cek tingkat/kelas
       const itemTingkat = String(item.tingkat || '').trim().toUpperCase();
-      if (itemTingkat && itemTingkat !== 'SEMUA') {
-        if (pkKelas && pkKelas !== 'SEMUA') {
+      if (itemTingkat && itemTingkat !== 'SEMUA' && pkKelas && pkKelas !== 'SEMUA') {
+        if (typeof getOverlappingClasses === 'function') {
+          if (getOverlappingClasses(paket.kelas, item.tingkat).length === 0) return false;
+        } else {
           const allowedTingkats = itemTingkat.split(',').map(s => s.trim().toUpperCase()).filter(Boolean);
           const kMatch = allowedTingkats.some(tk => {
             if (tk === pkKelas) return true;
@@ -249,9 +257,7 @@ function isPaketAllowedForGuru(paket) {
       return true;
     });
 
-    if (matchAny) return true;
-    // Jika guru sudah punya daftar penugasan atau paket_ids spesifik dan paket ini tidak cocok, tolak
-    return false;
+    return matchAny;
   }
 
   // 3. Fallback jika penugasan_mapel belum dikonfigurasi: gunakan pencocokan nama mapel legacy
@@ -296,10 +302,10 @@ function isHasilAllowedForGuru(hasil) {
   if (!isGuruMode()) return true;
   if (!hasil) return false;
 
-  // 1. ISOLASI KETAT: Jika guru sudah memiliki paket_ids khusus miliknya, hanya nilai dari paket tersebut yang tampil
+  // 1. Jika nilai berasal dari paket yang secara eksplisit ada di paket_ids guru ini, langsung izinkan
   const allowedIds = getGuruAllowedPaketIds();
-  if (allowedIds.length > 0) {
-    return Boolean(hasil.paket_soal_id && allowedIds.includes(String(hasil.paket_soal_id)));
+  if (allowedIds.length > 0 && hasil.paket_soal_id && allowedIds.includes(String(hasil.paket_soal_id))) {
+    return true;
   }
 
   // Tolak nilai yang berasal dari paket milik guru lain
@@ -2963,21 +2969,40 @@ function renderGuruTable(list) {
       }).catch(err => console.warn('Self-heal paket_ids admin gagal:', err));
     }
 
-    const paketBadges = validPaketIds.length > 0
-      ? validPaketIds.map(pid => {
-          const pkObj = paketLookup.get(String(pid));
-          if (!pkObj) return '';
-          const pName = pkObj.nama_paket || 'Paket Soal';
-          return `
-            <span class="badge bg-primary-subtle text-primary border border-primary-subtle me-1 mb-1 d-inline-flex align-items-center gap-1" style="font-size: 0.72rem;">
-              <i class="bi bi-journal-check"></i>
-              <span>${escapeHtml(pName)}</span>
-              <button type="button" class="btn-close" style="font-size: 0.48rem; width: 0.5rem; height: 0.5rem;"
-                onclick="quickDeleteGuruPaket('${escapeAttr(g.id)}', '${escapeAttr(pid)}', '${escapeAttr(pName)}')"
-                title="Hapus paket soal ini"></button>
-            </span>
-          `;
-        }).filter(Boolean).join('')
+    const explicitSetAdmin = new Set(validPaketIds.map(String));
+    const otherOwnedAdmin = getOtherGuruOwnedPaketIds(g.id);
+    const ownerNameMapAdmin = typeof getPaketOwnerNameMap === 'function' ? getPaketOwnerNameMap() : new Map();
+    const myDispNameAdmin = g.nama_lengkap || g.username || '';
+
+    const explicitBadgesAdmin = validPaketIds.map(pid => {
+      const pkObj = paketLookup.get(String(pid));
+      if (!pkObj) return '';
+      const pName = getCleanPaketName(pkObj.nama_paket, pkObj.kelas, pkObj.jurusan);
+      return `
+        <span class="badge bg-primary-subtle text-primary border border-primary-subtle me-1 mb-1 d-inline-flex align-items-center gap-1" style="font-size: 0.72rem;">
+          <i class="bi bi-journal-check"></i>
+          <span>${escapeHtml(pName)}</span>
+          <button type="button" class="btn-close" style="font-size: 0.48rem; width: 0.5rem; height: 0.5rem;"
+            onclick="quickDeleteGuruPaket('${escapeAttr(g.id)}', '${escapeAttr(pid)}', '${escapeAttr(pName)}')"
+            title="Hapus paket soal ini"></button>
+        </span>
+      `;
+    }).filter(Boolean).join('');
+
+    const dynamicBadgesAdmin = sourcePaketsForGuru
+      .filter(pk => pk && pk.id && !explicitSetAdmin.has(String(pk.id)) && !otherOwnedAdmin.has(String(pk.id)) && myDispNameAdmin && ownerNameMapAdmin.get(String(pk.id)) === myDispNameAdmin)
+      .map(pk => {
+        const pName = getCleanPaketName(pk.nama_paket, pk.kelas, pk.jurusan);
+        return `
+          <span class="badge bg-info-subtle text-dark border border-info-subtle me-1 mb-1 d-inline-flex align-items-center gap-1" style="font-size: 0.72rem;" title="Terhubung otomatis via penugasan mapel">
+            <i class="bi bi-magic text-primary"></i>
+            <span>${escapeHtml(pName)}</span>
+          </span>
+        `;
+      }).join('');
+
+    const paketBadges = (explicitBadgesAdmin || dynamicBadgesAdmin)
+      ? (explicitBadgesAdmin + dynamicBadgesAdmin)
       : `<span class="text-muted small"><i class="bi bi-magic me-1"></i>Otomatis</span>`;
 
     return `
@@ -6558,12 +6583,28 @@ async function handlePaketCrudSubmit(e) {
       }
       const ownerGuru = guruListSource.find(g => String(g.id) === String(targetGuruIdCheck));
       if (ownerGuru) {
+        // Kumpulkan SELURUH paket milik guru ini (baik eksplisit di paket_ids MAUPUN smart-matched) agar paket lain tidak hilang!
+        const otherOwnedSet = getOtherGuruOwnedPaketIds(ownerGuru.id);
+        const ownerNameMapNow = typeof getPaketOwnerNameMap === 'function' ? getPaketOwnerNameMap() : new Map();
+        const ownerDispName = ownerGuru.nama_lengkap || ownerGuru.username || '';
+
         let pids = [];
         if (Array.isArray(ownerGuru.paket_ids)) pids = [...ownerGuru.paket_ids];
         else if (typeof ownerGuru.paket_ids === 'string' && ownerGuru.paket_ids.trim()) {
           try { pids = JSON.parse(ownerGuru.paket_ids) || []; } catch (e) {}
         }
-        pids = Array.from(new Set(pids.map(String))).filter(Boolean);
+        pids = Array.from(new Set(pids.map(String))).filter(pid => pid && !otherOwnedSet.has(pid));
+
+        // Tambahkan juga seluruh paket lain di Bank Soal yang terhubung ke guru ini via penugasan_mapel
+        if (ownerDispName) {
+          (allPaketUnfiltered || []).forEach(pkItem => {
+            if (!pkItem || !pkItem.id) return;
+            const pkIdStr = String(pkItem.id);
+            if (!otherOwnedSet.has(pkIdStr) && ownerNameMapNow.get(pkIdStr) === ownerDispName && !pids.includes(pkIdStr)) {
+              pids.push(pkIdStr);
+            }
+          });
+        }
         if (!pids.includes(savedPaketId)) pids.push(savedPaketId);
 
         let pList = [];

@@ -612,9 +612,9 @@
   <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   
-  <script src="js/config.js?v=78"></script>
-  <script src="js/supabase-config.js?v=78"></script>
-  <script src="js/db-adapter.js?v=78"></script>
+  <script src="js/config.js?v=79"></script>
+  <script src="js/supabase-config.js?v=79"></script>
+  <script src="js/db-adapter.js?v=79"></script>
 
   <script>
     let allGuruList = [];
@@ -826,81 +826,94 @@
           }).catch(err => console.warn('Self-heal paket_ids gagal:', err));
         }
 
-        let paketBadges = '';
-        if (validPaketIds.length > 0) {
-          paketBadges = validPaketIds.map(pid => {
-            const pk = allPaketMap.get(String(pid));
-            if (!pk) return '';
-            const pName = getCleanPaketName(pk.nama_paket, pk.kelas, pk.jurusan);
-            return `
-              <span class="badge bg-primary-subtle text-primary border border-primary-subtle me-1 mb-1 d-inline-flex align-items-center gap-1" style="font-size: 0.72rem;">
-                <i class="bi bi-journal-check"></i>
-                <span>${escapeHtml(pName)}</span>
-                <button type="button" class="btn-close" style="font-size: 0.48rem; width: 0.5rem; height: 0.5rem;"
-                  onclick="quickDeleteGuruPaket('${escapeAttr(g.id)}', '${escapeAttr(pid)}', '${escapeAttr(pName)}')"
-                  title="Hapus paket soal ini"></button>
-              </span>
-            `;
-          }).filter(Boolean).join('');
-        } else {
-          // Fallback dinamis: tampilkan paket yang otomatis cocok dengan tugas mengajar guru
-          const dynamicMatched = [];
-          if (penugasanList.length > 0) {
-            penugasanList.forEach(item => {
-              const itemFam = normalizeMapelFamily(item.mapel);
-              allPaketList.forEach(pk => {
-                const pClean = getCleanPaketName(pk.nama_paket, pk.kelas, pk.jurusan);
-                const pBase = (pClean.split(' - ')[0] || pk.nama_paket || '').split(' (')[0].trim();
-                const pFam = normalizeMapelFamily(pBase);
-                const sameM = (pFam && itemFam && pFam === itemFam) ||
-                  String(pk.nama_paket || '').toLowerCase().includes(String(item.mapel || '').toLowerCase()) ||
-                  String(item.mapel || '').toLowerCase().includes(pBase.toLowerCase());
-                if (!sameM) return;
-                if (!hasJurusanOverlap(pk.jurusan, item.jurusan)) return;
-                if (getOverlappingClasses(pk.kelas, item.tingkat).length === 0) return;
-                if (!dynamicMatched.some(m => String(m.id) === String(pk.id))) {
-                  dynamicMatched.push(pk);
-                }
-              });
-            });
-          } else if (g.mapel_diampu) {
-            const gMapels = String(g.mapel_diampu).split(/[,;/|]+/).map(s => s.trim()).filter(Boolean);
-            gMapels.forEach(m => {
-              const mFam = normalizeMapelFamily(m);
-              allPaketList.forEach(pk => {
-                const pClean = getCleanPaketName(pk.nama_paket, pk.kelas, pk.jurusan);
-                const pBase = (pClean.split(' - ')[0] || pk.nama_paket || '').split(' (')[0].trim();
-                const pFam = normalizeMapelFamily(pBase);
-                const sameM = (pFam && mFam && pFam === mFam) ||
-                  String(pk.nama_paket || '').toLowerCase().includes(m.toLowerCase()) ||
-                  m.toLowerCase().includes(pBase.toLowerCase());
-                if (!sameM) return;
-                if (!hasJurusanOverlap(pk.jurusan, g.jurusan_diampu)) return;
-                if (getOverlappingClasses(pk.kelas, g.kelas_diampu).length === 0) return;
-                if (!dynamicMatched.some(m => String(m.id) === String(pk.id))) {
-                  dynamicMatched.push(pk);
-                }
-              });
-            });
+        // Gabungkan paket eksplisit (validPaketIds) DENGAN paket lain yang cocok dari penugasan_mapel (agar jika paket_ids baru terisi sebagian, mapel lain tetap muncul!)
+        const explicitBadgeSet = new Set(validPaketIds.map(String));
+        const otherOwnedInTable = new Set();
+        (allGuruList || []).forEach(og => {
+          if (!og || String(og.id) === String(g.id)) return;
+          let op = [];
+          if (Array.isArray(og.paket_ids)) op = og.paket_ids;
+          else if (typeof og.paket_ids === 'string' && og.paket_ids.trim()) {
+            try { op = JSON.parse(og.paket_ids) || []; } catch (e) {}
           }
+          op.forEach(x => { if (x) otherOwnedInTable.add(String(x)); });
+        });
 
-          if (dynamicMatched.length > 0) {
-            paketBadges = dynamicMatched.map(pk => {
-              const pName = getCleanPaketName(pk.nama_paket, pk.kelas, pk.jurusan);
-              return `
-                <span class="badge bg-info-subtle text-dark border border-info-subtle me-1 mb-1 d-inline-flex align-items-center gap-1" style="font-size: 0.72rem;" title="Terhubung otomatis via penugasan mapel (Klik 'Bersihkan & Sinkronkan Paket' untuk simpan permanen)">
-                  <i class="bi bi-magic text-primary"></i>
-                  <span>${escapeHtml(pName)}</span>
-                </span>
-              `;
-            }).join('');
-          } else {
-            paketBadges = `<span class="badge bg-light text-muted border" style="font-size: 0.72rem;"><i class="bi bi-magic me-1"></i>Otomatis</span>`;
-          }
+        const explicitBadgesHtml = validPaketIds.map(pid => {
+          const pk = allPaketMap.get(String(pid));
+          if (!pk) return '';
+          const pName = getCleanPaketName(pk.nama_paket, pk.kelas, pk.jurusan);
+          return `
+            <span class="badge bg-primary-subtle text-primary border border-primary-subtle me-1 mb-1 d-inline-flex align-items-center gap-1" style="font-size: 0.72rem;">
+              <i class="bi bi-journal-check"></i>
+              <span>${escapeHtml(pName)}</span>
+              <button type="button" class="btn-close" style="font-size: 0.48rem; width: 0.5rem; height: 0.5rem;"
+                onclick="quickDeleteGuruPaket('${escapeAttr(g.id)}', '${escapeAttr(pid)}', '${escapeAttr(pName)}')"
+                title="Hapus paket soal ini"></button>
+            </span>
+          `;
+        }).filter(Boolean).join('');
+
+        const dynamicMatched = [];
+        if (penugasanList.length > 0) {
+          penugasanList.forEach(item => {
+            const itemFam = normalizeMapelFamily(item.mapel);
+            allPaketList.forEach(pk => {
+              const pkIdStr = String(pk.id);
+              if (explicitBadgeSet.has(pkIdStr) || otherOwnedInTable.has(pkIdStr)) return;
+              const pClean = getCleanPaketName(pk.nama_paket, pk.kelas, pk.jurusan);
+              const pBase = (pClean.split(' - ')[0] || pk.nama_paket || '').split(' (')[0].trim();
+              const pFam = normalizeMapelFamily(pBase);
+              const sameM = (pFam && itemFam && pFam === itemFam) ||
+                String(pk.nama_paket || '').toLowerCase().includes(String(item.mapel || '').toLowerCase()) ||
+                String(item.mapel || '').toLowerCase().includes(pBase.toLowerCase());
+              if (!sameM) return;
+              if (!hasJurusanOverlap(pk.jurusan, item.jurusan)) return;
+              if (getOverlappingClasses(pk.kelas, item.tingkat).length === 0) return;
+              if (!dynamicMatched.some(m => String(m.id) === pkIdStr)) {
+                dynamicMatched.push(pk);
+              }
+            });
+          });
+        } else if (g.mapel_diampu) {
+          const gMapels = String(g.mapel_diampu).split(/[,;/|]+/).map(s => s.trim()).filter(Boolean);
+          gMapels.forEach(m => {
+            const mFam = normalizeMapelFamily(m);
+            allPaketList.forEach(pk => {
+              const pkIdStr = String(pk.id);
+              if (explicitBadgeSet.has(pkIdStr) || otherOwnedInTable.has(pkIdStr)) return;
+              const pClean = getCleanPaketName(pk.nama_paket, pk.kelas, pk.jurusan);
+              const pBase = (pClean.split(' - ')[0] || pk.nama_paket || '').split(' (')[0].trim();
+              const pFam = normalizeMapelFamily(pBase);
+              const sameM = (pFam && mFam && pFam === mFam) ||
+                String(pk.nama_paket || '').toLowerCase().includes(m.toLowerCase()) ||
+                m.toLowerCase().includes(pBase.toLowerCase());
+              if (!sameM) return;
+              if (!hasJurusanOverlap(pk.jurusan, g.jurusan_diampu)) return;
+              if (getOverlappingClasses(pk.kelas, g.kelas_diampu).length === 0) return;
+              if (!dynamicMatched.some(m => String(m.id) === pkIdStr)) {
+                dynamicMatched.push(pk);
+              }
+            });
+          });
         }
 
+        const dynamicBadgesHtml = dynamicMatched.map(pk => {
+          const pName = getCleanPaketName(pk.nama_paket, pk.kelas, pk.jurusan);
+          return `
+            <span class="badge bg-info-subtle text-dark border border-info-subtle me-1 mb-1 d-inline-flex align-items-center gap-1" style="font-size: 0.72rem;" title="Terhubung otomatis via penugasan mapel">
+              <i class="bi bi-magic text-primary"></i>
+              <span>${escapeHtml(pName)}</span>
+            </span>
+          `;
+        }).join('');
+
+        const paketBadges = (explicitBadgesHtml || dynamicBadgesHtml)
+          ? (explicitBadgesHtml + dynamicBadgesHtml)
+          : `<span class="badge bg-light text-muted border" style="font-size: 0.72rem;"><i class="bi bi-magic me-1"></i>Otomatis</span>`;
+
         // 3. Tombol Aksi (+ Tambah Mapel & Login Guru)
-        const loginUrl = `login-admin.html?v=78&role=guru&username=${encodeURIComponent(g.username || '')}`;
+        const loginUrl = `login-admin.html?v=79&role=guru&username=${encodeURIComponent(g.username || '')}`;
 
         return `
           <tr>
@@ -3457,7 +3470,7 @@
         }
         if (!paketHtml) paketHtml = `<span class="text-muted small fst-italic">Belum ada paket soal</span>`;
 
-        const loginUrl = `login-admin.html?v=78&role=guru&username=${encodeURIComponent(row.username || '')}`;
+        const loginUrl = `login-admin.html?v=79&role=guru&username=${encodeURIComponent(row.username || '')}`;
 
         return `
           <tr>
