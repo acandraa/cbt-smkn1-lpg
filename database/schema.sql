@@ -358,7 +358,7 @@ CREATE POLICY "Admins can manage paket_soal"
   ON public.paket_soal FOR ALL TO authenticated USING (public.is_admin());
 
 CREATE POLICY "Authenticated users can view paket_soal"
-  ON public.paket_soal FOR SELECT TO authenticated USING (TRUE);
+  ON public.paket_soal FOR SELECT TO anon, authenticated USING (TRUE);
 
 CREATE POLICY "Admins can manage jurusan"
   ON public.jurusan FOR ALL TO authenticated USING (public.is_admin());

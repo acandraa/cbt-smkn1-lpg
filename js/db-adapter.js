@@ -396,6 +396,93 @@ const DB = {
   // -------------------------------------------------------------
   GURU_SYS_ROW_ID: '00000000-0000-4000-8000-000000000999',
   MASTER_SYS_ROW_ID: '00000000-0000-4000-8000-000000000998',
+  PAKET_SYS_ROW_ID: '00000000-0000-4000-8000-000000000997',
+
+  async _readPaketCatalogFromSysRow(client) {
+    const target = client || window.supabaseClient;
+    if (!target) return [];
+    try {
+      const { data, error } = await target
+        .from('soal')
+        .select('id, pertanyaan')
+        .eq('id', this.PAKET_SYS_ROW_ID)
+        .maybeSingle();
+      if (error || !data || !data.pertanyaan) return [];
+      const parsed = JSON.parse(data.pertanyaan);
+      return Array.isArray(parsed) ? parsed : [];
+    } catch (e) {
+      return [];
+    }
+  },
+
+  async _writePaketCatalogToSysRow(client, paketList) {
+    const target = client || window.supabaseClient;
+    if (!target) return false;
+    return await this.executeWithAdminAuth(target, async (c) => {
+      const slim = (Array.isArray(paketList) ? paketList : [])
+        .filter(p => p && p.id)
+        .map(p => ({
+          id: p.id,
+          nama_paket: p.nama_paket || '',
+          jurusan: p.jurusan || null,
+          kelas: p.kelas || null,
+          jadwal_mulai: p.jadwal_mulai || null,
+          jadwal_selesai: p.jadwal_selesai || null,
+          created_at: p.created_at || null
+        }));
+      const payload = {
+        id: this.PAKET_SYS_ROW_ID,
+        paket_soal_id: null,
+        nomor: -997,
+        pertanyaan: JSON.stringify(slim),
+        opsi_a: '__CBT_SYS_PAKET__',
+        opsi_b: 'SYSTEM',
+        opsi_c: null,
+        opsi_d: null,
+        jawaban_benar: 'SYS',
+        bobot: 0
+      };
+      const { error } = await c.from('soal').upsert(payload, { onConflict: 'id' });
+      if (error) throw error;
+      return true;
+    });
+  },
+
+  async syncPublicPaketCatalog(paketList = []) {
+    const list = Array.isArray(paketList) ? paketList.filter(p => p && p.id) : [];
+    if (list.length === 0) return [];
+    if (this.isLocal()) return list;
+
+    const shards = (window.getSupabaseShards && window.getSupabaseShards()) || [];
+    if (shards.length > 1) {
+      await Promise.allSettled(shards.map(s => s.client && this._writePaketCatalogToSysRow(s.client, list)));
+    } else if (window.supabaseClient) {
+      await this._writePaketCatalogToSysRow(window.supabaseClient, list).catch(() => {});
+    }
+    return list;
+  },
+
+  async getPublicPaketCatalog() {
+    if (this.isLocal()) {
+      this.initLocalData();
+      return JSON.parse(localStorage.getItem('CBT_LOCAL_PAKET')) || [];
+    }
+    const shards = (window.getSupabaseShards && window.getSupabaseShards()) || [];
+    const clients = shards.length > 0 ? shards.map(s => s.client).filter(Boolean) : (window.supabaseClient ? [window.supabaseClient] : []);
+    const mapById = new Map();
+    const results = await Promise.allSettled(clients.map(c => this._readPaketCatalogFromSysRow(c)));
+    results.forEach(r => {
+      if (r.status === 'fulfilled' && Array.isArray(r.value)) {
+        r.value.forEach(item => {
+          const key = item && (item.id || (item.nama_paket || '').toUpperCase().trim());
+          if (key && !mapById.has(String(key))) {
+            mapById.set(String(key), item);
+          }
+        });
+      }
+    });
+    return Array.from(mapById.values());
+  },
 
   async _readMasterCatalogFromSysRow(client) {
     const target = client || window.supabaseClient;
@@ -1691,14 +1778,21 @@ const DB = {
             });
           }
         });
-        return Array.from(mapById.values());
+        const list = Array.from(mapById.values());
+        if (list.length > 0) return list;
+        return await this.getPublicPaketCatalog();
       }
       const { data, error } = await window.supabaseClient
         .from('paket_soal')
         .select('*')
         .order('created_at', { ascending: false });
-      if (error) throw error;
-      return data;
+      if (error) {
+        const pubFallback = await this.getPublicPaketCatalog();
+        if (pubFallback.length > 0) return pubFallback;
+        throw error;
+      }
+      if (Array.isArray(data) && data.length > 0) return data;
+      return await this.getPublicPaketCatalog();
     }
   },
 
@@ -1781,10 +1875,12 @@ const DB = {
           const firstErr = results.find(r => r.status === 'rejected')?.reason;
           if (firstErr) throw firstErr;
         }
+        this.getPaketList().then(list => { if (Array.isArray(list) && list.length > 0) this.syncPublicPaketCatalog(list); }).catch(() => {});
         return insertPayload;
       }
       return await this.executeWithAdminAuth(window.supabaseClient, async (c) => {
         await runUpsert(c, Boolean(id), id, payload);
+        this.getPaketList().then(list => { if (Array.isArray(list) && list.length > 0) this.syncPublicPaketCatalog(list); }).catch(() => {});
         return payload;
       });
     }
@@ -1811,9 +1907,11 @@ const DB = {
       };
       if (shards.length > 1) {
         await Promise.allSettled(shards.map(s => s.client && doDelete(s.client)));
+        this.getPaketList().then(list => { if (Array.isArray(list) && list.length > 0) this.syncPublicPaketCatalog(list); }).catch(() => {});
         return;
       }
       await doDelete(window.supabaseClient);
+      this.getPaketList().then(list => { if (Array.isArray(list) && list.length > 0) this.syncPublicPaketCatalog(list); }).catch(() => {});
     }
   },
 
@@ -1822,7 +1920,7 @@ const DB = {
       this.initLocalData();
       const list = JSON.parse(localStorage.getItem('CBT_LOCAL_SOAL')) || [];
       return list
-        .filter(s => s.paket_soal_id === paketId && s.id !== this.GURU_SYS_ROW_ID && s.id !== this.MASTER_SYS_ROW_ID && s.opsi_a !== '__CBT_SYS_GURU__' && s.opsi_a !== '__CBT_SYS_MASTER__')
+        .filter(s => s.paket_soal_id === paketId && s.id !== this.GURU_SYS_ROW_ID && s.id !== this.MASTER_SYS_ROW_ID && s.id !== this.PAKET_SYS_ROW_ID && s.opsi_a !== '__CBT_SYS_GURU__' && s.opsi_a !== '__CBT_SYS_MASTER__' && s.opsi_a !== '__CBT_SYS_PAKET__')
         .sort((a,b) => a.nomor - b.nomor);
     } else {
       const { data, error } = await window.supabaseClient
@@ -1831,7 +1929,7 @@ const DB = {
         .eq('paket_soal_id', paketId)
         .order('nomor', { ascending: true });
       if (error) throw error;
-      return (data || []).filter(s => s.id !== this.GURU_SYS_ROW_ID && s.id !== this.MASTER_SYS_ROW_ID && s.opsi_a !== '__CBT_SYS_GURU__' && s.opsi_a !== '__CBT_SYS_MASTER__' && s.nomor !== -999 && s.nomor !== -998);
+      return (data || []).filter(s => s.id !== this.GURU_SYS_ROW_ID && s.id !== this.MASTER_SYS_ROW_ID && s.id !== this.PAKET_SYS_ROW_ID && s.opsi_a !== '__CBT_SYS_GURU__' && s.opsi_a !== '__CBT_SYS_MASTER__' && s.opsi_a !== '__CBT_SYS_PAKET__' && s.nomor !== -999 && s.nomor !== -998 && s.nomor !== -997);
     }
   },
 
@@ -2573,14 +2671,14 @@ const DB = {
     if (this.isLocal()) {
       this.initLocalData();
       const list = JSON.parse(localStorage.getItem('CBT_LOCAL_SOAL')) || [];
-      return list.filter(s => s.id !== this.GURU_SYS_ROW_ID && s.id !== this.MASTER_SYS_ROW_ID && s.opsi_a !== '__CBT_SYS_GURU__' && s.opsi_a !== '__CBT_SYS_MASTER__' && s.nomor !== -999 && s.nomor !== -998);
+      return list.filter(s => s.id !== this.GURU_SYS_ROW_ID && s.id !== this.MASTER_SYS_ROW_ID && s.id !== this.PAKET_SYS_ROW_ID && s.opsi_a !== '__CBT_SYS_GURU__' && s.opsi_a !== '__CBT_SYS_MASTER__' && s.opsi_a !== '__CBT_SYS_PAKET__' && s.nomor !== -999 && s.nomor !== -998 && s.nomor !== -997);
     } else {
       const { data, error } = await window.supabaseClient
         .from('soal')
         .select('*')
         .order('nomor', { ascending: true });
       if (error) throw error;
-      return (data || []).filter(s => s.id !== this.GURU_SYS_ROW_ID && s.id !== this.MASTER_SYS_ROW_ID && s.opsi_a !== '__CBT_SYS_GURU__' && s.opsi_a !== '__CBT_SYS_MASTER__' && s.nomor !== -999 && s.nomor !== -998);
+      return (data || []).filter(s => s.id !== this.GURU_SYS_ROW_ID && s.id !== this.MASTER_SYS_ROW_ID && s.id !== this.PAKET_SYS_ROW_ID && s.opsi_a !== '__CBT_SYS_GURU__' && s.opsi_a !== '__CBT_SYS_MASTER__' && s.opsi_a !== '__CBT_SYS_PAKET__' && s.nomor !== -999 && s.nomor !== -998 && s.nomor !== -997);
     }
   },
 
@@ -2756,6 +2854,10 @@ const DB_PHP = {
   syncMasterCatalog() { return Promise.resolve({ kelas: [], jurusan: [] }); },
 
   getMasterCatalog() { return Promise.resolve({ kelas: [], jurusan: [] }); },
+
+  syncPublicPaketCatalog() { return Promise.resolve([]); },
+
+  getPublicPaketCatalog() { return Promise.resolve([]); },
 
   getPublicKelasJurusanFromPeserta() { return Promise.resolve({ kelas: [], jurusan: [] }); },
 

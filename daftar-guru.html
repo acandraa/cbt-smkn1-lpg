@@ -612,9 +612,9 @@
   <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   
-  <script src="js/config.js?v=76"></script>
-  <script src="js/supabase-config.js?v=76"></script>
-  <script src="js/db-adapter.js?v=76"></script>
+  <script src="js/config.js?v=77"></script>
+  <script src="js/supabase-config.js?v=77"></script>
+  <script src="js/db-adapter.js?v=77"></script>
 
   <script>
     let allGuruList = [];
@@ -675,6 +675,15 @@
         hydratePublicPaketSoalCounts(true).then(() => {
           recomputeAndRenderPublicKesiapan();
         }).catch(e => console.warn('Gagal hitung soal publik:', e));
+
+        // Jika browser ini sedang memiliki sesi Admin Supabase, sinkronkan katalog paket publik ke DB agar komputer lain tanpa login melihat data yang sama persis
+        if (allPaketList.length > 0 && window.supabaseClient && typeof DB.syncPublicPaketCatalog === 'function') {
+          window.supabaseClient.auth.getSession().then(({ data }) => {
+            if (data && data.session) {
+              DB.syncPublicPaketCatalog(allPaketList).catch(() => {});
+            }
+          }).catch(() => {});
+        }
       } catch (err) {
         console.error('Gagal memuat data:', err);
         tbody.innerHTML = `
@@ -2776,6 +2785,7 @@
               .not('paket_soal_id', 'is', null)
               .neq('nomor', -999)
               .neq('nomor', -998)
+              .neq('nomor', -997)
               .range(from, to);
             if (error) throw error;
             const rows = Array.isArray(data) ? data : [];
@@ -2801,6 +2811,7 @@
                 .not('paket_soal_id', 'is', null)
                 .neq('nomor', -999)
                 .neq('nomor', -998)
+                .neq('nomor', -997)
                 .limit(1000);
               if (Array.isArray(data) && data.length > 0) {
                 data.forEach(r => {

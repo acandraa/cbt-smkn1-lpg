@@ -568,6 +568,10 @@ async function refreshAllData() {
     if (!isGuruMode() && typeof DB.syncMasterCatalog === 'function') {
       DB.syncMasterCatalog(getAllAvailableKelasNames(), getAllAvailableJurusanNames()).catch(() => {});
     }
+    // Sinkronkan katalog paket soal publik agar halaman daftar-guru.html tampil penuh di komputer lain tanpa login
+    if (!isGuruMode() && typeof DB.syncPublicPaketCatalog === 'function' && allPaketUnfiltered.length > 0) {
+      DB.syncPublicPaketCatalog(allPaketUnfiltered).catch(() => {});
+    }
   } catch (err) {
     console.error("Gagal refreshAllData:", err);
   }
@@ -9955,6 +9959,7 @@ async function hydrateAllPaketSoalCounts(force = false) {
           .not('paket_soal_id', 'is', null)
           .neq('nomor', -999)
           .neq('nomor', -998)
+          .neq('nomor', -997)
           .range(from, to);
         if (error) throw error;
         const rows = Array.isArray(data) ? data : [];
@@ -9982,6 +9987,7 @@ async function hydrateAllPaketSoalCounts(force = false) {
               .not('paket_soal_id', 'is', null)
               .neq('nomor', -999)
               .neq('nomor', -998)
+              .neq('nomor', -997)
               .limit(1000);
             if (Array.isArray(data) && data.length > 0) {
               data.forEach(r => {
