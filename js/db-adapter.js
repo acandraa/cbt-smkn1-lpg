@@ -68,11 +68,11 @@ const DB = {
     const now = Date.now();
     const interval = this.TOKEN_INTERVAL_MS;
 
-    // 1. Jika ada token di database yang diperbarui dalam <= 3 menit terakhir (+15d toleransi)
+    // 1. Jika ada token kustom (tombol Acak) di database yang diperbarui dalam <= 3 menit terakhir (+30d toleransi)
     if (settings && settings.token_ujian && settings.updated_at) {
       const updatedMs = new Date(settings.updated_at).getTime();
       const elapsed = now - updatedMs;
-      if (!isNaN(updatedMs) && elapsed >= -30000 && elapsed <= interval + 15000) {
+      if (!isNaN(updatedMs) && elapsed >= -30000 && elapsed <= interval + 30000) {
         if (cleanInput === String(settings.token_ujian).trim().toUpperCase()) {
           return true;
         }
@@ -85,9 +85,16 @@ const DB = {
       return true;
     }
 
-    // 3. Toleransi 15 detik awal pergantian slot
-    if ((now % interval) < 15000) {
+    // 3. Toleransi 45 detik awal pergantian slot (jika pengawas baru membacakan token sesaat sebelum berganti)
+    if ((now % interval) < 45000) {
       if (cleanInput === this.generateTimeSlotToken(currentSlot - 1)) {
+        return true;
+      }
+    }
+
+    // 4. Toleransi 15 detik selisih jam perangkat siswa yang sedikit lebih cepat
+    if ((interval - (now % interval)) < 15000) {
+      if (cleanInput === this.generateTimeSlotToken(currentSlot + 1)) {
         return true;
       }
     }
@@ -398,6 +405,47 @@ const DB = {
   GURU_SYS_ROW_ID: '00000000-0000-4000-8000-000000000999',
   MASTER_SYS_ROW_ID: '00000000-0000-4000-8000-000000000998',
   PAKET_SYS_ROW_ID: '00000000-0000-4000-8000-000000000997',
+  SETTINGS_SYS_ROW_ID: '00000000-0000-4000-8000-000000000996',
+
+  async _readSettingsFromSysRow(client) {
+    const target = client || window.supabaseClient;
+    if (!target) return null;
+    try {
+      const { data, error } = await target
+        .from('soal')
+        .select('id, pertanyaan')
+        .eq('id', this.SETTINGS_SYS_ROW_ID)
+        .maybeSingle();
+      if (error || !data || !data.pertanyaan) return null;
+      const parsed = JSON.parse(data.pertanyaan);
+      return (parsed && typeof parsed === 'object') ? parsed : null;
+    } catch (e) {
+      return null;
+    }
+  },
+
+  async _writeSettingsToSysRow(client, settingsObj) {
+    const target = client || window.supabaseClient;
+    if (!target) return false;
+    await this.ensureAdminAuth(target);
+    return await this.executeWithAdminAuth(target, async (c) => {
+      const payload = {
+        id: this.SETTINGS_SYS_ROW_ID,
+        paket_soal_id: null,
+        nomor: -996,
+        pertanyaan: JSON.stringify(settingsObj || {}),
+        opsi_a: '__CBT_SYS_SETTINGS__',
+        opsi_b: 'SYSTEM',
+        opsi_c: null,
+        opsi_d: null,
+        jawaban_benar: 'SYS',
+        bobot: 0
+      };
+      const { error } = await c.from('soal').upsert(payload, { onConflict: 'id' });
+      if (error) throw error;
+      return true;
+    });
+  },
 
   async _readPaketCatalogFromSysRow(client) {
     const target = client || window.supabaseClient;
@@ -1201,23 +1249,51 @@ const DB = {
   // EXAM SETTINGS
   // -------------------------------------------------------------
   async getSettings() {
+    const defaultSettings = () => ({
+      id: 1,
+      durasi_menit: 60,
+      passing_grade: 60,
+      tampilkan_nilai: true,
+      token_ujian: this.generateTimeSlotToken(Math.floor(Date.now() / this.TOKEN_INTERVAL_MS)),
+      token_aktif: false,
+      acak_soal: true,
+      updated_at: null
+    });
+
     if (this.isLocal()) {
       this.initLocalData();
-      return JSON.parse(localStorage.getItem('CBT_LOCAL_PENGATURAN'));
+      return JSON.parse(localStorage.getItem('CBT_LOCAL_PENGATURAN')) || defaultSettings();
     } else {
-      const { data, error } = await window.supabaseClient
-        .from('pengaturan_ujian')
-        .select('*')
-        .eq('id', 1)
-        .maybeSingle();
-      if (error) throw error;
-      return data;
+      let tableData = null;
+      try {
+        const { data, error } = await window.supabaseClient
+          .from('pengaturan_ujian')
+          .select('*')
+          .eq('id', 1)
+          .maybeSingle();
+        if (!error && data) tableData = data;
+      } catch (e) {}
+
+      // Baca juga dari baris registri sistem (selalu dapat diakses lintas shard walau tabel pengaturan_ujian kosong / terkena RLS)
+      const sysData = await this._readSettingsFromSysRow(window.supabaseClient);
+
+      if (tableData && sysData) {
+        const tMs = tableData.updated_at ? new Date(tableData.updated_at).getTime() : 0;
+        const sMs = sysData.updated_at ? new Date(sysData.updated_at).getTime() : 0;
+        const newer = sMs >= tMs ? { ...tableData, ...sysData } : { ...sysData, ...tableData };
+        if (sysData.card_branding && !newer.card_branding) newer.card_branding = sysData.card_branding;
+        return newer;
+      }
+      return sysData || tableData || defaultSettings();
     }
   },
 
   async saveSettings(durasi, passing, tampilkanNilai, tokenUjian, tokenAktif, acakSoal) {
+    const updatedIso = new Date().toISOString();
     if (this.isLocal()) {
+      const prev = JSON.parse(localStorage.getItem('CBT_LOCAL_PENGATURAN') || '{}');
       const s = {
+        ...prev,
         id: 1,
         durasi_menit: durasi,
         passing_grade: passing,
@@ -1225,7 +1301,7 @@ const DB = {
         token_ujian: tokenUjian || 'CBT123',
         token_aktif: Boolean(tokenAktif),
         acak_soal: acakSoal !== undefined ? Boolean(acakSoal) : true,
-        updated_at: new Date().toISOString()
+        updated_at: updatedIso
       };
       localStorage.setItem('CBT_LOCAL_PENGATURAN', JSON.stringify(s));
       return s;
@@ -1238,20 +1314,90 @@ const DB = {
         token_ujian: tokenUjian || 'CBT123',
         token_aktif: Boolean(tokenAktif),
         acak_soal: acakSoal !== undefined ? Boolean(acakSoal) : true,
-        updated_at: new Date().toISOString()
+        updated_at: updatedIso
+      };
+
+      // Pertahankan card_branding yang sudah tersimpan di SETTINGS_SYS_ROW_ID
+      let existingSys = null;
+      try { existingSys = await this._readSettingsFromSysRow(window.supabaseClient); } catch (e) {}
+      const sysPayload = {
+        ...(existingSys || {}),
+        ...payload
+      };
+
+      const shards = (window.getSupabaseShards && window.getSupabaseShards()) || [];
+      const clients = shards.length > 0 ? shards.map(s => s.client).filter(Boolean) : [window.supabaseClient].filter(Boolean);
+
+      await Promise.allSettled(clients.map(async (client) => {
+        try {
+          await this.ensureAdminAuth(client);
+          await this.executeWithAdminAuth(client, async (c) => {
+            await c.from('pengaturan_ujian').upsert(payload, { onConflict: 'id' });
+          });
+        } catch (e) {}
+        await this._writeSettingsToSysRow(client, sysPayload);
+      }));
+
+      return sysPayload;
+    }
+  },
+
+  async getCardBranding() {
+    let localObj = null;
+    try {
+      const raw = localStorage.getItem('CBT_CETAK_KARTU_BRANDING_V1');
+      if (raw) localObj = JSON.parse(raw);
+    } catch (e) {}
+
+    if (this.isLocal() || this.isPhp()) {
+      return localObj;
+    }
+
+    try {
+      const sys = await this._readSettingsFromSysRow(window.supabaseClient);
+      if (sys && sys.card_branding && typeof sys.card_branding === 'object') {
+        if (!localObj) {
+          try { localStorage.setItem('CBT_CETAK_KARTU_BRANDING_V1', JSON.stringify(sys.card_branding)); } catch (e) {}
+          return sys.card_branding;
+        }
+        const lMs = localObj.updated_at ? new Date(localObj.updated_at).getTime() : 0;
+        const sMs = sys.card_branding.updated_at ? new Date(sys.card_branding.updated_at).getTime() : 0;
+        if (sMs > lMs) {
+          try { localStorage.setItem('CBT_CETAK_KARTU_BRANDING_V1', JSON.stringify(sys.card_branding)); } catch (e) {}
+          return sys.card_branding;
+        }
+      }
+    } catch (e) {}
+
+    return localObj;
+  },
+
+  async saveCardBranding(brandingObj) {
+    const clean = {
+      ...(brandingObj || {}),
+      updated_at: new Date().toISOString()
+    };
+    try {
+      localStorage.setItem('CBT_CETAK_KARTU_BRANDING_V1', JSON.stringify(clean));
+    } catch (e) {}
+
+    if (this.isLocal() || this.isPhp()) {
+      return clean;
+    }
+
+    try {
+      const existingSys = (await this._readSettingsFromSysRow(window.supabaseClient)) || {};
+      const nextSys = {
+        ...existingSys,
+        card_branding: clean
       };
       const shards = (window.getSupabaseShards && window.getSupabaseShards()) || [];
-      if (shards.length > 1) {
-        // Broadcast ke seluruh server Supabase agar durasi & token seragam
-        await Promise.allSettled(shards.map(s => s.client && s.client.from('pengaturan_ujian').upsert(payload)));
-        return payload;
-      }
-      const { data, error } = await window.supabaseClient
-        .from('pengaturan_ujian')
-        .upsert(payload);
-      if (error) throw error;
-      return data;
+      const clients = shards.length > 0 ? shards.map(s => s.client).filter(Boolean) : [window.supabaseClient].filter(Boolean);
+      await Promise.allSettled(clients.map(c => this._writeSettingsToSysRow(c, nextSys)));
+    } catch (e) {
+      console.warn('Gagal sinkron branding kartu ke cloud:', e);
     }
+    return clean;
   },
 
   // -------------------------------------------------------------
@@ -1737,15 +1883,27 @@ const DB = {
       const updatePayload = { is_locked: Boolean(isLocked) };
       if (shardId) {
         const client = this.getClientForShard(shardId);
-        const { error } = await client.from('peserta').update(updatePayload).eq('id', pesertaId);
-        if (error) throw error;
+        await this.ensureAdminAuth(client);
+        await this.executeWithAdminAuth(client, async (c) => {
+          const { error } = await c.from('peserta').update(updatePayload).eq('id', pesertaId);
+          if (error) throw error;
+        });
       } else {
         const shards = (window.getSupabaseShards && window.getSupabaseShards()) || [];
         if (shards.length > 1) {
-          await Promise.allSettled(shards.map(s => s.client && s.client.from('peserta').update(updatePayload).eq('id', pesertaId)));
+          await Promise.allSettled(shards.map(async (s) => {
+            if (!s.client) return;
+            await this.ensureAdminAuth(s.client);
+            await this.executeWithAdminAuth(s.client, async (c) => {
+              await c.from('peserta').update(updatePayload).eq('id', pesertaId);
+            });
+          }));
         } else {
-          const { error } = await window.supabaseClient.from('peserta').update(updatePayload).eq('id', pesertaId);
-          if (error) throw error;
+          await this.ensureAdminAuth(window.supabaseClient);
+          await this.executeWithAdminAuth(window.supabaseClient, async (c) => {
+            const { error } = await c.from('peserta').update(updatePayload).eq('id', pesertaId);
+            if (error) throw error;
+          });
         }
       }
     }
@@ -1944,7 +2102,7 @@ const DB = {
       this.initLocalData();
       const list = JSON.parse(localStorage.getItem('CBT_LOCAL_SOAL')) || [];
       return list
-        .filter(s => s.paket_soal_id === paketId && s.id !== this.GURU_SYS_ROW_ID && s.id !== this.MASTER_SYS_ROW_ID && s.id !== this.PAKET_SYS_ROW_ID && s.opsi_a !== '__CBT_SYS_GURU__' && s.opsi_a !== '__CBT_SYS_MASTER__' && s.opsi_a !== '__CBT_SYS_PAKET__')
+        .filter(s => s.paket_soal_id === paketId && s.id !== this.GURU_SYS_ROW_ID && s.id !== this.MASTER_SYS_ROW_ID && s.id !== this.PAKET_SYS_ROW_ID && s.id !== this.SETTINGS_SYS_ROW_ID && s.opsi_a !== '__CBT_SYS_GURU__' && s.opsi_a !== '__CBT_SYS_MASTER__' && s.opsi_a !== '__CBT_SYS_PAKET__' && s.opsi_a !== '__CBT_SYS_SETTINGS__')
         .sort((a,b) => a.nomor - b.nomor);
     } else {
       const { data, error } = await window.supabaseClient
@@ -1953,7 +2111,7 @@ const DB = {
         .eq('paket_soal_id', paketId)
         .order('nomor', { ascending: true });
       if (error) throw error;
-      return (data || []).filter(s => s.id !== this.GURU_SYS_ROW_ID && s.id !== this.MASTER_SYS_ROW_ID && s.id !== this.PAKET_SYS_ROW_ID && s.opsi_a !== '__CBT_SYS_GURU__' && s.opsi_a !== '__CBT_SYS_MASTER__' && s.opsi_a !== '__CBT_SYS_PAKET__' && s.nomor !== -999 && s.nomor !== -998 && s.nomor !== -997);
+      return (data || []).filter(s => s.id !== this.GURU_SYS_ROW_ID && s.id !== this.MASTER_SYS_ROW_ID && s.id !== this.PAKET_SYS_ROW_ID && s.id !== this.SETTINGS_SYS_ROW_ID && s.opsi_a !== '__CBT_SYS_GURU__' && s.opsi_a !== '__CBT_SYS_MASTER__' && s.opsi_a !== '__CBT_SYS_PAKET__' && s.opsi_a !== '__CBT_SYS_SETTINGS__' && s.nomor !== -999 && s.nomor !== -998 && s.nomor !== -997 && s.nomor !== -996);
     }
   },
 
@@ -2695,14 +2853,14 @@ const DB = {
     if (this.isLocal()) {
       this.initLocalData();
       const list = JSON.parse(localStorage.getItem('CBT_LOCAL_SOAL')) || [];
-      return list.filter(s => s.id !== this.GURU_SYS_ROW_ID && s.id !== this.MASTER_SYS_ROW_ID && s.id !== this.PAKET_SYS_ROW_ID && s.opsi_a !== '__CBT_SYS_GURU__' && s.opsi_a !== '__CBT_SYS_MASTER__' && s.opsi_a !== '__CBT_SYS_PAKET__' && s.nomor !== -999 && s.nomor !== -998 && s.nomor !== -997);
+      return list.filter(s => s.id !== this.GURU_SYS_ROW_ID && s.id !== this.MASTER_SYS_ROW_ID && s.id !== this.PAKET_SYS_ROW_ID && s.id !== this.SETTINGS_SYS_ROW_ID && s.opsi_a !== '__CBT_SYS_GURU__' && s.opsi_a !== '__CBT_SYS_MASTER__' && s.opsi_a !== '__CBT_SYS_PAKET__' && s.opsi_a !== '__CBT_SYS_SETTINGS__' && s.nomor !== -999 && s.nomor !== -998 && s.nomor !== -997 && s.nomor !== -996);
     } else {
       const { data, error } = await window.supabaseClient
         .from('soal')
         .select('*')
         .order('nomor', { ascending: true });
       if (error) throw error;
-      return (data || []).filter(s => s.id !== this.GURU_SYS_ROW_ID && s.id !== this.MASTER_SYS_ROW_ID && s.id !== this.PAKET_SYS_ROW_ID && s.opsi_a !== '__CBT_SYS_GURU__' && s.opsi_a !== '__CBT_SYS_MASTER__' && s.opsi_a !== '__CBT_SYS_PAKET__' && s.nomor !== -999 && s.nomor !== -998 && s.nomor !== -997);
+      return (data || []).filter(s => s.id !== this.GURU_SYS_ROW_ID && s.id !== this.MASTER_SYS_ROW_ID && s.id !== this.PAKET_SYS_ROW_ID && s.id !== this.SETTINGS_SYS_ROW_ID && s.opsi_a !== '__CBT_SYS_GURU__' && s.opsi_a !== '__CBT_SYS_MASTER__' && s.opsi_a !== '__CBT_SYS_PAKET__' && s.opsi_a !== '__CBT_SYS_SETTINGS__' && s.nomor !== -999 && s.nomor !== -998 && s.nomor !== -997 && s.nomor !== -996);
     }
   },
 
@@ -2882,6 +3040,21 @@ const DB_PHP = {
   syncPublicPaketCatalog() { return Promise.resolve([]); },
 
   getPublicPaketCatalog() { return Promise.resolve([]); },
+
+  getCardBranding() {
+    try {
+      const raw = localStorage.getItem('CBT_CETAK_KARTU_BRANDING_V1');
+      return Promise.resolve(raw ? JSON.parse(raw) : null);
+    } catch (e) {
+      return Promise.resolve(null);
+    }
+  },
+
+  saveCardBranding(brandingObj) {
+    const clean = { ...(brandingObj || {}), updated_at: new Date().toISOString() };
+    try { localStorage.setItem('CBT_CETAK_KARTU_BRANDING_V1', JSON.stringify(clean)); } catch (e) {}
+    return Promise.resolve(clean);
+  },
 
   getPublicKelasJurusanFromPeserta() { return Promise.resolve({ kelas: [], jurusan: [] }); },
 

@@ -100,6 +100,7 @@ document.addEventListener("DOMContentLoaded", async () => {
     const topEmailEl = document.getElementById('admin-email');
     if (topEmailEl) topEmailEl.innerText = currentAdminUser.email || 'Administrator';
     initAdminShardSelector();
+    startTokenAutoRotateLoop();
     await refreshAllData();
     toggleAutoRefresh(true);
   }
@@ -740,34 +741,48 @@ async function loadSettings() {
   if (DB.isPhp()) {
     renderPhpConnectionCard();
   } else {
-    document.getElementById('settings-supabase-url').value = window.CBT_CONFIG.url || "";
-    document.getElementById('settings-supabase-key').value = window.CBT_CONFIG.key || "";
+    const urlInp = document.getElementById('settings-supabase-url');
+    const keyInp = document.getElementById('settings-supabase-key');
+    if (urlInp) urlInp.value = window.CBT_CONFIG.url || "";
+    if (keyInp) keyInp.value = window.CBT_CONFIG.key || "";
   }
 
   try {
-    const data = await DB.getSettings();
-    if (data) {
-      examSettings = data;
-      document.getElementById('settings-exam-duration').value = data.durasi_menit;
-      const passingInput = document.getElementById('settings-exam-passing');
-      if (passingInput) passingInput.value = data.passing_grade || 0;
-      if (data.tampilkan_nilai !== undefined) {
-        document.getElementById('settings-exam-show-score').checked = data.tampilkan_nilai;
-      }
-      const tokenState = DB.getActiveTokenState ? DB.getActiveTokenState(data) : { token: data.token_ujian || 'CBT123', remainingMs: 180000 };
-      document.getElementById('settings-exam-token').value = tokenState.token;
-      const dashTokenEl = document.getElementById('dash-active-token');
-      if (dashTokenEl) dashTokenEl.innerText = tokenState.token;
-      if (data.token_aktif !== undefined) {
-        document.getElementById('settings-exam-use-token').checked = data.token_aktif;
-      }
-      if (data.acak_soal !== undefined) {
-        document.getElementById('settings-exam-randomize').checked = data.acak_soal;
-      }
-      startTokenAutoRotateLoop();
+    const fetched = await DB.getSettings();
+    const data = fetched || {
+      durasi_menit: 60,
+      passing_grade: 60,
+      tampilkan_nilai: true,
+      token_aktif: false,
+      acak_soal: true,
+      updated_at: null
+    };
+    examSettings = data;
+    const durEl = document.getElementById('settings-exam-duration');
+    if (durEl) durEl.value = data.durasi_menit || 60;
+    const passingInput = document.getElementById('settings-exam-passing');
+    if (passingInput) passingInput.value = data.passing_grade || 0;
+    if (data.tampilkan_nilai !== undefined) {
+      const showEl = document.getElementById('settings-exam-show-score');
+      if (showEl) showEl.checked = Boolean(data.tampilkan_nilai);
+    }
+    const tokenState = DB.getActiveTokenState ? DB.getActiveTokenState(data) : { token: data.token_ujian || 'CBT123', remainingMs: 180000 };
+    const setTokenEl = document.getElementById('settings-exam-token');
+    if (setTokenEl) setTokenEl.value = tokenState.token;
+    const dashTokenEl = document.getElementById('dash-active-token');
+    if (dashTokenEl) dashTokenEl.innerText = tokenState.token;
+    if (data.token_aktif !== undefined) {
+      const useTokenEl = document.getElementById('settings-exam-use-token');
+      if (useTokenEl) useTokenEl.checked = Boolean(data.token_aktif);
+    }
+    if (data.acak_soal !== undefined) {
+      const randEl = document.getElementById('settings-exam-randomize');
+      if (randEl) randEl.checked = Boolean(data.acak_soal);
     }
   } catch (err) {
     console.error("Gagal memuat pengaturan:", err);
+  } finally {
+    startTokenAutoRotateLoop();
   }
 }
 
@@ -843,7 +858,7 @@ function startTokenAutoRotateLoop() {
   if (tokenAutoRotateTimer) clearInterval(tokenAutoRotateTimer);
 
   const tick = async () => {
-    if (!DB.getActiveTokenState) return;
+    if (!DB || typeof DB.getActiveTokenState !== 'function') return;
     const state = DB.getActiveTokenState(examSettings);
     const timeStr = formatTokenCountdown(state.remainingMs);
 
@@ -857,12 +872,17 @@ function startTokenAutoRotateLoop() {
     }
 
     const dashCdEl = document.getElementById('dash-token-countdown');
-    if (dashCdEl) dashCdEl.innerText = timeStr;
+    if (dashCdEl && dashCdEl.innerText !== timeStr) {
+      dashCdEl.innerText = timeStr;
+    }
     const setCdEl = document.getElementById('settings-token-countdown');
-    if (setCdEl) setCdEl.innerText = `⏱️ ${timeStr}`;
+    if (setCdEl) {
+      const nextLbl = `⏱️ ${timeStr}`;
+      if (setCdEl.innerText !== nextLbl) setCdEl.innerText = nextLbl;
+    }
 
-    // Jika token slot 3 menit baru saja berganti, sinkronkan ke database di latar belakang
-    if (lastSyncedTokenValue !== state.token && !state.isCustomRecent) {
+    // Khusus mode PHP: sinkronkan token slot baru ke MySQL (di Supabase, slot 3 menit bersifat deterministik sehingga tidak perlu menimpa updated_at!)
+    if (DB.isPhp && DB.isPhp() && lastSyncedTokenValue !== state.token && !state.isCustomRecent) {
       lastSyncedTokenValue = state.token;
       try {
         const duration = (examSettings && examSettings.durasi_menit) || 60;
@@ -882,24 +902,38 @@ function startTokenAutoRotateLoop() {
 function generateNewToken() {
   const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
   let token = '';
-  for (let i = 0; i < 6; i++) {
-    token += chars.charAt(Math.floor(Math.random() * chars.length));
+  const currentDisplayed = (document.getElementById('dash-active-token')?.innerText || '').trim();
+  for (let attempt = 0; attempt < 5; attempt++) {
+    token = '';
+    for (let i = 0; i < 6; i++) {
+      token += chars.charAt(Math.floor(Math.random() * chars.length));
+    }
+    if (token !== currentDisplayed) break;
   }
-  document.getElementById('settings-exam-token').value = token;
+  const setEl = document.getElementById('settings-exam-token');
+  if (setEl) setEl.value = token;
   return token;
 }
 
 async function quickRotateTokenPembebas() {
   const newToken = generateNewToken();
-  try {
-    const duration = parseInt(document.getElementById('settings-exam-duration').value) || 60;
-    const passingInput = document.getElementById('settings-exam-passing');
-    const passing = passingInput ? (parseFloat(passingInput.value) || 60) : 60;
-    const showScore = document.getElementById('settings-exam-show-score').checked;
-    const useToken = document.getElementById('settings-exam-use-token').checked;
-    const randomize = document.getElementById('settings-exam-randomize').checked;
+  const dashTokenEl = document.getElementById('dash-active-token');
+  if (dashTokenEl) dashTokenEl.innerText = newToken;
 
-    await DB.saveSettings(duration, passing, showScore, newToken, useToken, randomize);
+  try {
+    const durVal = parseInt(document.getElementById('settings-exam-duration')?.value);
+    const duration = !isNaN(durVal) && durVal > 0 ? durVal : ((examSettings && examSettings.durasi_menit) || 60);
+    const passingInput = document.getElementById('settings-exam-passing');
+    const passVal = passingInput ? parseFloat(passingInput.value) : NaN;
+    const passing = !isNaN(passVal) ? passVal : ((examSettings && examSettings.passing_grade) || 60);
+    const showEl = document.getElementById('settings-exam-show-score');
+    const showScore = showEl ? showEl.checked : (examSettings?.tampilkan_nilai ?? true);
+    const useTokenEl = document.getElementById('settings-exam-use-token');
+    const useToken = useTokenEl ? useTokenEl.checked : (examSettings?.token_aktif ?? false);
+    const randEl = document.getElementById('settings-exam-randomize');
+    const randomize = randEl ? randEl.checked : (examSettings?.acak_soal ?? true);
+
+    const nowIso = new Date().toISOString();
     examSettings = {
       ...(examSettings || {}),
       durasi_menit: duration,
@@ -908,18 +942,20 @@ async function quickRotateTokenPembebas() {
       token_ujian: newToken,
       token_aktif: useToken,
       acak_soal: randomize,
-      updated_at: new Date().toISOString()
+      updated_at: nowIso
     };
     lastSyncedTokenValue = newToken;
-    const dashTokenEl = document.getElementById('dash-active-token');
-    if (dashTokenEl) dashTokenEl.innerText = newToken;
+    startTokenAutoRotateLoop();
+
+    await DB.saveSettings(duration, passing, showScore, newToken, useToken, randomize);
+
     Swal.fire({
       toast: true,
       position: 'top-end',
       icon: 'success',
-      title: `Token Pembebas baru: ${newToken} (Aktif 3 menit)`,
+      title: `Token Pembebas baru: ${newToken} (Aktif 3 menit di semua server)`,
       showConfirmButton: false,
-      timer: 2000
+      timer: 2200
     });
   } catch (err) {
     Swal.fire('Gagal Memperbarui Token', err.message || 'Terjadi kesalahan.', 'error');
@@ -2989,7 +3025,7 @@ function renderGuruTable(list) {
       `;
     }).filter(Boolean).join('');
 
-    const dynamicBadgesAdmin = sourcePaketsForGuru
+    const dynamicBadgesAdmin = conflictSourcePakets
       .filter(pk => pk && pk.id && !explicitSetAdmin.has(String(pk.id)) && !otherOwnedAdmin.has(String(pk.id)) && myDispNameAdmin && ownerNameMapAdmin.get(String(pk.id)) === myDispNameAdmin)
       .map(pk => {
         const pName = getCleanPaketName(pk.nama_paket, pk.kelas, pk.jurusan);
@@ -4948,10 +4984,205 @@ function checkAndRenderGuruConflictAlert() {
 }
 
 // -------------------------------------------------------------
-// CETAK KARTU PESERTA UJIAN (CBT EXAM CARDS)
+// CETAK KARTU PESERTA UJIAN (CBT EXAM CARDS) + LOGO SEKOLAH
 // -------------------------------------------------------------
+const CETAK_BRANDING_STORAGE_KEY = 'CBT_CETAK_KARTU_BRANDING_V1';
+let cetakLogoKiriDataUrl = '';
+let cetakLogoKananDataUrl = '';
+
+function getSavedCetakBrandingSync() {
+  try {
+    const raw = localStorage.getItem(CETAK_BRANDING_STORAGE_KEY);
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      if (parsed && typeof parsed === 'object') return parsed;
+    }
+  } catch (e) {}
+  return null;
+}
+
+function renderCetakLogoPreviews() {
+  const imgKiri = document.getElementById('img-preview-logo-kiri');
+  const svgKiri = document.getElementById('default-svg-logo-kiri');
+  const btnResKiri = document.getElementById('btn-reset-logo-kiri');
+  if (imgKiri && svgKiri) {
+    if (cetakLogoKiriDataUrl) {
+      imgKiri.src = cetakLogoKiriDataUrl;
+      imgKiri.classList.remove('d-none');
+      svgKiri.classList.add('d-none');
+      if (btnResKiri) btnResKiri.classList.remove('d-none');
+    } else {
+      imgKiri.src = '';
+      imgKiri.classList.add('d-none');
+      svgKiri.classList.remove('d-none');
+      if (btnResKiri) btnResKiri.classList.add('d-none');
+    }
+  }
+
+  const imgKanan = document.getElementById('img-preview-logo-kanan');
+  const phKanan = document.getElementById('placeholder-logo-kanan');
+  const btnResKanan = document.getElementById('btn-reset-logo-kanan');
+  if (imgKanan && phKanan) {
+    if (cetakLogoKananDataUrl) {
+      imgKanan.src = cetakLogoKananDataUrl;
+      imgKanan.classList.remove('d-none');
+      phKanan.classList.add('d-none');
+      if (btnResKanan) btnResKanan.classList.remove('d-none');
+    } else {
+      imgKanan.src = '';
+      imgKanan.classList.add('d-none');
+      phKanan.classList.remove('d-none');
+      if (btnResKanan) btnResKanan.classList.add('d-none');
+    }
+  }
+}
+
+function applyBrandingObjToModalInputs(b) {
+  if (!b || typeof b !== 'object') {
+    renderCetakLogoPreviews();
+    return;
+  }
+  cetakLogoKiriDataUrl = b.logoKiri || '';
+  cetakLogoKananDataUrl = b.logoKanan || '';
+  renderCetakLogoPreviews();
+
+  const setVal = (id, v) => {
+    const el = document.getElementById(id);
+    if (el && v !== undefined && v !== null) el.value = v;
+  };
+  if (b.headerAtas !== undefined) setVal('cetak-header-atas', b.headerAtas);
+  if (b.namaSekolah) setVal('cetak-nama-sekolah', b.namaSekolah);
+  if (b.judulUjian) setVal('cetak-judul-ujian', b.judulUjian);
+  if (b.subjudulUjian) setVal('cetak-subjudul-ujian', b.subjudulUjian);
+  if (b.kotaTanggal) setVal('cetak-kota-tanggal', b.kotaTanggal);
+}
+
+function collectCurrentBrandingFromModal() {
+  const saved = getSavedCetakBrandingSync() || {};
+  const headerEl = document.getElementById('cetak-header-atas');
+  const namaEl = document.getElementById('cetak-nama-sekolah');
+  const judulEl = document.getElementById('cetak-judul-ujian');
+  const subEl = document.getElementById('cetak-subjudul-ujian');
+  const kotaEl = document.getElementById('cetak-kota-tanggal');
+
+  return {
+    logoKiri: cetakLogoKiriDataUrl || '',
+    logoKanan: cetakLogoKananDataUrl || '',
+    headerAtas: headerEl ? headerEl.value.trim() : (saved.headerAtas ?? 'PEMERINTAH PROVINSI SUMATERA SELATAN • DINAS PENDIDIKAN'),
+    namaSekolah: (namaEl ? namaEl.value.trim() : saved.namaSekolah) || 'SMK NEGERI 1 LEMPUING',
+    judulUjian: (judulEl ? judulEl.value.trim() : saved.judulUjian) || 'PENILAIAN AKHIR SEMESTER (PAS) CBT',
+    subjudulUjian: (subEl ? subEl.value.trim() : saved.subjudulUjian) || 'TAHUN AJARAN 2025/2026',
+    kotaTanggal: (kotaEl ? kotaEl.value.trim() : saved.kotaTanggal) || 'Lempuing, November 2026'
+  };
+}
+
+function compressLogoImageFile(file, maxDim = 200) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onerror = () => reject(new Error('Gagal membaca berkas gambar.'));
+    reader.onload = (ev) => {
+      const dataUrl = ev.target.result;
+      // Jika SVG, simpan langsung agar tetap tajam vektor
+      if (file.type === 'image/svg+xml' && String(dataUrl).length < 80000) {
+        resolve(dataUrl);
+        return;
+      }
+      const img = new Image();
+      img.onerror = () => reject(new Error('Format gambar tidak valid atau rusak.'));
+      img.onload = () => {
+        let w = img.naturalWidth || img.width || maxDim;
+        let h = img.naturalHeight || img.height || maxDim;
+        if (w > maxDim || h > maxDim) {
+          const ratio = Math.min(maxDim / w, maxDim / h);
+          w = Math.max(1, Math.round(w * ratio));
+          h = Math.max(1, Math.round(h * ratio));
+        }
+        const canvas = document.createElement('canvas');
+        canvas.width = w;
+        canvas.height = h;
+        const ctx = canvas.getContext('2d');
+        ctx.clearRect(0, 0, w, h);
+        ctx.drawImage(img, 0, 0, w, h);
+        resolve(canvas.toDataURL('image/png'));
+      };
+      img.src = dataUrl;
+    };
+    reader.readAsDataURL(file);
+  });
+}
+
+async function handleCetakLogoUpload(side, inputEl) {
+  const file = inputEl && inputEl.files && inputEl.files[0];
+  if (!file) return;
+  if (!file.type.startsWith('image/')) {
+    Swal.fire('Format Tidak Didukung', 'Silakan pilih file gambar (PNG, JPG, WebP, atau SVG).', 'warning');
+    inputEl.value = '';
+    return;
+  }
+  try {
+    const compressed = await compressLogoImageFile(file, 200);
+    if (side === 'kanan') {
+      cetakLogoKananDataUrl = compressed;
+    } else {
+      cetakLogoKiriDataUrl = compressed;
+    }
+    renderCetakLogoPreviews();
+    const nextBranding = collectCurrentBrandingFromModal();
+    if (typeof DB.saveCardBranding === 'function') {
+      await DB.saveCardBranding(nextBranding);
+    } else {
+      try { localStorage.setItem(CETAK_BRANDING_STORAGE_KEY, JSON.stringify(nextBranding)); } catch (e) {}
+    }
+  } catch (err) {
+    Swal.fire('Gagal Memuat Logo', err.message || 'Terjadi kesalahan saat memproses gambar logo.', 'error');
+  } finally {
+    inputEl.value = '';
+  }
+}
+
+async function resetCetakLogo(side) {
+  if (side === 'kanan') cetakLogoKananDataUrl = '';
+  else cetakLogoKiriDataUrl = '';
+  renderCetakLogoPreviews();
+  const nextBranding = collectCurrentBrandingFromModal();
+  if (typeof DB.saveCardBranding === 'function') {
+    await DB.saveCardBranding(nextBranding);
+  } else {
+    try { localStorage.setItem(CETAK_BRANDING_STORAGE_KEY, JSON.stringify(nextBranding)); } catch (e) {}
+  }
+}
+
+async function saveCetakBrandingManual() {
+  const nextBranding = collectCurrentBrandingFromModal();
+  if (typeof DB.saveCardBranding === 'function') {
+    await DB.saveCardBranding(nextBranding);
+  } else {
+    try { localStorage.setItem(CETAK_BRANDING_STORAGE_KEY, JSON.stringify(nextBranding)); } catch (e) {}
+  }
+  Swal.fire({
+    toast: true,
+    position: 'top-end',
+    icon: 'success',
+    title: 'Logo & identitas sekolah berhasil disimpan!',
+    showConfirmButton: false,
+    timer: 2000
+  });
+}
 
 async function openCetakKartuModal() {
+  // Muat logo & identitas sekolah tersimpan (lokal & sinkron cloud)
+  const localBrand = getSavedCetakBrandingSync();
+  if (localBrand) {
+    applyBrandingObjToModalInputs(localBrand);
+  } else {
+    renderCetakLogoPreviews();
+  }
+  if (typeof DB.getCardBranding === 'function') {
+    DB.getCardBranding().then(cloudBrand => {
+      if (cloudBrand) applyBrandingObjToModalInputs(cloudBrand);
+    }).catch(() => {});
+  }
+
   if (!allPeserta || allPeserta.length === 0) {
     try {
       allPeserta = await DB.getPesertaList();
@@ -5083,11 +5314,15 @@ function prosesCetakKartu(mode = 'direct') {
     return;
   }
 
+  const branding = collectCurrentBrandingFromModal();
+  if (typeof DB.saveCardBranding === 'function') {
+    DB.saveCardBranding(branding).catch(() => {});
+  } else {
+    try { localStorage.setItem(CETAK_BRANDING_STORAGE_KEY, JSON.stringify(branding)); } catch (e) {}
+  }
+
   const opt = {
-    namaSekolah: document.getElementById('cetak-nama-sekolah')?.value || 'SMK NEGERI 1 LEMPUING',
-    judulUjian: document.getElementById('cetak-judul-ujian')?.value || 'PENILAIAN AKHIR SEMESTER (PAS) CBT',
-    subjudulUjian: document.getElementById('cetak-subjudul-ujian')?.value || 'TAHUN AJARAN 2025/2026',
-    kotaTanggal: document.getElementById('cetak-kota-tanggal')?.value || 'Lempuing, November 2026',
+    ...branding,
     showQr: document.getElementById('cetak-opt-qr')?.checked ?? true,
     showTtd: document.getElementById('cetak-opt-ttd')?.checked ?? true,
     pisahKelas: document.getElementById('cetak-opt-pisah-kelas')?.checked ?? true,
@@ -5099,19 +5334,27 @@ function prosesCetakKartu(mode = 'direct') {
   renderAndPrintCards(students, opt, mode);
 }
 
-function cetakKartuSiswa(pesertaId, mode = 'direct') {
+async function cetakKartuSiswa(pesertaId, mode = 'direct') {
   const p = (allPeserta || []).find(item => String(item.id) === String(pesertaId));
   if (!p) {
     Swal.fire('Error', 'Data peserta tidak ditemukan.', 'error');
     return;
   }
 
+  let savedBrand = getSavedCetakBrandingSync();
+  if (!savedBrand && typeof DB.getCardBranding === 'function') {
+    try { savedBrand = await DB.getCardBranding(); } catch (e) {}
+  }
+
   const todayStr = new Date().toLocaleDateString('id-ID', { day: 'numeric', month: 'long', year: 'numeric' });
   const opt = {
-    namaSekolah: 'SMK NEGERI 1 LEMPUING',
-    judulUjian: 'KARTU PESERTA UJIAN BERBASIS KOMPUTER (CBT)',
-    subjudulUjian: 'TAHUN AJARAN 2025/2026',
-    kotaTanggal: `Lempuing, ${todayStr}`,
+    logoKiri: savedBrand?.logoKiri || cetakLogoKiriDataUrl || '',
+    logoKanan: savedBrand?.logoKanan || cetakLogoKananDataUrl || '',
+    headerAtas: savedBrand?.headerAtas !== undefined ? savedBrand.headerAtas : 'PEMERINTAH PROVINSI SUMATERA SELATAN • DINAS PENDIDIKAN',
+    namaSekolah: savedBrand?.namaSekolah || 'SMK NEGERI 1 LEMPUING',
+    judulUjian: savedBrand?.judulUjian || 'KARTU PESERTA UJIAN BERBASIS KOMPUTER (CBT)',
+    subjudulUjian: savedBrand?.subjudulUjian || 'TAHUN AJARAN 2025/2026',
+    kotaTanggal: savedBrand?.kotaTanggal || `Lempuing, ${todayStr}`,
     showQr: true,
     showTtd: true,
     pisahKelas: false,
@@ -5312,8 +5555,15 @@ function generatePrintCardsHtml(students, opt) {
       margin-bottom: 1.2mm;
     }
     .kop-logo {
-      width: 22px;
-      height: 22px;
+      width: 24px;
+      height: 24px;
+      object-fit: contain;
+      flex-shrink: 0;
+      display: block;
+    }
+    .kop-logo-spacer {
+      width: 24px;
+      height: 24px;
       flex-shrink: 0;
     }
     .kop-text {
@@ -5521,20 +5771,31 @@ function generatePrintCardsHtml(students, opt) {
           printPass = p.password || p.password_plain || opt.customPass || p.username;
         }
 
+        const leftLogoHtml = opt.logoKiri
+          ? `<img class="kop-logo" src="${escapeAttr(opt.logoKiri)}" alt="Logo">`
+          : `<svg class="kop-logo" viewBox="0 0 100 100" fill="none">
+              <circle cx="50" cy="50" r="45" fill="#0d6efd" stroke="#ffffff" stroke-width="4" />
+              <path d="M50 20 L25 40 L35 40 L35 75 L65 75 L65 40 L75 40 Z" fill="#ffffff" />
+              <circle cx="50" cy="50" r="8" fill="#ffc107" />
+            </svg>`;
+        const rightLogoHtml = opt.logoKanan
+          ? `<img class="kop-logo" src="${escapeAttr(opt.logoKanan)}" alt="Logo Kanan">`
+          : `<div class="kop-logo-spacer"></div>`;
+        const headerAtasClean = opt.headerAtas !== undefined
+          ? String(opt.headerAtas).trim()
+          : 'PEMERINTAH PROVINSI SUMATERA SELATAN • DINAS PENDIDIKAN';
+
         return `
         <div class="kartu-card">
           <!-- Kop Kartu -->
           <div class="kop-sekolah">
-            <svg class="kop-logo" viewBox="0 0 100 100" fill="none">
-              <circle cx="50" cy="50" r="45" fill="#0d6efd" stroke="#ffffff" stroke-width="4" />
-              <path d="M50 20 L25 40 L35 40 L35 75 L65 75 L65 40 L75 40 Z" fill="#ffffff" />
-              <circle cx="50" cy="50" r="8" fill="#ffc107" />
-            </svg>
+            ${leftLogoHtml}
             <div class="kop-text">
-              <div class="kop-prov">PEMERINTAH PROVINSI SUMATERA SELATAN &bull; DINAS PENDIDIKAN</div>
+              ${headerAtasClean ? `<div class="kop-prov">${escapeHtml(headerAtasClean)}</div>` : ''}
               <div class="kop-nama">${escapeHtml(opt.namaSekolah)}</div>
               <div class="kop-judul">${escapeHtml(opt.judulUjian)}</div>
             </div>
+            ${rightLogoHtml}
           </div>
 
           <!-- Body Siswa (Kop, Nama, Kelas, Username, Password) -->
@@ -10203,6 +10464,7 @@ async function hydrateAllPaketSoalCounts(force = false) {
           .neq('nomor', -999)
           .neq('nomor', -998)
           .neq('nomor', -997)
+          .neq('nomor', -996)
           .range(from, to);
         if (error) throw error;
         const rows = Array.isArray(data) ? data : [];
@@ -11570,6 +11832,9 @@ window.handleProctorResetSesi = handleProctorResetSesi;
 window.handleProctorResetLogin = handleProctorResetLogin;
 window.bukaSesiMapelBaruModal = bukaSesiMapelBaruModal;
 window.openCetakKartuModal = openCetakKartuModal;
+window.handleCetakLogoUpload = handleCetakLogoUpload;
+window.resetCetakLogo = resetCetakLogo;
+window.saveCetakBrandingManual = saveCetakBrandingManual;
 window.onCetakPasswordModeChange = onCetakPasswordModeChange;
 window.onCetakFilterJurusanChange = onCetakFilterJurusanChange;
 window.populateCetakJurusanAndKelasDropdowns = populateCetakJurusanAndKelasDropdowns;

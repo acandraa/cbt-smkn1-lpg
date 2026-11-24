@@ -277,19 +277,21 @@
       <div class="kartu-header">
         <!-- SVG School logo centered for PDF quality -->
         <svg width="65" height="65" viewBox="0 0 100 100" fill="none" xmlns="http://www.w3.org/2000/svg"
-          class="kartu-logo">
+          class="kartu-logo" id="pdf-logo-svg">
           <circle cx="50" cy="50" r="45" fill="#0d6efd" stroke="#ffffff" stroke-width="4" />
           <path d="M50 20 L25 40 L35 40 L35 75 L65 75 L65 40 L75 40 Z" fill="#ffffff" />
           <circle cx="50" cy="50" r="8" fill="#ffc107" />
         </svg>
+        <img id="pdf-logo-img" src="" alt="Logo Sekolah" class="kartu-logo d-none"
+          style="width: 65px; height: 65px; object-fit: contain;" />
         <div class="kartu-school-info text-center">
-          <h4>Panitia PPDB CBT</h4>
-          <h4 style="font-size: 1.2rem; color: #0d6efd; margin-top: 1px;">SMK Negeri 1 Lempuing</h4>
-          <p>Kec. Lempuing, Kab. Ogan Komering Ilir, Sumatera Selatan</p>
+          <h4 id="pdf-header-atas">Panitia Ujian CBT</h4>
+          <h4 id="pdf-nama-sekolah" style="font-size: 1.2rem; color: #0d6efd; margin-top: 1px;">SMK Negeri 1 Lempuing</h4>
+          <p id="pdf-subjudul">Kec. Lempuing, Kab. Ogan Komering Ilir, Sumatera Selatan</p>
         </div>
       </div>
 
-      <div class="kartu-title">Kartu Peserta Ujian Seleksi Masuk</div>
+      <div class="kartu-title" id="pdf-judul-ujian">Kartu Peserta Ujian Seleksi Masuk</div>
 
       <table class="kartu-table">
         <tr>
@@ -374,11 +376,11 @@
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 
   <!-- CBT Modules -->
-  <script src="js/config.js?v=71"></script>
-  <script src="js/supabase-config.js?v=71"></script>
-  <script src="js/db-adapter.js?v=71"></script>
-  <script src="js/auth.js?v=71"></script>
-  <script src="js/ujian.js?v=71"></script>
+  <script src="js/config.js?v=80"></script>
+  <script src="js/supabase-config.js?v=80"></script>
+  <script src="js/db-adapter.js?v=80"></script>
+  <script src="js/auth.js?v=80"></script>
+  <script src="js/ujian.js?v=80"></script>
 
   <script>
     // Dark mode logic

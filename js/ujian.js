@@ -627,13 +627,41 @@ async function loadExamSetupAndVerify() {
 // PDF CARD GENERATION
 // -------------------------------------------------------------
 
-function cetakKartuPesertaPDF() {
+async function cetakKartuPesertaPDF() {
   Swal.fire({
     title: 'Mempersiapkan PDF...',
     text: 'Sedang memproses kartu peserta ujian...',
     allowOutsideClick: false,
     didOpen: () => { Swal.showLoading(); }
   });
+
+  // Terapkan logo & identitas sekolah asal jika sudah diatur di Admin
+  try {
+    if (typeof DB.getCardBranding === 'function') {
+      const brand = await DB.getCardBranding();
+      if (brand && typeof brand === 'object') {
+        const logoSvg = document.getElementById('pdf-logo-svg');
+        const logoImg = document.getElementById('pdf-logo-img');
+        if (brand.logoKiri && logoImg && logoSvg) {
+          logoImg.src = brand.logoKiri;
+          logoImg.classList.remove('d-none');
+          logoSvg.classList.add('d-none');
+        } else if (logoImg && logoSvg) {
+          logoImg.src = '';
+          logoImg.classList.add('d-none');
+          logoSvg.classList.remove('d-none');
+        }
+        const hAtas = document.getElementById('pdf-header-atas');
+        if (hAtas && brand.headerAtas !== undefined) hAtas.innerText = brand.headerAtas || '';
+        const nSek = document.getElementById('pdf-nama-sekolah');
+        if (nSek && brand.namaSekolah) nSek.innerText = brand.namaSekolah;
+        const subEl = document.getElementById('pdf-subjudul');
+        if (subEl && brand.subjudulUjian) subEl.innerText = brand.subjudulUjian;
+        const judEl = document.getElementById('pdf-judul-ujian');
+        if (judEl && brand.judulUjian) judEl.innerText = brand.judulUjian;
+      }
+    }
+  } catch (e) {}
 
   // Populate hidden print fields
   document.getElementById('pdf-username').innerText = studentProfile.username || '-';

@@ -2347,23 +2347,104 @@ Jawaban: B"></textarea>
             </div>
           </div>
 
-          <!-- Configuration Form -->
-          <div class="row g-3 mb-3">
-            <div class="col-md-6">
-              <label for="cetak-nama-sekolah" class="form-label fw-semibold">Nama Sekolah / Instansi</label>
-              <input type="text" class="form-control" id="cetak-nama-sekolah" value="SMK NEGERI 1 LEMPUING">
+          <!-- Logo & Kop Identitas Sekolah Asal -->
+          <div class="p-3 mb-3 rounded-3 border bg-light-subtle">
+            <div class="d-flex justify-content-between align-items-center flex-wrap gap-2 mb-2">
+              <h6 class="fw-bold mb-0 text-dark">
+                <i class="bi bi-building-gear me-2 text-primary"></i>Logo &amp; Identitas Kop Sekolah Asal
+              </h6>
+              <button type="button" class="btn btn-outline-success btn-sm py-0 px-2 rounded-pill fw-semibold"
+                style="font-size: 0.75rem;" onclick="saveCetakBrandingManual()">
+                <i class="bi bi-floppy-fill me-1"></i>Simpan Identitas Sekolah
+              </button>
             </div>
-            <div class="col-md-6">
-              <label for="cetak-judul-ujian" class="form-label fw-semibold">Judul Kegiatan Ujian</label>
-              <input type="text" class="form-control" id="cetak-judul-ujian" value="PENILAIAN AKHIR SEMESTER (PAS) CBT">
+
+            <div class="row g-3 mb-3 align-items-center">
+              <!-- Logo Utama / Kiri -->
+              <div class="col-md-6">
+                <div class="d-flex align-items-center gap-3 p-2 border rounded-3 bg-white">
+                  <div class="border rounded d-flex align-items-center justify-content-center bg-light flex-shrink-0 overflow-hidden"
+                    style="width: 52px; height: 52px;" id="preview-box-logo-kiri">
+                    <svg width="34" height="34" viewBox="0 0 100 100" fill="none" id="default-svg-logo-kiri">
+                      <circle cx="50" cy="50" r="45" fill="#0d6efd" stroke="#ffffff" stroke-width="4" />
+                      <path d="M50 20 L25 40 L35 40 L35 75 L65 75 L65 40 L75 40 Z" fill="#ffffff" />
+                      <circle cx="50" cy="50" r="8" fill="#ffc107" />
+                    </svg>
+                    <img id="img-preview-logo-kiri" src="" alt="Logo Kiri" class="d-none"
+                      style="max-width: 48px; max-height: 48px; object-fit: contain;">
+                  </div>
+                  <div class="flex-grow-1 min-w-0">
+                    <div class="fw-semibold small text-dark mb-1">Logo Sekolah / Logo Kiri</div>
+                    <input type="file" id="input-file-logo-kiri" accept="image/*" class="d-none"
+                      onchange="handleCetakLogoUpload('kiri', this)">
+                    <div class="d-flex gap-1 flex-wrap">
+                      <button type="button" class="btn btn-primary btn-sm py-0 px-2" style="font-size: 0.74rem;"
+                        onclick="document.getElementById('input-file-logo-kiri').click()">
+                        <i class="bi bi-upload me-1"></i>Pilih Logo
+                      </button>
+                      <button type="button" class="btn btn-outline-danger btn-sm py-0 px-2 d-none" id="btn-reset-logo-kiri"
+                        style="font-size: 0.74rem;" onclick="resetCetakLogo('kiri')">
+                        <i class="bi bi-trash"></i> Hapus
+                      </button>
+                    </div>
+                    <div class="text-muted mt-1" style="font-size: 0.68rem;">Format PNG / JPG / WebP (otomatis tersimpan)</div>
+                  </div>
+                </div>
+              </div>
+
+              <!-- Logo Kanan (Opsional) -->
+              <div class="col-md-6">
+                <div class="d-flex align-items-center gap-3 p-2 border rounded-3 bg-white">
+                  <div class="border rounded d-flex align-items-center justify-content-center bg-light flex-shrink-0 overflow-hidden"
+                    style="width: 52px; height: 52px;" id="preview-box-logo-kanan">
+                    <span class="text-muted small" id="placeholder-logo-kanan" style="font-size: 0.65rem; text-align: center; line-height: 1.1;">Tanpa<br>Logo 2</span>
+                    <img id="img-preview-logo-kanan" src="" alt="Logo Kanan" class="d-none"
+                      style="max-width: 48px; max-height: 48px; object-fit: contain;">
+                  </div>
+                  <div class="flex-grow-1 min-w-0">
+                    <div class="fw-semibold small text-dark mb-1">Logo Kanan <span class="text-muted fw-normal">(Opsional)</span></div>
+                    <input type="file" id="input-file-logo-kanan" accept="image/*" class="d-none"
+                      onchange="handleCetakLogoUpload('kanan', this)">
+                    <div class="d-flex gap-1 flex-wrap">
+                      <button type="button" class="btn btn-outline-primary btn-sm py-0 px-2" style="font-size: 0.74rem;"
+                        onclick="document.getElementById('input-file-logo-kanan').click()">
+                        <i class="bi bi-upload me-1"></i>Pilih Logo Kanan
+                      </button>
+                      <button type="button" class="btn btn-outline-danger btn-sm py-0 px-2 d-none" id="btn-reset-logo-kanan"
+                        style="font-size: 0.74rem;" onclick="resetCetakLogo('kanan')">
+                        <i class="bi bi-trash"></i> Hapus
+                      </button>
+                    </div>
+                    <div class="text-muted mt-1" style="font-size: 0.68rem;">Misal: Logo Sekolah ke-2 / Jurusan / Tut Wuri</div>
+                  </div>
+                </div>
+              </div>
             </div>
-            <div class="col-md-6">
-              <label for="cetak-subjudul-ujian" class="form-label fw-semibold">Subjudul / Tahun Ajaran</label>
-              <input type="text" class="form-control" id="cetak-subjudul-ujian" value="TAHUN AJARAN 2025/2026">
-            </div>
-            <div class="col-md-6">
-              <label for="cetak-kota-tanggal" class="form-label fw-semibold">Tempat & Tanggal Penerbitan</label>
-              <input type="text" class="form-control" id="cetak-kota-tanggal" value="Lempuing, November 2026">
+
+            <!-- Configuration Form -->
+            <div class="row g-2">
+              <div class="col-12">
+                <label for="cetak-header-atas" class="form-label small fw-semibold mb-1">Baris Kop Atas (Pemerintah Daerah / Dinas / Yayasan — Opsional)</label>
+                <input type="text" class="form-control form-control-sm" id="cetak-header-atas"
+                  value="PEMERINTAH PROVINSI SUMATERA SELATAN • DINAS PENDIDIKAN"
+                  placeholder="Contoh: PEMERINTAH PROVINSI ... • DINAS PENDIDIKAN (kosongkan jika tidak dipakai)">
+              </div>
+              <div class="col-md-6">
+                <label for="cetak-nama-sekolah" class="form-label small fw-semibold mb-1">Nama Sekolah / Instansi Asal</label>
+                <input type="text" class="form-control form-control-sm" id="cetak-nama-sekolah" value="SMK NEGERI 1 LEMPUING">
+              </div>
+              <div class="col-md-6">
+                <label for="cetak-judul-ujian" class="form-label small fw-semibold mb-1">Judul Kegiatan Ujian</label>
+                <input type="text" class="form-control form-control-sm" id="cetak-judul-ujian" value="PENILAIAN AKHIR SEMESTER (PAS) CBT">
+              </div>
+              <div class="col-md-6">
+                <label for="cetak-subjudul-ujian" class="form-label small fw-semibold mb-1">Subjudul / Tahun Ajaran</label>
+                <input type="text" class="form-control form-control-sm" id="cetak-subjudul-ujian" value="TAHUN AJARAN 2025/2026">
+              </div>
+              <div class="col-md-6">
+                <label for="cetak-kota-tanggal" class="form-label small fw-semibold mb-1">Tempat &amp; Tanggal Penerbitan</label>
+                <input type="text" class="form-control form-control-sm" id="cetak-kota-tanggal" value="Lempuing, November 2026">
+              </div>
             </div>
           </div>
 
@@ -2486,13 +2567,13 @@ Jawaban: B"></textarea>
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 
   <!-- CBT Modules -->
-  <script src="js/config.js?v=79"></script>
-  <script src="js/supabase-config.js?v=79"></script>
-  <script src="js/db-adapter.js?v=79"></script>
-  <script src="js/auth.js?v=79"></script>
-  <script src="js/excel-helpers.js?v=79"></script>
-  <script src="js/templates.js?v=79"></script>
-  <script src="js/admin.js?v=79"></script>
+  <script src="js/config.js?v=80"></script>
+  <script src="js/supabase-config.js?v=80"></script>
+  <script src="js/db-adapter.js?v=80"></script>
+  <script src="js/auth.js?v=80"></script>
+  <script src="js/excel-helpers.js?v=80"></script>
+  <script src="js/templates.js?v=80"></script>
+  <script src="js/admin.js?v=80"></script>
   <script>
     // Dark mode logic
     const themeToggleBtn = document.getElementById('theme-toggle-admin');
