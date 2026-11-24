@@ -612,9 +612,9 @@
   <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   
-  <script src="js/config.js?v=77"></script>
-  <script src="js/supabase-config.js?v=77"></script>
-  <script src="js/db-adapter.js?v=77"></script>
+  <script src="js/config.js?v=78"></script>
+  <script src="js/supabase-config.js?v=78"></script>
+  <script src="js/db-adapter.js?v=78"></script>
 
   <script>
     let allGuruList = [];
@@ -900,7 +900,7 @@
         }
 
         // 3. Tombol Aksi (+ Tambah Mapel & Login Guru)
-        const loginUrl = `login-admin.html?v=76&role=guru&username=${encodeURIComponent(g.username || '')}`;
+        const loginUrl = `login-admin.html?v=78&role=guru&username=${encodeURIComponent(g.username || '')}`;
 
         return `
           <tr>
@@ -1500,9 +1500,15 @@
             .split(/[,\s]+/)[0]
             .trim();
 
-          const myOwnPakets = sourcePakets.filter(p =>
-            updatedPaketIds.includes(String(p.id)) && !otherGuruPaketIds.has(String(p.id))
-          );
+          // Sertakan paket eksplisit di paket_ids MAUPUN paket yang terhubung otomatis (smart-matched) ke guru ini
+          const smartOwnerMap = typeof buildPubPaketOwnerMap === 'function' ? buildPubPaketOwnerMap() : new Map();
+          const myGuruDisplayName = g.nama_lengkap || g.username || '';
+          const myOwnPakets = sourcePakets.filter(p => {
+            const pidStr = String(p.id);
+            if (otherGuruPaketIds.has(pidStr)) return false;
+            if (updatedPaketIds.includes(pidStr)) return true;
+            return Boolean(myGuruDisplayName && smartOwnerMap.get(pidStr) === myGuruDisplayName);
+          });
           const claimedPaketIds = new Set();
 
           const buildTargetPaketName = (item) => {
@@ -3451,7 +3457,7 @@
         }
         if (!paketHtml) paketHtml = `<span class="text-muted small fst-italic">Belum ada paket soal</span>`;
 
-        const loginUrl = `login-admin.html?v=76&role=guru&username=${encodeURIComponent(row.username || '')}`;
+        const loginUrl = `login-admin.html?v=78&role=guru&username=${encodeURIComponent(row.username || '')}`;
 
         return `
           <tr>

@@ -95,13 +95,14 @@ const DB = {
     return false;
   },
 
-  // Auto-heal admin session jika sebuah shard belum memiliki sesi terautentikasi
+  // Auto-heal admin session jika sebuah shard belum memiliki sesi admin terautentikasi
   async ensureAdminAuth(client) {
     const target = client || window.supabaseClient;
     if (!target || !target.auth) return false;
     try {
       const { data } = await target.auth.getSession();
-      if (!data || !data.session) {
+      const curEmail = String(data?.session?.user?.email || '').toLowerCase();
+      if (!data || !data.session || !curEmail.includes('admin')) {
         let syncCreds = null;
         try { syncCreds = JSON.parse(sessionStorage.getItem('CBT_ADMIN_AUTH_SYNC') || 'null'); } catch (e) {}
         const email = (syncCreds && syncCreds.email) || 'admin@smkn1lempuing.sch.id';
@@ -1837,10 +1838,17 @@ const DB = {
     } else {
       const shards = (window.getSupabaseShards && window.getSupabaseShards()) || [];
       const runUpsert = async (c, isUpdate, targetId, dataObj) => {
+        // Pastikan sesi Admin aktif terlebih dahulu karena UPDATE yang diblokir RLS tidak melempar error di PostgREST (hanya mengupdate 0 baris)
+        await this.ensureAdminAuth(c);
         try {
           if (isUpdate) {
-            const { error } = await c.from('paket_soal').update(dataObj).eq('id', targetId);
+            const { data: uRows, error } = await c.from('paket_soal').update(dataObj).eq('id', targetId).select('id');
             if (error) throw error;
+            if (!Array.isArray(uRows) || uRows.length === 0) {
+              // Jika paket belum ada di shard ini, lakukan upsert agar semua shard seragam
+              const { error: upErr } = await c.from('paket_soal').upsert({ ...dataObj, id: targetId }, { onConflict: 'id' });
+              if (upErr) throw upErr;
+            }
           } else {
             const { error } = await c.from('paket_soal').insert(dataObj);
             if (error) throw error;
@@ -1864,7 +1872,7 @@ const DB = {
       };
 
       if (shards.length > 1) {
-        const insertPayload = id ? payload : { ...payload, id: payload.id || this.uuidv4() };
+        const insertPayload = id ? { ...payload, id } : { ...payload, id: payload.id || this.uuidv4() };
         // Broadcast ke semua server Supabase agar paket soal selalu seragam dengan ID yang sama
         const results = await Promise.allSettled(shards.map(async (shard) => {
           if (!shard.client) return null;
@@ -1875,12 +1883,18 @@ const DB = {
           const firstErr = results.find(r => r.status === 'rejected')?.reason;
           if (firstErr) throw firstErr;
         }
-        this.getPaketList().then(list => { if (Array.isArray(list) && list.length > 0) this.syncPublicPaketCatalog(list); }).catch(() => {});
+        try {
+          const freshList = await this.getPaketList();
+          if (Array.isArray(freshList) && freshList.length > 0) await this.syncPublicPaketCatalog(freshList);
+        } catch (e) {}
         return insertPayload;
       }
       return await this.executeWithAdminAuth(window.supabaseClient, async (c) => {
         await runUpsert(c, Boolean(id), id, payload);
-        this.getPaketList().then(list => { if (Array.isArray(list) && list.length > 0) this.syncPublicPaketCatalog(list); }).catch(() => {});
+        try {
+          const freshList = await this.getPaketList();
+          if (Array.isArray(freshList) && freshList.length > 0) await this.syncPublicPaketCatalog(freshList);
+        } catch (e) {}
         return payload;
       });
     }
@@ -1899,6 +1913,7 @@ const DB = {
     } else {
       const shards = (window.getSupabaseShards && window.getSupabaseShards()) || [];
       const doDelete = async (client) => {
+        await this.ensureAdminAuth(client);
         return await this.executeWithAdminAuth(client, async (c) => {
           const { error } = await c.from('paket_soal').delete().eq('id', id);
           if (error) throw error;
@@ -1907,11 +1922,17 @@ const DB = {
       };
       if (shards.length > 1) {
         await Promise.allSettled(shards.map(s => s.client && doDelete(s.client)));
-        this.getPaketList().then(list => { if (Array.isArray(list) && list.length > 0) this.syncPublicPaketCatalog(list); }).catch(() => {});
+        try {
+          const freshList = await this.getPaketList();
+          await this.syncPublicPaketCatalog(freshList || []);
+        } catch (e) {}
         return;
       }
       await doDelete(window.supabaseClient);
-      this.getPaketList().then(list => { if (Array.isArray(list) && list.length > 0) this.syncPublicPaketCatalog(list); }).catch(() => {});
+      try {
+        const freshList = await this.getPaketList();
+        await this.syncPublicPaketCatalog(freshList || []);
+      } catch (e) {}
     }
   },
 

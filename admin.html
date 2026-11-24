@@ -2180,32 +2180,56 @@ Jawaban: B"></textarea>
               </div>
             </div>
             <div class="mb-3">
-              <label for="crud-paket-jurusan" class="form-label fw-semibold">Jurusan Paket Soal</label>
+              <div class="d-flex justify-content-between align-items-center mb-1">
+                <label for="crud-paket-jurusan" class="form-label fw-semibold mb-0">Jurusan Paket Soal</label>
+                <button type="button" class="btn btn-link btn-sm p-0 text-decoration-none" style="font-size: 0.75rem;"
+                  onclick="autoFillPaketJurusanFromKelasInput()">
+                  <i class="bi bi-magic me-1"></i>Sesuaikan Otomatis dari Kelas
+                </button>
+              </div>
               <div class="input-group">
-                <select class="form-select" id="crud-paket-jurusan">
-                  <option value="">Semua Jurusan (Umum)</option>
-                </select>
-                <button class="btn btn-outline-secondary" type="button" onclick="openJurusanModal()"
-                  title="Kelola / Tambah Jurusan">
+                <input type="text" class="form-control" id="crud-paket-jurusan"
+                  placeholder="Kosongkan = Semua Jurusan, atau ketik: TKJ, TKRO"
+                  oninput="syncPaketJurusanChecklistFromInput()">
+                <div class="dropdown">
+                  <button class="btn btn-outline-primary dropdown-toggle" type="button" data-bs-toggle="dropdown"
+                    data-bs-auto-close="outside" id="btn-dropdown-paket-jurusan">
+                    <i class="bi bi-check2-square me-1"></i>Pilih
+                  </button>
+                  <div class="dropdown-menu dropdown-menu-end p-2 shadow" style="min-width: 240px; max-height: 260px; overflow-y: auto;"
+                    id="checklist-paket-jurusan">
+                  </div>
+                </div>
+                <button class="btn btn-outline-secondary" type="button" id="btn-gear-paket-jurusan" onclick="openJurusanModal()"
+                  title="Kelola / Tambah Master Jurusan">
                   <i class="bi bi-gear-fill"></i>
                 </button>
               </div>
-              <small class="text-muted">Pilih jurusan spesifik atau biarkan 'Semua Jurusan' jika berlaku untuk seluruh
-                siswa.</small>
+              <small class="text-muted">Bisa <b>diketik/diedit langsung</b> (pisahkan koma, misal: <code>TKJ, TKRO</code>) atau centang lewat tombol <b>Pilih</b>. Kosongkan jika berlaku untuk <b>Semua Jurusan</b>.</small>
             </div>
             <div class="mb-3">
               <label for="crud-paket-kelas" class="form-label fw-semibold">Kelas Paket Soal</label>
               <div class="input-group">
-                <select class="form-select" id="crud-paket-kelas">
-                  <option value="">Semua Kelas (Umum)</option>
-                </select>
-                <button class="btn btn-outline-secondary" type="button" onclick="openKelasModal()"
-                  title="Kelola / Tambah Kelas">
+                <input type="text" class="form-control" id="crud-paket-kelas"
+                  placeholder="Kosongkan = Semua Kelas, atau ketik: X TKJ 1, X TKJ 2, X TKRO 1"
+                  oninput="syncPaketKelasChecklistFromInput()">
+                <div class="dropdown">
+                  <button class="btn btn-outline-primary dropdown-toggle" type="button" data-bs-toggle="dropdown"
+                    data-bs-auto-close="outside" id="btn-dropdown-paket-kelas">
+                    <i class="bi bi-check2-square me-1"></i>Pilih
+                  </button>
+                  <div class="dropdown-menu dropdown-menu-end p-2 shadow" style="min-width: 280px; max-height: 310px; overflow-y: auto;">
+                    <input type="text" class="form-control form-control-sm mb-2" id="search-checklist-paket-kelas"
+                      placeholder="Cari kelas / rombel..." oninput="filterPaketKelasChecklist(this.value)">
+                    <div id="checklist-paket-kelas"></div>
+                  </div>
+                </div>
+                <button class="btn btn-outline-secondary" type="button" id="btn-gear-paket-kelas" onclick="openKelasModal()"
+                  title="Kelola / Tambah Master Kelas">
                   <i class="bi bi-gear-fill"></i>
                 </button>
               </div>
-              <small class="text-muted">Pilih <b>Semua Kelas</b> untuk semua angkatan, atau <b>Tingkat X</b> untuk
-                seluruh rombel kelas 10 (X TKJ 1 & X TKJ 2 sama-sama dapat), atau pilih rombel tertentu.</small>
+              <small class="text-muted">Bisa <b>diketik/diedit langsung</b> jika ada salah ketik (contoh: <code>X TKJ 1, X TKJ 2, X TKRO 1, X TKRO 2</code> atau <code>TINGKAT:X</code>), atau centang banyak kelas lewat tombol <b>Pilih</b>.</small>
             </div>
             <div class="mb-3" id="crud-paket-guru-wrapper">
               <label for="crud-paket-guru" class="form-label fw-semibold"><i
@@ -2217,12 +2241,12 @@ Jawaban: B"></textarea>
                 otomatis masuk ke akun guru tersebut.</small>
             </div>
             <div class="mb-3">
-              <label for="crud-paket-mulai" class="form-label fw-semibold">Jadwal Mulai (Otomatis Terbuka)</label>
-              <input type="datetime-local" class="form-control" id="crud-paket-mulai" required>
+              <label for="crud-paket-mulai" class="form-label fw-semibold">Jadwal Mulai <span class="text-muted fw-normal small">(Opsional)</span></label>
+              <input type="datetime-local" class="form-control" id="crud-paket-mulai">
             </div>
             <div class="mb-3">
-              <label for="crud-paket-selesai" class="form-label fw-semibold">Jadwal Selesai (Otomatis Ditutup)</label>
-              <input type="datetime-local" class="form-control" id="crud-paket-selesai" required>
+              <label for="crud-paket-selesai" class="form-label fw-semibold">Jadwal Selesai <span class="text-muted fw-normal small">(Opsional)</span></label>
+              <input type="datetime-local" class="form-control" id="crud-paket-selesai">
             </div>
           </div>
           <div class="modal-footer">
@@ -2462,13 +2486,13 @@ Jawaban: B"></textarea>
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 
   <!-- CBT Modules -->
-  <script src="js/config.js?v=77"></script>
-  <script src="js/supabase-config.js?v=77"></script>
-  <script src="js/db-adapter.js?v=77"></script>
-  <script src="js/auth.js?v=77"></script>
-  <script src="js/excel-helpers.js?v=77"></script>
-  <script src="js/templates.js?v=77"></script>
-  <script src="js/admin.js?v=77"></script>
+  <script src="js/config.js?v=78"></script>
+  <script src="js/supabase-config.js?v=78"></script>
+  <script src="js/db-adapter.js?v=78"></script>
+  <script src="js/auth.js?v=78"></script>
+  <script src="js/excel-helpers.js?v=78"></script>
+  <script src="js/templates.js?v=78"></script>
+  <script src="js/admin.js?v=78"></script>
   <script>
     // Dark mode logic
     const themeToggleBtn = document.getElementById('theme-toggle-admin');
