@@ -34,6 +34,99 @@ function saveAnswersToLocalStorage() {
   }
 }
 
+// Bersihkan seluruh cache lokal ujian (jawaban lama, timer lama, & paket aktif lama) milik siswa ini
+function clearStudentExamLocalCache(pesertaId) {
+  const pid = pesertaId || (studentProfile && studentProfile.id);
+  if (!pid) return;
+  try {
+    localStorage.removeItem(`CBT_TIMER_END_${pid}`);
+    localStorage.removeItem(`CBT_IN_PROGRESS_PAKET_${pid}`);
+    const ansPrefix = `CBT_LOCAL_ANS_${pid}_`;
+    const keysToRemove = [];
+    for (let i = 0; i < localStorage.length; i++) {
+      const k = localStorage.key(i);
+      if (k && k.startsWith(ansPrefix)) {
+        keysToRemove.push(k);
+      }
+    }
+    keysToRemove.forEach(k => localStorage.removeItem(k));
+  } catch (e) {}
+
+  try {
+    sessionStorage.removeItem('CBT_PESERTA_PROFILE_CACHE');
+    const fbRaw = sessionStorage.getItem('CBT_PESERTA_FALLBACK_SESSION');
+    if (fbRaw) {
+      const fb = JSON.parse(fbRaw);
+      if (fb && fb.profile && String(fb.profile.id) === String(pid)) {
+        fb.profile.status_ujian = 'Belum Ujian';
+        fb.profile.pelanggaran = 0;
+        fb.profile.is_locked = false;
+        sessionStorage.setItem('CBT_PESERTA_FALLBACK_SESSION', JSON.stringify(fb));
+      }
+    }
+  } catch (e) {}
+
+  savedAnswers = {};
+  hasPendingSync = false;
+  examTimerEndTimestamp = null;
+}
+
+// Hentikan paksa tampilan soal & kembalikan ke halaman awal ketika sesi di-reset oleh Admin/Pengawas
+async function handleRemoteExamResetByAdmin() {
+  if (sessionKickedOut) return;
+  sessionKickedOut = true;
+  isExamActive = false;
+  hasPendingSync = false;
+
+  if (timerInterval) clearInterval(timerInterval);
+  if (batchSyncInterval) clearInterval(batchSyncInterval);
+  if (debouncedSyncTimer) clearTimeout(debouncedSyncTimer);
+  if (typeof fullscreenWarningInterval !== 'undefined' && fullscreenWarningInterval) {
+    clearInterval(fullscreenWarningInterval);
+    fullscreenWarningInterval = null;
+  }
+  if (typeof securityWatchdogInterval !== 'undefined' && securityWatchdogInterval) {
+    clearInterval(securityWatchdogInterval);
+  }
+  if (sessionWatchdogInterval) clearInterval(sessionWatchdogInterval);
+
+  if (studentProfile && studentProfile.id) {
+    clearStudentExamLocalCache(studentProfile.id);
+  }
+
+  // Langsung sembunyikan tampilan soal lama agar tidak lagi terlihat di layar siswa
+  try {
+    const viewExam = document.getElementById('view-exam');
+    if (viewExam) viewExam.classList.add('d-none');
+    document.body.classList.remove('exam-active');
+    if (typeof hideSecurityBlackout === 'function') hideSecurityBlackout();
+    if (typeof exitFullscreen === 'function') exitFullscreen();
+    if (typeof Swal !== 'undefined' && Swal.isVisible()) {
+      Swal.close();
+    }
+  } catch (e) {}
+
+  try {
+    await Swal.fire({
+      icon: 'info',
+      title: 'Sesi Ujian Telah Direset',
+      html: 'Pengawas telah mereset sesi ujian Anda.<br><small class="text-muted">Mengembalikan ke halaman login awal...</small>',
+      timer: 1800,
+      timerProgressBar: true,
+      allowOutsideClick: false,
+      showConfirmButton: true,
+      confirmButtonText: 'OK',
+      confirmButtonColor: '#0d6efd'
+    });
+  } catch (e) {}
+
+  if (typeof Auth !== 'undefined' && typeof Auth.logout === 'function') {
+    await Auth.logout({ skipClearRemoteToken: true });
+  } else {
+    window.location.href = 'index.html';
+  }
+}
+
 document.addEventListener("DOMContentLoaded", async () => {
   // Validate student session via DB adapter (supports local mock & cloud)
   const authSession = await DB.checkSession('peserta');
@@ -69,13 +162,16 @@ document.addEventListener("DOMContentLoaded", async () => {
   document.getElementById('loading-overlay').classList.add('d-none');
 });
 
-// Pengawas Sesi Tunggal (Single-Device Watchdog): Super Ringan (~1 SELECT <100 byte tiap 45-65 detik acak)
+// Pengawas Sesi Live & Deteksi Reset Pengawas (~1 SELECT <120 byte tiap 25-35 detik acak, anti-tumpuk)
+let lastLiveStateCheckMs = 0;
+let isCheckingLiveSession = false;
+
 function initSingleDeviceSessionGuard() {
   if (!studentProfile || !studentProfile.id) return;
 
-  // Jika halaman direfresh di perangkat yang sama, pulihkan token dari profil jika cocok dengan ID perangkat lokal
+  // Jika halaman direfresh di perangkat yang sama & siswa memang sedang ujian, pulihkan token sesi lokal
   let localToken = sessionStorage.getItem('CBT_ACTIVE_SESSION_TOKEN') || '';
-  if (!localToken && studentProfile.active_session_token && typeof Auth !== 'undefined' && Auth.getOrCreateDeviceId) {
+  if (!localToken && studentProfile.status_ujian !== 'Belum Ujian' && studentProfile.active_session_token && typeof Auth !== 'undefined' && Auth.getOrCreateDeviceId) {
     const myDevId = Auth.getOrCreateDeviceId();
     const remoteDevId = String(studentProfile.active_session_token).split('|')[0];
     if (remoteDevId && remoteDevId === myDevId) {
@@ -86,41 +182,103 @@ function initSingleDeviceSessionGuard() {
 
   if (sessionWatchdogInterval) clearInterval(sessionWatchdogInterval);
 
-  // Jeda acak 45–65 detik agar ratusan siswa tidak menembak server pada detik yang bersamaan (jitter)
-  const intervalMs = 45000 + Math.floor(Math.random() * 20000);
-  sessionWatchdogInterval = setInterval(checkSingleDeviceSession, intervalMs);
+  // Jeda acak 25–35 detik agar untuk 750 siswa di 5 server hanya ~5 req/detik/server (<120 byte PK index lookup)
+  const intervalMs = 25000 + Math.floor(Math.random() * 10000);
+  sessionWatchdogInterval = setInterval(() => {
+    // Hemat kuota & baterai jika tab sedang diminimize (kecuali siswa sedang terkunci menunggu unlock pengawas)
+    if (document.visibilityState === 'hidden' && !isTokenPembebasModalOpen) return;
+    checkSingleDeviceSession();
+  }, intervalMs);
+
+  // Cek seketika saat tab/jendela kembali terlihat (dibatasi minimal jeda 5 detik)
+  const onQuickCheck = () => {
+    if (document.visibilityState === 'visible' && Date.now() - lastLiveStateCheckMs > 5000) {
+      checkSingleDeviceSession();
+    }
+  };
+  window.addEventListener('focus', onQuickCheck);
+  document.addEventListener('visibilitychange', onQuickCheck);
 }
 
 async function checkSingleDeviceSession() {
-  if (!studentProfile || !studentProfile.id || sessionKickedOut) return;
+  if (!studentProfile || !studentProfile.id || sessionKickedOut || isCheckingLiveSession) return;
   if (!navigator.onLine) return; // Fail-open saat sinyal lemah/putus agar tidak salah tendang
+  if (typeof DB === 'undefined') return;
 
-  const localToken = sessionStorage.getItem('CBT_ACTIVE_SESSION_TOKEN') || '';
-  if (!localToken) return;
-  if (typeof DB === 'undefined' || typeof DB.getPesertaSessionToken !== 'function') return;
+  isCheckingLiveSession = true;
+  lastLiveStateCheckMs = Date.now();
 
   try {
-    const res = await DB.getPesertaSessionToken(studentProfile.id);
-    if (!res || res.supported !== true) return;
+    let live = null;
+    if (typeof DB.getPesertaLiveState === 'function') {
+      live = await DB.getPesertaLiveState(studentProfile.id);
+    } else if (typeof DB.getPesertaSessionToken === 'function') {
+      const tokRes = await DB.getPesertaSessionToken(studentProfile.id);
+      if (tokRes && tokRes.supported) {
+        live = {
+          status_ujian: studentProfile.status_ujian,
+          is_locked: Boolean(studentProfile.is_locked),
+          pelanggaran: parseInt(studentProfile.pelanggaran || 0),
+          active_session_token: tokRes.token,
+          tokenSupported: true
+        };
+      }
+    }
 
-    // Hanya keluarkan perangkat lama jika server benar-benar mengonfirmasi token berubah / di-reset Proktor
-    if (res.token !== localToken) {
+    if (!live) return;
+
+    // 1. DETEKSI INSTAN RESET OLEH ADMIN / PENGAWAS:
+    // Jika siswa sedang di layar soal (isExamActive) atau sebelumnya berstatus Sedang/Sudah Ujian,
+    // namun di database server statusnya telah dikembalikan ke 'Belum Ujian', segera tutup soal & bersihkan cache!
+    if ((isExamActive || studentProfile.status_ujian !== 'Belum Ujian') && live.status_ujian === 'Belum Ujian') {
+      await handleRemoteExamResetByAdmin();
+      return;
+    }
+
+    // 2. DETEKSI BUKA BLOKIR / UNLOCK DARI ADMIN:
+    // Jika sebelumnya siswa terkunci di modal Token Pembebas lalu Admin membuka blokir dari Dashboard
+    if ((studentProfile.is_locked || isTokenPembebasModalOpen) && live.is_locked === false && live.status_ujian !== 'Belum Ujian') {
+      studentProfile.is_locked = false;
+      violationCount = parseInt(live.pelanggaran || 0);
+      if (isTokenPembebasModalOpen) {
+        isTokenPembebasModalOpen = false;
+        if (typeof Swal !== 'undefined' && Swal.isVisible()) Swal.close();
+        if (typeof hideSecurityBlackout === 'function') hideSecurityBlackout();
+        if (isExamActive && typeof requestFullscreen === 'function') requestFullscreen();
+      }
+    }
+
+    // 3. DETEKSI PINDAH PERANGKAT (SINGLE-DEVICE SESSION):
+    const localToken = sessionStorage.getItem('CBT_ACTIVE_SESSION_TOKEN') || '';
+    if (localToken && live.tokenSupported && live.active_session_token !== localToken) {
       sessionKickedOut = true;
       isExamActive = false;
 
       if (timerInterval) clearInterval(timerInterval);
       if (batchSyncInterval) clearInterval(batchSyncInterval);
+      if (debouncedSyncTimer) clearTimeout(debouncedSyncTimer);
       if (typeof securityWatchdogInterval !== 'undefined' && securityWatchdogInterval) {
         clearInterval(securityWatchdogInterval);
       }
       if (sessionWatchdogInterval) clearInterval(sessionWatchdogInterval);
 
-      saveAnswersToLocalStorage();
+      // PENTING: Hanya simpan jawaban lokal jika status di server masih 'Sedang Ujian' (pindah HP).
+      // Jika status sudah 'Belum Ujian' (direset), bersihkan cache lokal!
+      if (live.status_ujian === 'Sedang Ujian') {
+        saveAnswersToLocalStorage();
+      } else {
+        clearStudentExamLocalCache(studentProfile.id);
+      }
+
+      const viewExam = document.getElementById('view-exam');
+      if (viewExam) viewExam.classList.add('d-none');
 
       await Swal.fire({
         icon: 'warning',
         title: 'Sesi Perangkat Dihentikan',
-        html: `Akun Anda telah <strong>dibuka di perangkat lain</strong> atau <strong>di-reset oleh Pengawas</strong>.<br><br>Tenang, jawaban yang sudah Anda pilih tetap tersimpan aman.`,
+        html: `Akun Anda telah <strong>dibuka di perangkat lain</strong> atau <strong>di-reset oleh Pengawas</strong>.`,
+        timer: 2200,
+        timerProgressBar: true,
         allowOutsideClick: false,
         confirmButtonText: 'Kembali ke Halaman Login',
         confirmButtonColor: '#0d6efd'
@@ -131,6 +289,8 @@ async function checkSingleDeviceSession() {
     }
   } catch (e) {
     // Abaikan error jaringan sesaat agar kelancaran ujian tidak terganggu
+  } finally {
+    isCheckingLiveSession = false;
   }
 }
 
@@ -523,11 +683,23 @@ async function loadExamSetupAndVerify() {
     candidateAgamaPakets = candidateActivePakets.filter(p => isAgamaPaket(p.nama_paket));
 
     // 3. Tentukan paket aktif yang akan digunakan:
-    // Prioritas 1: Jika siswa sedang dalam pengerjaan (in-progress) di browser ini
-    const inProgressId = localStorage.getItem(`CBT_IN_PROGRESS_PAKET_${studentProfile.id}`);
+    // PENTING: Jika status siswa di server adalah 'Belum Ujian' (baru mulai / habis di-reset Admin),
+    // WAJIB bersihkan seluruh cache paket, timer, dan jawaban lama di localStorage agar tidak nyangkut di soal yang tadi!
+    if (studentProfile.status_ujian !== 'Sedang Ujian') {
+      clearStudentExamLocalCache(studentProfile.id);
+    }
+
     let activePaket = null;
-    if (inProgressId) {
-      activePaket = (allPaket || []).find(p => p.id === inProgressId);
+    if (studentProfile.status_ujian === 'Sedang Ujian') {
+      const inProgressId = localStorage.getItem(`CBT_IN_PROGRESS_PAKET_${studentProfile.id}`);
+      if (inProgressId) {
+        // Hanya lanjutkan paket jika masih masuk dalam daftar paket yang aktif & cocok saat ini
+        activePaket = candidateActivePakets.find(p => p.id === inProgressId) || null;
+        if (!activePaket) {
+          localStorage.removeItem(`CBT_IN_PROGRESS_PAKET_${studentProfile.id}`);
+          localStorage.removeItem(`CBT_TIMER_END_${studentProfile.id}`);
+        }
+      }
     }
 
     // Prioritas 2: Jika terdeteksi paket Agama aktif
@@ -805,16 +977,21 @@ async function mulaiUjianCBT() {
     }
 
     currentActivePaket = activePaket;
+    // 2. Cek apakah siswa melanjutkan ujian yang memang sedang berjalan, atau mulai baru dari 'Belum Ujian' (misal habis direset)
+    const isResumingRunningExam = (studentProfile.status_ujian === 'Sedang Ujian');
+    if (!isResumingRunningExam) {
+      clearStudentExamLocalCache(studentProfile.id);
+    }
+
     localStorage.setItem(`CBT_IN_PROGRESS_PAKET_${studentProfile.id}`, activePaket.id);
 
-    // 2. Fetch questions for the active paket
+    // Ambil daftar soal untuk paket aktif & acak jika pengaturan acak_soal diaktifkan
     let questions = await DB.getSoalByPaket(activePaket.id);
 
     if (!questions || questions.length === 0) {
       throw new Error("Bank soal ujian untuk paket ini masih kosong. Hubungi panitia.");
     }
-    
-    // Acak soal jika diaktifkan di pengaturan
+
     if (settings && settings.acak_soal) {
       for (let i = questions.length - 1; i > 0; i--) {
         const j = Math.floor(Math.random() * (i + 1));
@@ -825,45 +1002,46 @@ async function mulaiUjianCBT() {
     allQuestions = questions;
     totalSoalCount = questions.length;
 
-    // 2. Fetch or create starting status
-    if (studentProfile.status_ujian !== 'Sedang Ujian') {
+    if (!isResumingRunningExam) {
       await DB.updateStatusUjian(studentProfile.id, 'Sedang Ujian');
       studentProfile.status_ujian = 'Sedang Ujian';
     }
 
-    // 3. Restore answers: Prioritaskan Cache Lokal (LocalStorage-First)
-    const localKey = getLocalAnswerStorageKey();
-    const cachedLocalStr = localKey ? localStorage.getItem(localKey) : null;
-    let cachedAnswers = null;
-    if (cachedLocalStr) {
-      try { cachedAnswers = JSON.parse(cachedLocalStr); } catch (e) {}
-    }
-
+    // 3. Restore answers HANYA jika siswa benar-benar sedang melanjutkan sesi 'Sedang Ujian' (bukan habis di-reset!)
     savedAnswers = {};
-    if (cachedAnswers && typeof cachedAnswers === 'object' && Object.keys(cachedAnswers).length > 0) {
-      savedAnswers = cachedAnswers;
-    } else {
-      // Fallback ke database jika lokal belum ada (misal login pertama kali atau ganti perangkat)
-      try {
-        const userAnswers = await DB.getJawabanList(studentProfile.id);
-        if (userAnswers && userAnswers.length > 0) {
-          userAnswers.forEach(ans => {
-            savedAnswers[ans.soal_id] = {
-              jawaban: ans.jawaban,
-              ragu_ragu: Boolean(ans.ragu_ragu),
-              answered_at: ans.created_at ? new Date(ans.created_at).getTime() : Date.now()
-            };
-          });
-          saveAnswersToLocalStorage();
+    if (isResumingRunningExam) {
+      const localKey = getLocalAnswerStorageKey();
+      const cachedLocalStr = localKey ? localStorage.getItem(localKey) : null;
+      let cachedAnswers = null;
+      if (cachedLocalStr) {
+        try { cachedAnswers = JSON.parse(cachedLocalStr); } catch (e) {}
+      }
+
+      if (cachedAnswers && typeof cachedAnswers === 'object' && Object.keys(cachedAnswers).length > 0) {
+        savedAnswers = cachedAnswers;
+      } else {
+        // Fallback ke database jika lokal belum ada (misal ganti perangkat / pindah HP)
+        try {
+          const userAnswers = await DB.getJawabanList(studentProfile.id);
+          if (userAnswers && userAnswers.length > 0) {
+            userAnswers.forEach(ans => {
+              savedAnswers[ans.soal_id] = {
+                jawaban: ans.jawaban,
+                ragu_ragu: Boolean(ans.ragu_ragu),
+                answered_at: ans.created_at ? new Date(ans.created_at).getTime() : Date.now()
+              };
+            });
+            saveAnswersToLocalStorage();
+          }
+        } catch (e) {
+          console.warn("Gagal fetch jawaban dari DB saat start:", e);
         }
-      } catch (e) {
-        console.warn("Gagal fetch jawaban dari DB saat start:", e);
       }
     }
 
-    // 4. Setup timer with anti-refresh preservation
-    const durationMinutes = parseInt(document.getElementById('dash-duration').innerText);
-    const savedEnd = localStorage.getItem(`CBT_TIMER_END_${studentProfile.id}`);
+    // 4. Setup timer (mulai penuh dari awal jika sesi baru / habis direset)
+    const durationMinutes = parseInt(document.getElementById('dash-duration').innerText) || 60;
+    const savedEnd = isResumingRunningExam ? localStorage.getItem(`CBT_TIMER_END_${studentProfile.id}`) : null;
     
     if (savedEnd) {
       examTimerEndTimestamp = parseInt(savedEnd);
@@ -1325,6 +1503,17 @@ async function syncAnswersBatchToServer(isFinal = false) {
   }
 
   try {
+    // Pengaman Anti-Timpa Hemat Kuota: hanya cek status live jika pengecekan terakhir sudah > 20 detik lalu (atau saat submit akhir)
+    if (typeof DB.getPesertaLiveState === 'function' && (isFinal || (Date.now() - lastLiveStateCheckMs > 20000))) {
+      lastLiveStateCheckMs = Date.now();
+      const live = await DB.getPesertaLiveState(studentProfile.id);
+      if (live && live.status_ujian === 'Belum Ujian') {
+        isSyncingInProgress = false;
+        await handleRemoteExamResetByAdmin();
+        return;
+      }
+    }
+
     const payload = answerKeys.map(sId => {
       const item = savedAnswers[sId];
       const s = allQuestions.find(q => q.id === sId);
@@ -1420,6 +1609,16 @@ async function submitUjianFinal() {
   document.querySelector('#loading-overlay h5').innerText = "Menyimpan & Mengkalkulasi Hasil Ujian...";
 
   try {
+    // Pastikan sesi tidak baru saja direset oleh Pengawas sebelum submit nilai akhir
+    if (typeof DB.getPesertaLiveState === 'function') {
+      const live = await DB.getPesertaLiveState(studentProfile.id);
+      if (live && live.status_ujian === 'Belum Ujian') {
+        document.getElementById('loading-overlay').classList.add('d-none');
+        await handleRemoteExamResetByAdmin();
+        return;
+      }
+    }
+
     // 1. Force final batch sync jawaban ke server sebelum submit
     await syncAnswersBatchToServer(true);
 

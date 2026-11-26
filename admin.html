@@ -132,6 +132,11 @@
                 <i class="bi bi-people-fill"></i> Data Peserta
               </a>
             </li>
+            <li class="nav-item" id="nav-item-pengawas">
+              <a class="admin-nav-link" href="#" onclick="switchTab('pengawas')">
+                <i class="bi bi-shield-check"></i> Pengawas Ruang
+              </a>
+            </li>
             <li class="nav-item" id="nav-item-guru">
               <a class="admin-nav-link" href="#" onclick="switchTab('guru')">
                 <i class="bi bi-person-workspace"></i> Data Guru Mapel
@@ -571,6 +576,121 @@
                   <ul class="pagination pagination-sm mb-0" id="peserta-pagination-nav"></ul>
                 </nav>
               </div>
+            </div>
+          </div>
+        </section>
+
+        <!-- SECTION: PENGAWAS RUANG UJIAN -->
+        <section id="sec-pengawas" class="d-none">
+          <div class="d-flex justify-content-between flex-wrap flex-md-nowrap align-items-center pt-3 pb-2 mb-4 border-bottom">
+            <div>
+              <h1 class="h2 text-dark mb-1"><i class="bi bi-shield-check text-primary me-2"></i>Manajemen Pengawas Ruang Ujian</h1>
+              <p class="text-muted small mb-0">Delegasikan Token Pembebas, Buka Kunci Pelanggaran, &amp; Pindah HP ke pengawas masing-masing ruang (mendukung ruang berisi campuran beberapa kelas).</p>
+            </div>
+            <div class="btn-toolbar mb-2 mb-md-0 gap-2 flex-wrap">
+              <a href="pengawas.html?v=84" target="_blank" class="btn btn-outline-dark btn-sm rounded-pill px-3 fw-semibold">
+                <i class="bi bi-box-arrow-up-right me-1"></i> Buka Portal Pengawas
+              </a>
+              <button class="btn btn-outline-success btn-sm rounded-pill px-3 fw-semibold" onclick="copyPortalPengawasUrl()">
+                <i class="bi bi-whatsapp me-1"></i> Bagikan Link Portal
+              </button>
+              <button class="btn btn-outline-primary btn-sm rounded-pill px-3 fw-semibold" onclick="generatePengawasAutoByRuang()"
+                title="Buat otomatis kode PIN untuk setiap Ruang yang terdeteksi dari Data Peserta (otomatis mencakup kelas campuran di ruang tsb)">
+                <i class="bi bi-magic me-1"></i> Generate per Ruang
+              </button>
+              <button class="btn btn-outline-info text-dark btn-sm rounded-pill px-3 fw-semibold" onclick="generatePengawasAutoByKelas()"
+                title="Buat otomatis kode PIN untuk setiap Kelas">
+                <i class="bi bi-collection me-1"></i> Generate per Kelas
+              </button>
+              <button class="btn btn-warning text-dark btn-sm rounded-pill px-3 fw-bold shadow-sm" onclick="cetakKartuPengawasRuang()">
+                <i class="bi bi-printer-fill me-1"></i> Cetak Kartu / QR Pengawas
+              </button>
+              <button class="btn btn-primary btn-sm rounded-pill px-3 fw-semibold shadow-sm" onclick="openPengawasFormModal()">
+                <i class="bi bi-plus-circle me-1"></i> + Buat Akun Ruang / Campuran
+              </button>
+            </div>
+          </div>
+
+          <!-- Kartu Pengaturan Cepat PIN Umum & Wewenang Pengawas -->
+          <div class="glass-card p-4 mb-4 border-start border-4 border-primary">
+            <div class="row g-3 align-items-center">
+              <div class="col-lg-5">
+                <div class="d-flex align-items-center justify-content-between mb-1">
+                  <h6 class="fw-bold mb-0 text-dark"><i class="bi bi-key-fill text-warning me-2"></i>PIN Pengawas Umum (Mode Fleksibel)</h6>
+                  <div class="form-check form-switch mb-0">
+                    <input class="form-check-input" type="checkbox" id="cfg-pengawas-pin-aktif" checked>
+                    <label class="form-check-label small fw-semibold" for="cfg-pengawas-pin-aktif">Aktif</label>
+                  </div>
+                </div>
+                <p class="text-muted small mb-2" style="font-size: 0.78rem;">
+                  Jika diaktifkan, guru pengawas yang masuk memakai PIN Umum ini dapat langsung memilih <strong>Ruang</strong> atau <strong>mencentang beberapa Kelas campuran</strong> yang ada di ruangannya lewat HP.
+                </p>
+                <div class="input-group input-group-sm" style="max-width: 320px;">
+                  <span class="input-group-text fw-semibold bg-light">PIN Umum:</span>
+                  <input type="text" class="form-control fw-bold font-monospace text-uppercase text-danger" id="cfg-pengawas-pin-umum" value="CBT2026" style="letter-spacing: 2px;">
+                  <button class="btn btn-outline-secondary" type="button" onclick="randomizeGeneralPengawasPin()" title="Acak PIN Umum">
+                    <i class="bi bi-shuffle"></i> Acak
+                  </button>
+                </div>
+              </div>
+
+              <div class="col-lg-5 border-start-lg ps-lg-4">
+                <h6 class="fw-bold mb-2 text-dark"><i class="bi bi-Sliders me-1 text-primary"></i>Batas Wewenang Pengawas di Ruangan</h6>
+                <div class="small text-muted mb-1">
+                  <i class="bi bi-check-circle-fill text-success me-1"></i><strong>Lihat Token Live, Buka Kunci Pelanggaran, &amp; Pindah HP</strong> selalu aktif (aman).
+                </div>
+                <div class="form-check form-switch mb-1">
+                  <input class="form-check-input" type="checkbox" id="cfg-pengawas-allow-reset-sesi" checked>
+                  <label class="form-check-label small fw-semibold" for="cfg-pengawas-allow-reset-sesi">
+                    Izinkan Pengawas klik <strong>Reset Sesi Perorangan (1 Siswa)</strong>
+                  </label>
+                </div>
+                <div class="form-check form-switch mb-0">
+                  <input class="form-check-input" type="checkbox" id="cfg-pengawas-allow-force-finish" checked>
+                  <label class="form-check-label small fw-semibold" for="cfg-pengawas-allow-force-finish">
+                    Izinkan Pengawas klik <strong>Paksa Selesai Perorangan (1 Siswa)</strong>
+                  </label>
+                </div>
+              </div>
+
+              <div class="col-lg-2 text-lg-end">
+                <button class="btn btn-success btn-sm rounded-pill px-3 py-2 fw-bold w-100 shadow-sm" onclick="savePengawasConfigFromUI()">
+                  <i class="bi bi-floppy-fill me-1"></i> Simpan Pengaturan
+                </button>
+              </div>
+            </div>
+          </div>
+
+          <!-- Tabel Akun Pengawas Spesifik per Ruang / Multi-Kelas -->
+          <div class="glass-card p-0 mb-4">
+            <div class="p-3 border-bottom d-flex justify-content-between align-items-center flex-wrap gap-2">
+              <div>
+                <h6 class="fw-bold mb-0 text-dark">Daftar Akun / Kode PIN Khusus per Ruang &amp; Kelas Campuran</h6>
+                <small class="text-muted">Gunakan daftar ini jika ingin mengunci 1 PIN khusus untuk 1 Ruang atau gabungan beberapa Kelas tertentu (bisa dicetak QR-nya untuk meja pengawas).</small>
+              </div>
+              <button class="btn btn-outline-danger btn-sm rounded-pill px-3" onclick="clearAllPengawasAccounts()">
+                <i class="bi bi-trash me-1"></i> Hapus Semua PIN Ruang
+              </button>
+            </div>
+            <div class="table-responsive">
+              <table class="table table-hover align-middle mb-0 custom-table">
+                <thead class="table-light">
+                  <tr>
+                    <th style="width: 50px;">No</th>
+                    <th>Nama Ruang / Pengawas</th>
+                    <th>Kode PIN Akses</th>
+                    <th>Cakupan Ruang / Gabungan Kelas</th>
+                    <th>Sesi</th>
+                    <th>Siswa Terkait</th>
+                    <th class="text-center" style="width: 170px;">Aksi</th>
+                  </tr>
+                </thead>
+                <tbody id="tbody-pengawas-accounts">
+                  <tr>
+                    <td colspan="7" class="text-center py-4 text-muted">Memuat daftar akun pengawas...</td>
+                  </tr>
+                </tbody>
+              </table>
             </div>
           </div>
         </section>
@@ -2569,6 +2689,102 @@ Jawaban: B"></textarea>
     </div>
   </div>
 
+  <!-- Modal: Buat / Edit Akun Pengawas Ruang / Kelas Campuran -->
+  <div class="modal fade" id="pengawasFormModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered modal-lg">
+      <div class="modal-content border-0 shadow-lg rounded-4">
+        <div class="modal-header bg-light">
+          <h5 class="modal-title fw-bold" id="pengawasModalTitle">
+            <i class="bi bi-shield-plus text-primary me-2"></i>Buat Akun Pengawas Ruang / Campuran Kelas
+          </h5>
+          <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+        </div>
+        <form id="form-pengawas-crud">
+          <input type="hidden" id="pengawas-acc-id">
+          <div class="modal-body p-4">
+            <div class="row g-3 mb-3">
+              <div class="col-md-6">
+                <label for="pengawas-acc-nama" class="form-label small fw-bold">Nama Ruang / Label Pengawas</label>
+                <input type="text" class="form-control" id="pengawas-acc-nama" placeholder="Contoh: Pengawas Ruang 01 (Lab TKJ)" required>
+              </div>
+              <div class="col-md-4">
+                <label for="pengawas-acc-kode" class="form-label small fw-bold">Kode Akses / PIN Login</label>
+                <div class="input-group">
+                  <input type="text" class="form-control fw-bold font-monospace text-uppercase" id="pengawas-acc-kode" placeholder="R01-4829" required>
+                  <button class="btn btn-outline-secondary" type="button" onclick="randomizePengawasAccPin()" title="Acak Kode PIN">
+                    <i class="bi bi-shuffle"></i>
+                  </button>
+                </div>
+              </div>
+              <div class="col-md-2">
+                <label for="pengawas-acc-sesi" class="form-label small fw-bold">Filter Sesi</label>
+                <select class="form-select" id="pengawas-acc-sesi">
+                  <option value="">Semua</option>
+                  <option value="Sesi 1">Sesi 1</option>
+                  <option value="Sesi 2">Sesi 2</option>
+                  <option value="Sesi 3">Sesi 3</option>
+                </select>
+              </div>
+            </div>
+
+            <div class="mb-3">
+              <label class="form-label small fw-bold">Mode Pengelompokan Siswa di Ruangan Ini:</label>
+              <div class="row g-2">
+                <div class="col-md-4">
+                  <label class="border rounded-3 p-2 d-flex align-items-start gap-2 w-100 bg-light" style="cursor:pointer;">
+                    <input class="form-check-input mt-1" type="radio" name="rad-pengawas-mode" value="ruang" checked onchange="onPengawasScopeModeChange()">
+                    <div class="small">
+                      <strong class="d-block text-dark">Berdasarkan Ruang</strong>
+                      <span class="text-muted" style="font-size:0.73rem;">Otomatis gabung semua kelas yang ada di Ruang tsb.</span>
+                    </div>
+                  </label>
+                </div>
+                <div class="col-md-4">
+                  <label class="border rounded-3 p-2 d-flex align-items-start gap-2 w-100 bg-light" style="cursor:pointer;">
+                    <input class="form-check-input mt-1" type="radio" name="rad-pengawas-mode" value="kelas" onchange="onPengawasScopeModeChange()">
+                    <div class="small">
+                      <strong class="d-block text-dark">Campuran Multi-Kelas</strong>
+                      <span class="text-muted" style="font-size:0.73rem;">Centang 1 atau lebih kelas yang digabung di 1 ruang.</span>
+                    </div>
+                  </label>
+                </div>
+                <div class="col-md-4">
+                  <label class="border rounded-3 p-2 d-flex align-items-start gap-2 w-100 bg-light" style="cursor:pointer;">
+                    <input class="form-check-input mt-1" type="radio" name="rad-pengawas-mode" value="fleksibel" onchange="onPengawasScopeModeChange()">
+                    <div class="small">
+                      <strong class="d-block text-dark">Fleksibel di HP</strong>
+                      <span class="text-muted" style="font-size:0.73rem;">Pengawas bebas memilih Ruang/Kelas sendiri di HP.</span>
+                    </div>
+                  </label>
+                </div>
+              </div>
+            </div>
+
+            <!-- Box Pilih Ruang -->
+            <div id="box-pengawas-pilih-ruang" class="p-3 border rounded-3 bg-light-subtle">
+              <label class="form-label small fw-bold mb-1">Centang Ruang Ujian (atau ketik manual dipisahkan koma):</label>
+              <div class="d-flex flex-wrap gap-2 mb-2" id="checklist-pengawas-ruang"></div>
+              <input type="text" class="form-control form-control-sm" id="inp-pengawas-ruang-manual" placeholder="Contoh: Ruang 01 (ketik di sini jika belum ada di daftar atas)">
+            </div>
+
+            <!-- Box Pilih Multi-Kelas -->
+            <div id="box-pengawas-pilih-kelas" class="p-3 border rounded-3 bg-light-subtle d-none">
+              <label class="form-label small fw-bold mb-1">Centang Kelas yang Dicampur di Ruangan Ini (Bisa Pilih Lebih dari 1 Kelas):</label>
+              <div class="d-flex flex-wrap gap-2 mb-2" id="checklist-pengawas-kelas" style="max-height: 190px; overflow-y: auto;"></div>
+              <input type="text" class="form-control form-control-sm" id="inp-pengawas-kelas-manual" placeholder="Contoh: X TKJ 1, XI AKL 1 (otomatis terisi saat dicentang)">
+            </div>
+          </div>
+          <div class="modal-footer bg-light">
+            <button type="button" class="btn btn-secondary btn-sm" data-bs-dismiss="modal">Batal</button>
+            <button type="submit" class="btn btn-primary btn-sm px-4 fw-bold">
+              <i class="bi bi-save me-1"></i> Simpan Akun Pengawas
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+  </div>
+
   <!-- SCRIPTS -->
   <!-- SweetAlert2 -->
   <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
@@ -2585,13 +2801,13 @@ Jawaban: B"></textarea>
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 
   <!-- CBT Modules -->
-  <script src="js/config.js?v=81"></script>
-  <script src="js/supabase-config.js?v=81"></script>
-  <script src="js/db-adapter.js?v=81"></script>
-  <script src="js/auth.js?v=81"></script>
-  <script src="js/excel-helpers.js?v=81"></script>
-  <script src="js/templates.js?v=81"></script>
-  <script src="js/admin.js?v=81"></script>
+  <script src="js/config.js?v=84"></script>
+  <script src="js/supabase-config.js?v=84"></script>
+  <script src="js/db-adapter.js?v=84"></script>
+  <script src="js/auth.js?v=84"></script>
+  <script src="js/excel-helpers.js?v=84"></script>
+  <script src="js/templates.js?v=84"></script>
+  <script src="js/admin.js?v=84"></script>
   <script>
     // Dark mode logic
     const themeToggleBtn = document.getElementById('theme-toggle-admin');

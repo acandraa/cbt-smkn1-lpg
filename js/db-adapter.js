@@ -406,6 +406,306 @@ const DB = {
   MASTER_SYS_ROW_ID: '00000000-0000-4000-8000-000000000998',
   PAKET_SYS_ROW_ID: '00000000-0000-4000-8000-000000000997',
   SETTINGS_SYS_ROW_ID: '00000000-0000-4000-8000-000000000996',
+  PENGAWAS_SYS_ROW_ID: '00000000-0000-4000-8000-000000000995',
+
+  _defaultPengawasRegistry() {
+    return {
+      config: {
+        pin_umum_aktif: true,
+        pin_umum: 'CBT2026',
+        izinkan_reset_sesi: true,
+        izinkan_paksa_selesai: true
+      },
+      accounts: [],
+      updated_at: null
+    };
+  },
+
+  async ensureAllShardsAdminAuth() {
+    if (this.isLocal() || this.isPhp()) return true;
+    const shards = (window.getSupabaseShards && window.getSupabaseShards()) || [];
+    if (shards.length > 1) {
+      await Promise.allSettled(shards.map(s => s.client ? this.ensureAdminAuth(s.client) : Promise.resolve(false)));
+      if (window.setActiveSupabaseShard) window.setActiveSupabaseShard('all');
+      return true;
+    }
+    if (window.supabaseClient) {
+      return await this.ensureAdminAuth(window.supabaseClient);
+    }
+    return false;
+  },
+
+  async _readPengawasRegistryFromSysRow(client) {
+    const target = client || window.supabaseClient;
+    if (!target) return null;
+    try {
+      const { data, error } = await target
+        .from('soal')
+        .select('id, pertanyaan')
+        .eq('id', this.PENGAWAS_SYS_ROW_ID)
+        .maybeSingle();
+      if (error || !data || !data.pertanyaan) return null;
+      const parsed = JSON.parse(data.pertanyaan);
+      return (parsed && typeof parsed === 'object') ? parsed : null;
+    } catch (e) {
+      return null;
+    }
+  },
+
+  async _writePengawasRegistryToSysRow(client, regObj) {
+    const target = client || window.supabaseClient;
+    if (!target) return false;
+    await this.ensureAdminAuth(target);
+    return await this.executeWithAdminAuth(target, async (c) => {
+      const payload = {
+        id: this.PENGAWAS_SYS_ROW_ID,
+        paket_soal_id: null,
+        nomor: -995,
+        pertanyaan: JSON.stringify(regObj || {}),
+        opsi_a: '__CBT_SYS_PENGAWAS__',
+        opsi_b: 'SYSTEM',
+        opsi_c: null,
+        opsi_d: null,
+        jawaban_benar: 'SYS',
+        bobot: 0
+      };
+      const { error } = await c.from('soal').upsert(payload, { onConflict: 'id' });
+      if (error) throw error;
+      return true;
+    });
+  },
+
+  async getPengawasRegistry() {
+    const def = this._defaultPengawasRegistry();
+    let localCached = null;
+    try {
+      const raw = localStorage.getItem('CBT_PENGAWAS_REGISTRY_V1');
+      if (raw) localCached = JSON.parse(raw);
+    } catch (e) {}
+
+    if (this.isLocal() || this.isPhp()) {
+      const base = localCached || def;
+      return {
+        config: { ...def.config, ...(base.config || {}) },
+        accounts: Array.isArray(base.accounts) ? base.accounts : [],
+        updated_at: base.updated_at || null
+      };
+    }
+
+    const shards = (window.getSupabaseShards && window.getSupabaseShards()) || [];
+    const primary = (shards[0] && shards[0].client) || window.supabaseClient;
+    const remote = await this._readPengawasRegistryFromSysRow(primary);
+    const chosen = remote || localCached || def;
+    const normalized = {
+      config: { ...def.config, ...(chosen.config || {}) },
+      accounts: Array.isArray(chosen.accounts) ? chosen.accounts : [],
+      updated_at: chosen.updated_at || null
+    };
+    try { localStorage.setItem('CBT_PENGAWAS_REGISTRY_V1', JSON.stringify(normalized)); } catch (e) {}
+    return normalized;
+  },
+
+  async savePengawasRegistry(regObj) {
+    const def = this._defaultPengawasRegistry();
+    const clean = {
+      config: { ...def.config, ...((regObj && regObj.config) || {}) },
+      accounts: Array.isArray(regObj && regObj.accounts) ? regObj.accounts : [],
+      updated_at: new Date().toISOString()
+    };
+    try { localStorage.setItem('CBT_PENGAWAS_REGISTRY_V1', JSON.stringify(clean)); } catch (e) {}
+
+    if (this.isLocal() || this.isPhp()) {
+      return clean;
+    }
+
+    const shards = (window.getSupabaseShards && window.getSupabaseShards()) || [];
+    const clients = shards.length > 0 ? shards.map(s => s.client).filter(Boolean) : [window.supabaseClient].filter(Boolean);
+    await Promise.allSettled(clients.map(c => this._writePengawasRegistryToSysRow(c, clean)));
+    return clean;
+  },
+
+  async verifyPengawasLogin(kodeInput, namaPengawas = '') {
+    const cleanKode = String(kodeInput || '').trim().toUpperCase();
+    if (!cleanKode) {
+      throw new Error('Kode Akses / PIN Pengawas wajib diisi.');
+    }
+
+    const reg = await this.getPengawasRegistry();
+    const cfg = reg.config || {};
+    const cleanNama = String(namaPengawas || '').trim();
+
+    // 1. Cek daftar akun pengawas per Ruang / Multi-Kelas terlebih dahulu
+    const matchedAcc = (reg.accounts || []).find(acc =>
+      acc && acc.aktif !== false && String(acc.kode_akses || '').trim().toUpperCase() === cleanKode
+    );
+
+    if (matchedAcc) {
+      await this.ensureAllShardsAdminAuth();
+      return {
+        role: 'pengawas',
+        accountId: matchedAcc.id,
+        kode_akses: matchedAcc.kode_akses,
+        nama_akun: matchedAcc.nama_akun || 'Pengawas Ruang',
+        nama_pengawas: cleanNama || matchedAcc.nama_akun || 'Pengawas Ruang',
+        mode_cakupan: matchedAcc.mode_cakupan || 'fleksibel',
+        ruang_list: Array.isArray(matchedAcc.ruang_list) ? matchedAcc.ruang_list : [],
+        kelas_list: Array.isArray(matchedAcc.kelas_list) ? matchedAcc.kelas_list : [],
+        sesi_filter: matchedAcc.sesi_filter || '',
+        config: cfg,
+        login_at: new Date().toISOString()
+      };
+    }
+
+    // 2. Cek PIN Pengawas Umum Sekolah (Mode Fleksibel pilih Ruang / Multi-Kelas di HP)
+    if (cfg.pin_umum_aktif && cfg.pin_umum && cleanKode === String(cfg.pin_umum).trim().toUpperCase()) {
+      await this.ensureAllShardsAdminAuth();
+      return {
+        role: 'pengawas',
+        accountId: 'PIN_UMUM',
+        kode_akses: cleanKode,
+        nama_akun: 'Pengawas Ruang (PIN Umum)',
+        nama_pengawas: cleanNama || 'Pengawas Ruang',
+        mode_cakupan: 'fleksibel',
+        ruang_list: [],
+        kelas_list: [],
+        sesi_filter: '',
+        config: cfg,
+        login_at: new Date().toISOString()
+      };
+    }
+
+    throw new Error('Kode Akses / PIN Pengawas salah atau belum diaktifkan oleh Admin.');
+  },
+
+  // Paksa selesai 1 peserta secara aman & shard-aware (dipakai Admin maupun Pengawas Ruang)
+  async paksaSelesaiSatuPeserta(peserta, allPaketPreloaded = null) {
+    if (!peserta || !peserta.id) throw new Error('Data peserta tidak ditemukan.');
+    if (peserta.status_ujian === 'Sudah Ujian') {
+      throw new Error('Peserta ini sudah menyelesaikan ujian.');
+    }
+
+    const normJur = (raw) => {
+      const s = String(raw || '').toLowerCase().trim();
+      if (!s || s === 'semua' || s === 'semua jurusan') return 'semua';
+      if (s === 'akl' || s === 'akuntansi' || s.startsWith('akuntansi ')) return 'akl';
+      if (s === 'tkj' || s === 'tjkt') return 'tkj';
+      if (s === 'tkro' || s === 'tkr') return 'tkro';
+      if (s === 'tbsm' || s === 'tsm') return 'tbsm';
+      return s;
+    };
+
+    const matchKls = (pKelas, sKelas) => {
+      if (!pKelas || pKelas.toLowerCase() === 'semua') return { match: true, specificity: 0 };
+      if (!sKelas) return { match: false, specificity: 0 };
+      const s = sKelas.toLowerCase().trim();
+      const parts = pKelas.toLowerCase().split(',').map(x => x.trim()).filter(Boolean);
+      if (parts.includes(s)) return { match: true, specificity: 3 };
+      const sTok = s.split(/[\s\-_]+/);
+      const sGrade = (sTok[0] === 'kelas' ? sTok[1] : sTok[0]) || '';
+      for (const part of parts) {
+        const g = part.replace(/^tingkat[:\s]+/, '').trim();
+        if (['x', 'xi', 'xii', '10', '11', '12'].includes(g) && g === sGrade) {
+          return { match: true, specificity: 2 };
+        }
+      }
+      return { match: false, specificity: 0 };
+    };
+
+    const pakets = Array.isArray(allPaketPreloaded) && allPaketPreloaded.length > 0
+      ? allPaketPreloaded
+      : await this.getPaketList();
+    const now = new Date();
+    const sJur = normJur(peserta.jurusan);
+    const sKls = String(peserta.kelas || '').toLowerCase().trim();
+
+    let bestPaket = null;
+    let bestScore = -1;
+    for (const pk of (pakets || [])) {
+      const pJur = String(pk.jurusan || '').toLowerCase().trim();
+      const jurParts = pJur.split(',').map(normJur).filter(Boolean);
+      const jurOk = (!pJur || pJur === 'semua' || jurParts.includes('semua') || jurParts.includes(sJur));
+      const klsRes = matchKls(pk.kelas, sKls);
+      if ((jurOk || klsRes.specificity === 3) && klsRes.match) {
+        let sc = klsRes.specificity + ((pJur && pJur !== 'semua' && jurParts.includes(sJur)) ? 4 : 0);
+        if (pk.jadwal_mulai) {
+          const st = new Date(pk.jadwal_mulai);
+          const en = pk.jadwal_selesai ? new Date(pk.jadwal_selesai) : new Date('2099-12-31');
+          if (now >= st && now <= en) sc += 50;
+        }
+        const qCount = Number(pk.total_soal !== undefined ? pk.total_soal : (pk.soal_count || 0)) || 0;
+        if (qCount > 0) sc += 100;
+        if (sc > bestScore) {
+          bestScore = sc;
+          bestPaket = pk;
+        }
+      }
+    }
+
+    if (!bestPaket) {
+      throw new Error('Tidak ditemukan paket soal yang sesuai dengan kelas & jurusan peserta ini.');
+    }
+
+    const questions = await this.getSoalByPaket(bestPaket.id);
+    if (!questions || questions.length === 0) {
+      throw new Error('Paket soal peserta ini masih kosong (0 butir soal).');
+    }
+
+    const shardId = peserta._shardId || peserta._shard_id || null;
+    const client = (!this.isLocal() && !this.isPhp()) ? this.getClientForShard(shardId) : null;
+
+    let answers = [];
+    if (this.isLocal() || this.isPhp() || !client) {
+      answers = (await this.getJawabanList(peserta.id)) || [];
+    } else {
+      await this.ensureAdminAuth(client);
+      const { data: ansData } = await client.from('jawaban_peserta').select('*').eq('peserta_id', peserta.id);
+      answers = ansData || [];
+    }
+
+    let correct = 0;
+    let wrong = 0;
+    questions.forEach(s => {
+      const userAns = answers.find(a => String(a.soal_id) === String(s.id));
+      if (userAns && userAns.jawaban === s.jawaban_benar) correct++;
+      else wrong++;
+    });
+
+    const finalScore = parseFloat(((correct / questions.length) * 100).toFixed(2));
+    const nowIso = new Date().toISOString();
+
+    if (this.isLocal() || this.isPhp() || !client) {
+      await this.insertHasil(peserta.id, correct, wrong, finalScore, 'Selesai', nowIso, nowIso, bestPaket.id);
+      await this.updateStatusUjian(peserta.id, 'Sudah Ujian');
+    } else {
+      await this.executeWithAdminAuth(client, async (c) => {
+        const hasilRow = {
+          id: this.uuidv4(),
+          peserta_id: peserta.id,
+          paket_soal_id: bestPaket.id,
+          jumlah_benar: correct,
+          jumlah_salah: wrong,
+          nilai: finalScore,
+          status_kelulusan: 'Selesai',
+          waktu_mulai: nowIso,
+          waktu_selesai: nowIso
+        };
+        const { error: hErr } = await c.from('hasil_ujian').insert(hasilRow);
+        if (hErr) throw hErr;
+
+        const useTok = !this._hasNoSessionCol(c);
+        const uPayload = useTok
+          ? { status_ujian: 'Sudah Ujian', is_locked: false, active_session_token: null }
+          : { status_ujian: 'Sudah Ujian', is_locked: false };
+        const { error: uErr } = await c.from('peserta').update(uPayload).eq('id', peserta.id);
+        if (uErr && useTok && this._isMissingSessionColError(uErr)) {
+          this._markNoSessionCol(c);
+          await c.from('peserta').update({ status_ujian: 'Sudah Ujian', is_locked: false }).eq('id', peserta.id);
+        }
+      });
+    }
+
+    return { ok: true, paket: bestPaket.nama_paket, benar: correct, salah: wrong, nilai: finalScore };
+  },
 
   async _readSettingsFromSysRow(client) {
     const target = client || window.supabaseClient;
@@ -1673,6 +1973,18 @@ const DB = {
     }
   },
 
+  _noSessionColClients: typeof WeakSet !== 'undefined' ? new WeakSet() : null,
+
+  _hasNoSessionCol(client) {
+    return Boolean(client && this._noSessionColClients && this._noSessionColClients.has(client));
+  },
+
+  _markNoSessionCol(client) {
+    if (client && this._noSessionColClients) {
+      try { this._noSessionColClients.add(client); } catch (e) {}
+    }
+  },
+
   _isMissingSessionColError(err) {
     if (!err) return false;
     const code = String(err.code || '');
@@ -1692,16 +2004,19 @@ const DB = {
         localStorage.setItem('CBT_LOCAL_PESERTA', JSON.stringify(list));
       }
     } else {
-      const payload = shouldClearSession
+      const target = window.supabaseClient;
+      const useTokenCol = shouldClearSession && !this._hasNoSessionCol(target);
+      const payload = useTokenCol
         ? { status_ujian: status, active_session_token: null }
         : { status_ujian: status };
-      const { error } = await window.supabaseClient
+      const { error } = await target
         .from('peserta')
         .update(payload)
         .eq('id', pesertaId);
       if (error) {
-        if (shouldClearSession && this._isMissingSessionColError(error)) {
-          const { error: err2 } = await window.supabaseClient
+        if (useTokenCol && this._isMissingSessionColError(error)) {
+          this._markNoSessionCol(target);
+          const { error: err2 } = await target
             .from('peserta')
             .update({ status_ujian: status })
             .eq('id', pesertaId);
@@ -1727,7 +2042,7 @@ const DB = {
     }
 
     const target = clientOverride || window.supabaseClient;
-    if (!target) return { supported: false };
+    if (!target || this._hasNoSessionCol(target)) return { supported: false };
 
     try {
       const { error } = await target
@@ -1736,6 +2051,7 @@ const DB = {
         .eq('id', pesertaId);
       if (error) {
         if (this._isMissingSessionColError(error)) {
+          this._markNoSessionCol(target);
           return { supported: false };
         }
         // Coba sekali lagi dengan admin auth jika terkena RLS pada fallback session
@@ -1771,7 +2087,7 @@ const DB = {
     }
 
     const target = clientOverride || window.supabaseClient;
-    if (!target) return { supported: false, token: null };
+    if (!target || this._hasNoSessionCol(target)) return { supported: false, token: null };
 
     try {
       const { data, error } = await target
@@ -1781,6 +2097,7 @@ const DB = {
         .maybeSingle();
       if (error) {
         if (this._isMissingSessionColError(error)) {
+          this._markNoSessionCol(target);
           return { supported: false, token: null };
         }
         return { supported: false, token: null };
@@ -1789,6 +2106,82 @@ const DB = {
       return { supported: true, token: data.active_session_token || null };
     } catch (e) {
       return { supported: false, token: null };
+    }
+  },
+
+  // Ambil status live peserta (< 120 byte) untuk deteksi instan saat di-reset / dibuka kuncinya oleh Pengawas
+  async getPesertaLiveState(pesertaId, clientOverride = null) {
+    if (!pesertaId) return null;
+    if (this.isLocal()) {
+      const list = JSON.parse(localStorage.getItem('CBT_LOCAL_PESERTA')) || [];
+      const found = list.find(p => p.id === pesertaId);
+      if (!found) return null;
+      return {
+        status_ujian: found.status_ujian || 'Belum Ujian',
+        is_locked: Boolean(found.is_locked),
+        pelanggaran: parseInt(found.pelanggaran || 0),
+        active_session_token: found.active_session_token || null,
+        tokenSupported: true
+      };
+    }
+
+    const target = clientOverride || window.supabaseClient;
+    if (!target) return null;
+
+    try {
+      // Jika shard ini sudah diketahui belum memiliki kolom active_session_token, langsung query 3 kolom inti (hemat 1 round-trip!)
+      if (this._hasNoSessionCol(target)) {
+        const { data: dFast, error: eFast } = await target
+          .from('peserta')
+          .select('status_ujian, is_locked, pelanggaran')
+          .eq('id', pesertaId)
+          .maybeSingle();
+        if (eFast || !dFast) return null;
+        return {
+          status_ujian: dFast.status_ujian || 'Belum Ujian',
+          is_locked: Boolean(dFast.is_locked),
+          pelanggaran: parseInt(dFast.pelanggaran || 0),
+          active_session_token: null,
+          tokenSupported: false
+        };
+      }
+
+      const { data, error } = await target
+        .from('peserta')
+        .select('status_ujian, is_locked, pelanggaran, active_session_token')
+        .eq('id', pesertaId)
+        .maybeSingle();
+
+      if (error) {
+        if (this._isMissingSessionColError(error)) {
+          this._markNoSessionCol(target);
+          const { data: d2, error: e2 } = await target
+            .from('peserta')
+            .select('status_ujian, is_locked, pelanggaran')
+            .eq('id', pesertaId)
+            .maybeSingle();
+          if (e2 || !d2) return null;
+          return {
+            status_ujian: d2.status_ujian || 'Belum Ujian',
+            is_locked: Boolean(d2.is_locked),
+            pelanggaran: parseInt(d2.pelanggaran || 0),
+            active_session_token: null,
+            tokenSupported: false
+          };
+        }
+        return null;
+      }
+
+      if (!data) return null;
+      return {
+        status_ujian: data.status_ujian || 'Belum Ujian',
+        is_locked: Boolean(data.is_locked),
+        pelanggaran: parseInt(data.pelanggaran || 0),
+        active_session_token: data.active_session_token || null,
+        tokenSupported: true
+      };
+    } catch (e) {
+      return null;
     }
   },
 
@@ -2102,7 +2495,7 @@ const DB = {
       this.initLocalData();
       const list = JSON.parse(localStorage.getItem('CBT_LOCAL_SOAL')) || [];
       return list
-        .filter(s => s.paket_soal_id === paketId && s.id !== this.GURU_SYS_ROW_ID && s.id !== this.MASTER_SYS_ROW_ID && s.id !== this.PAKET_SYS_ROW_ID && s.id !== this.SETTINGS_SYS_ROW_ID && s.opsi_a !== '__CBT_SYS_GURU__' && s.opsi_a !== '__CBT_SYS_MASTER__' && s.opsi_a !== '__CBT_SYS_PAKET__' && s.opsi_a !== '__CBT_SYS_SETTINGS__')
+        .filter(s => s.paket_soal_id === paketId && s.id !== this.GURU_SYS_ROW_ID && s.id !== this.MASTER_SYS_ROW_ID && s.id !== this.PAKET_SYS_ROW_ID && s.id !== this.SETTINGS_SYS_ROW_ID && s.id !== this.PENGAWAS_SYS_ROW_ID && s.opsi_a !== '__CBT_SYS_GURU__' && s.opsi_a !== '__CBT_SYS_MASTER__' && s.opsi_a !== '__CBT_SYS_PAKET__' && s.opsi_a !== '__CBT_SYS_SETTINGS__' && s.opsi_a !== '__CBT_SYS_PENGAWAS__')
         .sort((a,b) => a.nomor - b.nomor);
     } else {
       const { data, error } = await window.supabaseClient
@@ -2111,7 +2504,7 @@ const DB = {
         .eq('paket_soal_id', paketId)
         .order('nomor', { ascending: true });
       if (error) throw error;
-      return (data || []).filter(s => s.id !== this.GURU_SYS_ROW_ID && s.id !== this.MASTER_SYS_ROW_ID && s.id !== this.PAKET_SYS_ROW_ID && s.id !== this.SETTINGS_SYS_ROW_ID && s.opsi_a !== '__CBT_SYS_GURU__' && s.opsi_a !== '__CBT_SYS_MASTER__' && s.opsi_a !== '__CBT_SYS_PAKET__' && s.opsi_a !== '__CBT_SYS_SETTINGS__' && s.nomor !== -999 && s.nomor !== -998 && s.nomor !== -997 && s.nomor !== -996);
+      return (data || []).filter(s => s.id !== this.GURU_SYS_ROW_ID && s.id !== this.MASTER_SYS_ROW_ID && s.id !== this.PAKET_SYS_ROW_ID && s.id !== this.SETTINGS_SYS_ROW_ID && s.id !== this.PENGAWAS_SYS_ROW_ID && s.opsi_a !== '__CBT_SYS_GURU__' && s.opsi_a !== '__CBT_SYS_MASTER__' && s.opsi_a !== '__CBT_SYS_PAKET__' && s.opsi_a !== '__CBT_SYS_SETTINGS__' && s.opsi_a !== '__CBT_SYS_PENGAWAS__' && s.nomor !== -999 && s.nomor !== -998 && s.nomor !== -997 && s.nomor !== -996 && s.nomor !== -995);
     }
   },
 
@@ -2884,14 +3277,14 @@ const DB = {
     if (this.isLocal()) {
       this.initLocalData();
       const list = JSON.parse(localStorage.getItem('CBT_LOCAL_SOAL')) || [];
-      return list.filter(s => s.id !== this.GURU_SYS_ROW_ID && s.id !== this.MASTER_SYS_ROW_ID && s.id !== this.PAKET_SYS_ROW_ID && s.id !== this.SETTINGS_SYS_ROW_ID && s.opsi_a !== '__CBT_SYS_GURU__' && s.opsi_a !== '__CBT_SYS_MASTER__' && s.opsi_a !== '__CBT_SYS_PAKET__' && s.opsi_a !== '__CBT_SYS_SETTINGS__' && s.nomor !== -999 && s.nomor !== -998 && s.nomor !== -997 && s.nomor !== -996);
+      return list.filter(s => s.id !== this.GURU_SYS_ROW_ID && s.id !== this.MASTER_SYS_ROW_ID && s.id !== this.PAKET_SYS_ROW_ID && s.id !== this.SETTINGS_SYS_ROW_ID && s.id !== this.PENGAWAS_SYS_ROW_ID && s.opsi_a !== '__CBT_SYS_GURU__' && s.opsi_a !== '__CBT_SYS_MASTER__' && s.opsi_a !== '__CBT_SYS_PAKET__' && s.opsi_a !== '__CBT_SYS_SETTINGS__' && s.opsi_a !== '__CBT_SYS_PENGAWAS__' && s.nomor !== -999 && s.nomor !== -998 && s.nomor !== -997 && s.nomor !== -996 && s.nomor !== -995);
     } else {
       const { data, error } = await window.supabaseClient
         .from('soal')
         .select('*')
         .order('nomor', { ascending: true });
       if (error) throw error;
-      return (data || []).filter(s => s.id !== this.GURU_SYS_ROW_ID && s.id !== this.MASTER_SYS_ROW_ID && s.id !== this.PAKET_SYS_ROW_ID && s.id !== this.SETTINGS_SYS_ROW_ID && s.opsi_a !== '__CBT_SYS_GURU__' && s.opsi_a !== '__CBT_SYS_MASTER__' && s.opsi_a !== '__CBT_SYS_PAKET__' && s.opsi_a !== '__CBT_SYS_SETTINGS__' && s.nomor !== -999 && s.nomor !== -998 && s.nomor !== -997 && s.nomor !== -996);
+      return (data || []).filter(s => s.id !== this.GURU_SYS_ROW_ID && s.id !== this.MASTER_SYS_ROW_ID && s.id !== this.PAKET_SYS_ROW_ID && s.id !== this.SETTINGS_SYS_ROW_ID && s.id !== this.PENGAWAS_SYS_ROW_ID && s.opsi_a !== '__CBT_SYS_GURU__' && s.opsi_a !== '__CBT_SYS_MASTER__' && s.opsi_a !== '__CBT_SYS_PAKET__' && s.opsi_a !== '__CBT_SYS_SETTINGS__' && s.opsi_a !== '__CBT_SYS_PENGAWAS__' && s.nomor !== -999 && s.nomor !== -998 && s.nomor !== -997 && s.nomor !== -996 && s.nomor !== -995);
     }
   },
 
@@ -3042,6 +3435,23 @@ const DB_PHP = {
 
   getPesertaSessionToken(pesertaId) {
     return DB.api('getPesertaSessionToken', { peserta_id: pesertaId });
+  },
+
+  async getPesertaLiveState(pesertaId) {
+    try {
+      const data = await DB.api('session', { role: 'peserta' });
+      const p = data && data.profile;
+      if (!p || (pesertaId && String(p.id) !== String(pesertaId))) return null;
+      return {
+        status_ujian: p.status_ujian || 'Belum Ujian',
+        is_locked: Boolean(p.is_locked),
+        pelanggaran: parseInt(p.pelanggaran || 0),
+        active_session_token: p.active_session_token || null,
+        tokenSupported: Object.prototype.hasOwnProperty.call(p, 'active_session_token')
+      };
+    } catch (e) {
+      return null;
+    }
   },
 
   resetPesertaLoginSession(pesertaId) {

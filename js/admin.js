@@ -11,6 +11,7 @@ let cetakKartuModalInstance = null;
 let aiGeneratorModalInstance = null;
 let guruFormModalInstance = null;
 let penugasanGuruModalInstance = null;
+let pengawasFormModalInstance = null;
 let importWordModalInstance = null;
 let wordImportedDataCache = [];
 let aiGeneratedQuestions = [];
@@ -55,6 +56,8 @@ document.addEventListener("DOMContentLoaded", async () => {
   if (guruModalEl) guruFormModalInstance = new bootstrap.Modal(guruModalEl);
   const penugasanGuruEl = document.getElementById('modal-penugasan-guru');
   if (penugasanGuruEl) penugasanGuruModalInstance = new bootstrap.Modal(penugasanGuruEl);
+  const pengawasModalEl = document.getElementById('pengawasFormModal');
+  if (pengawasModalEl) pengawasFormModalInstance = new bootstrap.Modal(pengawasModalEl);
   const wordModalEl = document.getElementById('importWordModal');
   if (wordModalEl) importWordModalInstance = new bootstrap.Modal(wordModalEl);
   initWordDropZone();
@@ -66,6 +69,8 @@ document.addEventListener("DOMContentLoaded", async () => {
   document.getElementById('form-peserta-crud').addEventListener('submit', handlePesertaCrudSubmit);
   const formGuruEl = document.getElementById('form-guru-crud');
   if (formGuruEl) formGuruEl.addEventListener('submit', handleGuruCrudSubmit);
+  const formPengawasEl = document.getElementById('form-pengawas-crud');
+  if (formPengawasEl) formPengawasEl.addEventListener('submit', handlePengawasCrudSubmit);
   document.getElementById('form-soal-crud').addEventListener('submit', handleSoalCrudSubmit);
   document.getElementById('form-paket-crud').addEventListener('submit', handlePaketCrudSubmit);
   document.getElementById('form-jurusan-quick').addEventListener('submit', handleQuickJurusanSubmit);
@@ -434,7 +439,7 @@ function applyGuruRoleUI() {
   }
 
   // Sembunyikan menu yang khusus Admin
-  ['nav-item-dashboard', 'nav-item-peserta', 'nav-item-guru', 'nav-item-kesiapan', 'nav-item-jurusan', 'nav-item-pengaturan'].forEach(id => {
+  ['nav-item-dashboard', 'nav-item-peserta', 'nav-item-pengawas', 'nav-item-guru', 'nav-item-kesiapan', 'nav-item-jurusan', 'nav-item-pengaturan'].forEach(id => {
     const el = document.getElementById(id);
     if (el) el.classList.add('d-none');
   });
@@ -659,7 +664,7 @@ function switchTab(tabId) {
     tabId = 'soal';
   }
   activeTab = tabId;
-  const sections = ['dashboard', 'peserta', 'guru', 'kesiapan', 'soal', 'jurusan', 'nilai', 'pengaturan'];
+  const sections = ['dashboard', 'peserta', 'pengawas', 'guru', 'kesiapan', 'soal', 'jurusan', 'nilai', 'pengaturan'];
   
   sections.forEach(sec => {
     const el = document.getElementById(`sec-${sec}`);
@@ -691,6 +696,8 @@ function switchTab(tabId) {
     toggleAutoRefresh(false);
     if (tabId === 'guru' && !isGuruMode()) {
       loadGuru();
+    } else if (tabId === 'pengawas' && !isGuruMode()) {
+      loadPengawasManagement();
     } else if (tabId === 'kesiapan' && !isGuruMode()) {
       loadKesiapanMonitoring(false);
     } else if (tabId === 'jurusan') {
@@ -2789,60 +2796,11 @@ async function paksaSelesaiUjian(id, name) {
   });
 
   if (result.isConfirmed) {
-    Swal.fire({ title: 'Mengkalkulasi...', didOpen: () => { Swal.showLoading(); } });
+    Swal.fire({ title: 'Mengkalkulasi...', allowOutsideClick: false, didOpen: () => { Swal.showLoading(); } });
     try {
-      // Logic for force submit: we calculate the score on admin side and insert it to hasil
       const p = allPeserta.find(item => item.id === id);
-      if (p.status_ujian === 'Sudah Ujian') throw new Error("Peserta ini sudah menyelesaikan ujian.");
-
-      let activePaket = null;
-      let bestScore = -1;
-      const studentJurusan = normalizeJurAlias(p.jurusan);
-      const studentKelas = (p.kelas || "").toLowerCase().trim();
-
-      for (const pk of allPaket) {
-        let pkJurusan = (pk.jurusan || "").toLowerCase().trim();
-        const jurParts = pkJurusan.split(',').map(x => normalizeJurAlias(x)).filter(Boolean);
-        const jurusanMatch = (pkJurusan === "" || pkJurusan === "semua" || jurParts.includes('semua') || jurParts.includes(studentJurusan));
-        const kelasResult = checkKelasMatch(pk.kelas, studentKelas);
-
-        if ((jurusanMatch || kelasResult.specificity === 3) && kelasResult.match) {
-          let score = 0;
-          if ((pkJurusan && pkJurusan !== "semua" && !jurParts.includes('semua') && jurParts.includes(studentJurusan)) || kelasResult.specificity === 3) {
-            score += 4;
-          }
-          score += kelasResult.specificity;
-          const soalCount = Number(pk.total_soal !== undefined ? pk.total_soal : (pk.soal_count || 0)) || 0;
-          if (soalCount > 0) score += 100; // utamakan paket yang sudah berisi soal
-          if (score > bestScore) {
-            bestScore = score;
-            activePaket = pk;
-          }
-        }
-      }
-      if (!activePaket) throw new Error("Tidak ada paket soal yang sesuai dengan jurusan & kelas peserta ini.");
-
-      const questions = await DB.getSoalByPaket(activePaket.id);
-      const answers = await DB.getJawabanList(id);
-      
-      let correct = 0;
-      let wrong = 0;
-      
-      questions.forEach(s => {
-        const userAns = answers ? answers.find(a => a.soal_id === s.id) : null;
-        if (userAns && userAns.jawaban === s.jawaban_benar) {
-          correct++;
-        } else {
-          wrong++;
-        }
-      });
-      
-      const score = parseFloat(((correct / questions.length) * 100).toFixed(2));
-      const status = '-';
-      
-      await DB.insertHasil(id, correct, wrong, score, status, new Date().toISOString(), new Date().toISOString());
-      await DB.updateStatusUjian(id, 'Sudah Ujian');
-      
+      if (!p) throw new Error("Data peserta tidak ditemukan.");
+      await DB.paksaSelesaiSatuPeserta(p, allPaket);
       Swal.fire('Berhasil', 'Ujian berhasil diselesaikan secara paksa.', 'success');
       await loadPeserta();
       await loadHasil();
@@ -10667,6 +10625,7 @@ async function hydrateAllPaketSoalCounts(force = false) {
           .neq('nomor', -998)
           .neq('nomor', -997)
           .neq('nomor', -996)
+          .neq('nomor', -995)
           .range(from, to);
         if (error) throw error;
         const rows = Array.isArray(data) ? data : [];
@@ -12082,3 +12041,608 @@ window.combineWacanaAndQuestion = combineWacanaAndQuestion;
 window.copyWacanaFromPrevSoal = copyWacanaFromPrevSoal;
 window.clearSoalWacanaInput = clearSoalWacanaInput;
 window.applyWacanaToSoalRangePrompt = applyWacanaToSoalRangePrompt;
+
+// =============================================================
+// MODUL MANAJEMEN PENGAWAS RUANG & KELAS CAMPURAN (v84)
+// =============================================================
+let pengawasRegistryCache = null;
+
+function makeRandomPinCode(prefix = '') {
+  const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+  let code = '';
+  for (let i = 0; i < 4; i++) {
+    code += chars.charAt(Math.floor(Math.random() * chars.length));
+  }
+  return prefix ? `${prefix}-${code}` : `P-${code}`;
+}
+
+function getPortalPengawasBaseUrl() {
+  try {
+    const loc = window.location;
+    const base = loc.href.split('?')[0].replace(/admin\.html.*$/i, '');
+    return `${base}pengawas.html`;
+  } catch (e) {
+    return 'pengawas.html';
+  }
+}
+
+async function loadPengawasManagement() {
+  if (isGuruMode()) return;
+  try {
+    if (!allPeserta || allPeserta.length === 0) {
+      allPeserta = (await DB.getPesertaList()) || [];
+    }
+    pengawasRegistryCache = await DB.getPengawasRegistry();
+    const cfg = pengawasRegistryCache.config || {};
+
+    const pinAktifEl = document.getElementById('cfg-pengawas-pin-aktif');
+    const pinValEl = document.getElementById('cfg-pengawas-pin-umum');
+    const allowResetEl = document.getElementById('cfg-pengawas-allow-reset-sesi');
+    const allowForceEl = document.getElementById('cfg-pengawas-allow-force-finish');
+
+    if (pinAktifEl) pinAktifEl.checked = cfg.pin_umum_aktif !== false;
+    if (pinValEl) pinValEl.value = cfg.pin_umum || 'CBT2026';
+    if (allowResetEl) allowResetEl.checked = cfg.izinkan_reset_sesi !== false;
+    if (allowForceEl) allowForceEl.checked = cfg.izinkan_paksa_selesai !== false;
+
+    renderPengawasTable();
+  } catch (err) {
+    console.error('Gagal memuat manajemen pengawas:', err);
+  }
+}
+
+function countStudentsMatchingPengawasAcc(acc) {
+  if (!acc) return 0;
+  const mode = acc.mode_cakupan || 'fleksibel';
+  if (mode === 'fleksibel') return (allPeserta || []).length;
+  const rSet = new Set((acc.ruang_list || []).map(x => String(x).trim().toUpperCase()).filter(Boolean));
+  const kSet = new Set((acc.kelas_list || []).map(x => String(x).trim().toUpperCase()).filter(Boolean));
+  const ses = String(acc.sesi_filter || '').trim().toLowerCase();
+
+  return (allPeserta || []).filter(p => {
+    if (ses && String(p.sesi || '').trim().toLowerCase() !== ses) return false;
+    if (mode === 'ruang' && rSet.size > 0) return rSet.has(String(p.ruang || '').trim().toUpperCase());
+    if (mode === 'kelas' && kSet.size > 0) return kSet.has(String(p.kelas || '').trim().toUpperCase());
+    return true;
+  }).length;
+}
+
+function getClassesInsideRuang(ruangList) {
+  const rSet = new Set((ruangList || []).map(x => String(x).trim().toUpperCase()).filter(Boolean));
+  if (rSet.size === 0) return [];
+  const kSet = new Set();
+  (allPeserta || []).forEach(p => {
+    if (rSet.has(String(p.ruang || '').trim().toUpperCase()) && p.kelas) {
+      kSet.add(String(p.kelas).trim().toUpperCase());
+    }
+  });
+  return Array.from(kSet).sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
+}
+
+function renderPengawasTable() {
+  const tbody = document.getElementById('tbody-pengawas-accounts');
+  if (!tbody) return;
+
+  const accounts = (pengawasRegistryCache && Array.isArray(pengawasRegistryCache.accounts))
+    ? pengawasRegistryCache.accounts
+    : [];
+
+  if (accounts.length === 0) {
+    tbody.innerHTML = `
+      <tr>
+        <td colspan="7" class="text-center py-4 text-muted">
+          Belum ada PIN khusus per Ruang/Kelas. Pengawas saat ini dapat langsung masuk menggunakan <strong>PIN Umum</strong> di atas, atau klik tombol <strong>Generate per Ruang</strong> / <strong>+ Buat Akun Ruang / Campuran</strong> di kanan atas.
+        </td>
+      </tr>
+    `;
+    return;
+  }
+
+  tbody.innerHTML = accounts.map((acc, idx) => {
+    const mode = acc.mode_cakupan || 'fleksibel';
+    let scopeBadges = '';
+    if (mode === 'ruang') {
+      const ruangs = acc.ruang_list || [];
+      const mixedKelas = getClassesInsideRuang(ruangs);
+      scopeBadges = ruangs.map(r => `<span class="badge bg-info-subtle text-dark border me-1"><i class="bi bi-door-open me-1"></i>${escapeHtml(r)}</span>`).join('') +
+        (mixedKelas.length > 0 ? `<div class="small text-muted mt-1" style="font-size:0.72rem;">Isi Kelas: ${escapeHtml(mixedKelas.join(', '))}</div>` : '');
+    } else if (mode === 'kelas') {
+      scopeBadges = (acc.kelas_list || []).map(k => `<span class="badge bg-primary-subtle text-primary border me-1 mb-1">${escapeHtml(k)}</span>`).join('');
+    } else {
+      scopeBadges = `<span class="badge bg-secondary-subtle text-dark border">Fleksibel (Pilih Ruang/Kelas di HP)</span>`;
+    }
+
+    const stuCount = countStudentsMatchingPengawasAcc(acc);
+
+    return `
+      <tr>
+        <td>${idx + 1}</td>
+        <td class="fw-bold text-dark">${escapeHtml(acc.nama_akun)}</td>
+        <td>
+          <span class="badge bg-warning-subtle text-danger border border-warning font-monospace fs-6 px-2 py-1">${escapeHtml(acc.kode_akses)}</span>
+        </td>
+        <td>${scopeBadges}</td>
+        <td><span class="badge bg-light text-dark border">${escapeHtml(acc.sesi_filter || 'Semua Sesi')}</span></td>
+        <td><span class="badge bg-success-subtle text-success border">${stuCount} Siswa</span></td>
+        <td class="text-center">
+          <div class="d-inline-flex gap-1">
+            <button class="btn btn-sm btn-outline-success py-1 px-2" title="Salin Link & PIN ke WhatsApp" onclick="copySinglePengawasWA('${escapeAttr(acc.id)}')">
+              <i class="bi bi-whatsapp"></i>
+            </button>
+            <button class="btn btn-sm btn-outline-primary py-1 px-2" title="Edit Akun Ruang" onclick="openPengawasFormModal('${escapeAttr(acc.id)}')">
+              <i class="bi bi-pencil"></i>
+            </button>
+            <button class="btn btn-sm btn-outline-danger py-1 px-2" title="Hapus" onclick="deletePengawasAcc('${escapeAttr(acc.id)}')">
+              <i class="bi bi-trash"></i>
+            </button>
+          </div>
+        </td>
+      </tr>
+    `;
+  }).join('');
+}
+
+function randomizeGeneralPengawasPin() {
+  const inp = document.getElementById('cfg-pengawas-pin-umum');
+  if (inp) inp.value = makeRandomPinCode('PGW');
+}
+
+async function savePengawasConfigFromUI() {
+  if (!pengawasRegistryCache) pengawasRegistryCache = await DB.getPengawasRegistry();
+  const pinAktif = document.getElementById('cfg-pengawas-pin-aktif')?.checked ?? true;
+  const pinVal = (document.getElementById('cfg-pengawas-pin-umum')?.value || 'CBT2026').trim().toUpperCase();
+  const allowReset = document.getElementById('cfg-pengawas-allow-reset-sesi')?.checked ?? true;
+  const allowForce = document.getElementById('cfg-pengawas-allow-force-finish')?.checked ?? true;
+
+  if (pinAktif && !pinVal) {
+    Swal.fire('PIN Kosong', 'Isi Kode PIN Umum terlebih dahulu.', 'warning');
+    return;
+  }
+
+  pengawasRegistryCache.config = {
+    pin_umum_aktif: pinAktif,
+    pin_umum: pinVal || 'CBT2026',
+    izinkan_reset_sesi: allowReset,
+    izinkan_paksa_selesai: allowForce
+  };
+
+  try {
+    await DB.savePengawasRegistry(pengawasRegistryCache);
+    Swal.fire({
+      toast: true,
+      position: 'top-end',
+      icon: 'success',
+      title: 'Pengaturan Pengawas Ruang berhasil disimpan ke semua server!',
+      showConfirmButton: false,
+      timer: 2200
+    });
+  } catch (err) {
+    Swal.fire('Gagal Menyimpan', err.message || 'Terjadi kesalahan.', 'error');
+  }
+}
+
+function randomizePengawasAccPin() {
+  const inp = document.getElementById('pengawas-acc-kode');
+  if (inp) inp.value = makeRandomPinCode('R');
+}
+
+function onPengawasScopeModeChange() {
+  const mode = document.querySelector('input[name="rad-pengawas-mode"]:checked')?.value || 'ruang';
+  const boxRuang = document.getElementById('box-pengawas-pilih-ruang');
+  const boxKelas = document.getElementById('box-pengawas-pilih-kelas');
+  if (boxRuang) boxRuang.classList.toggle('d-none', mode !== 'ruang');
+  if (boxKelas) boxKelas.classList.toggle('d-none', mode !== 'kelas');
+}
+
+function getAllUniqueRuangNames() {
+  const map = new Map();
+  (allPeserta || []).forEach(p => {
+    const r = String(p.ruang || '').trim();
+    if (r) {
+      const k = r.toUpperCase();
+      if (!map.has(k)) map.set(k, r);
+    }
+  });
+  return Array.from(map.values()).sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
+}
+
+function openPengawasFormModal(accId = '') {
+  const accounts = (pengawasRegistryCache && pengawasRegistryCache.accounts) || [];
+  const existing = accId ? accounts.find(a => String(a.id) === String(accId)) : null;
+
+  document.getElementById('pengawasModalTitle').innerHTML = existing
+    ? `<i class="bi bi-pencil-square text-primary me-2"></i>Edit Akun Pengawas Ruang`
+    : `<i class="bi bi-shield-plus text-primary me-2"></i>Buat Akun Pengawas Ruang / Campuran Kelas`;
+
+  document.getElementById('pengawas-acc-id').value = existing ? existing.id : '';
+  document.getElementById('pengawas-acc-nama').value = existing ? existing.nama_akun : '';
+  document.getElementById('pengawas-acc-kode').value = existing ? existing.kode_akses : makeRandomPinCode('R');
+  document.getElementById('pengawas-acc-sesi').value = existing ? (existing.sesi_filter || '') : '';
+
+  const mode = existing ? (existing.mode_cakupan || 'ruang') : 'ruang';
+  const rad = document.querySelector(`input[name="rad-pengawas-mode"][value="${mode}"]`);
+  if (rad) rad.checked = true;
+  onPengawasScopeModeChange();
+
+  // Render checklist Ruang
+  const selRuangs = new Set((existing?.ruang_list || []).map(x => String(x).trim().toUpperCase()));
+  const allRuangs = getAllUniqueRuangNames();
+  const rCont = document.getElementById('checklist-pengawas-ruang');
+  if (rCont) {
+    if (allRuangs.length === 0) {
+      rCont.innerHTML = `<span class="text-muted small">Kolom Ruang pada Data Peserta masih kosong. Gunakan mode <strong>Campuran Multi-Kelas</strong> atau ketik nama ruang di bawah.</span>`;
+    } else {
+      rCont.innerHTML = allRuangs.map((r, i) => `
+        <div class="form-check form-check-inline m-0 border rounded px-2 py-1 bg-white">
+          <input class="form-check-input chk-pengawas-ruang" type="checkbox" id="chk-pr-${i}" value="${escapeAttr(r)}"
+            ${selRuangs.has(r.toUpperCase()) ? 'checked' : ''} onchange="syncPengawasChecklistToInput('ruang')">
+          <label class="form-check-label small fw-semibold" for="chk-pr-${i}">${escapeHtml(r)}</label>
+        </div>
+      `).join('');
+    }
+  }
+  document.getElementById('inp-pengawas-ruang-manual').value = (existing?.ruang_list || []).join(', ');
+
+  // Render checklist Multi-Kelas
+  const selKelas = new Set((existing?.kelas_list || []).map(x => String(x).trim().toUpperCase()));
+  const allKls = getAllAvailableKelasNames();
+  const kCont = document.getElementById('checklist-pengawas-kelas');
+  if (kCont) {
+    if (allKls.length === 0) {
+      kCont.innerHTML = `<span class="text-muted small">Belum ada kelas terdaftar. Ketik nama kelas di kolom bawah.</span>`;
+    } else {
+      kCont.innerHTML = allKls.map((k, i) => `
+        <div class="form-check form-check-inline m-0 border rounded px-2 py-1 bg-white">
+          <input class="form-check-input chk-pengawas-kelas" type="checkbox" id="chk-pk-${i}" value="${escapeAttr(k)}"
+            ${selKelas.has(k.toUpperCase()) ? 'checked' : ''} onchange="syncPengawasChecklistToInput('kelas')">
+          <label class="form-check-label small fw-semibold" for="chk-pk-${i}">${escapeHtml(k)}</label>
+        </div>
+      `).join('');
+    }
+  }
+  document.getElementById('inp-pengawas-kelas-manual').value = (existing?.kelas_list || []).join(', ');
+
+  if (pengawasFormModalInstance) pengawasFormModalInstance.show();
+}
+
+function syncPengawasChecklistToInput(type) {
+  if (type === 'ruang') {
+    const vals = Array.from(document.querySelectorAll('.chk-pengawas-ruang:checked')).map(el => el.value);
+    document.getElementById('inp-pengawas-ruang-manual').value = vals.join(', ');
+  } else {
+    const vals = Array.from(document.querySelectorAll('.chk-pengawas-kelas:checked')).map(el => el.value);
+    document.getElementById('inp-pengawas-kelas-manual').value = vals.join(', ');
+  }
+}
+
+async function handlePengawasCrudSubmit(e) {
+  e.preventDefault();
+  if (!pengawasRegistryCache) pengawasRegistryCache = await DB.getPengawasRegistry();
+
+  const id = (document.getElementById('pengawas-acc-id')?.value || '').trim();
+  const nama = (document.getElementById('pengawas-acc-nama')?.value || '').trim();
+  const kode = (document.getElementById('pengawas-acc-kode')?.value || '').trim().toUpperCase();
+  const sesi = (document.getElementById('pengawas-acc-sesi')?.value || '').trim();
+  const mode = document.querySelector('input[name="rad-pengawas-mode"]:checked')?.value || 'ruang';
+
+  const ruangList = String(document.getElementById('inp-pengawas-ruang-manual')?.value || '')
+    .split(',').map(s => s.trim()).filter(Boolean);
+  const kelasList = String(document.getElementById('inp-pengawas-kelas-manual')?.value || '')
+    .split(',').map(s => s.trim().toUpperCase()).filter(Boolean);
+
+  if (!nama || !kode) {
+    Swal.fire('Data Belum Lengkap', 'Nama Ruang dan Kode PIN wajib diisi.', 'warning');
+    return;
+  }
+  if (mode === 'ruang' && ruangList.length === 0) {
+    Swal.fire('Ruang Belum Dipilih', 'Centang atau ketik minimal 1 Ruang Ujian.', 'warning');
+    return;
+  }
+  if (mode === 'kelas' && kelasList.length === 0) {
+    Swal.fire('Kelas Belum Dipilih', 'Centang minimal 1 Kelas yang ada di ruangan ini.', 'warning');
+    return;
+  }
+
+  const dup = (pengawasRegistryCache.accounts || []).find(a =>
+    String(a.id) !== String(id) && String(a.kode_akses || '').toUpperCase() === kode
+  );
+  if (dup) {
+    Swal.fire('Kode PIN Duplikat', `Kode PIN "${kode}" sudah dipakai untuk "${dup.nama_akun}". Gunakan kode lain.`, 'warning');
+    return;
+  }
+
+  const payload = {
+    id: id || DB.uuidv4(),
+    nama_akun: nama,
+    kode_akses: kode,
+    mode_cakupan: mode,
+    ruang_list: mode === 'ruang' ? ruangList : [],
+    kelas_list: mode === 'kelas' ? kelasList : [],
+    sesi_filter: sesi,
+    aktif: true,
+    created_at: new Date().toISOString()
+  };
+
+  if (!Array.isArray(pengawasRegistryCache.accounts)) pengawasRegistryCache.accounts = [];
+  const idx = pengawasRegistryCache.accounts.findIndex(a => String(a.id) === String(id));
+  if (idx !== -1) pengawasRegistryCache.accounts[idx] = payload;
+  else pengawasRegistryCache.accounts.push(payload);
+
+  try {
+    await DB.savePengawasRegistry(pengawasRegistryCache);
+    if (pengawasFormModalInstance) pengawasFormModalInstance.hide();
+    renderPengawasTable();
+    Swal.fire({ toast: true, position: 'top-end', icon: 'success', title: 'Akun Pengawas berhasil disimpan!', showConfirmButton: false, timer: 1800 });
+  } catch (err) {
+    Swal.fire('Gagal Menyimpan', err.message || 'Terjadi kesalahan.', 'error');
+  }
+}
+
+async function deletePengawasAcc(accId) {
+  if (!pengawasRegistryCache) return;
+  const target = (pengawasRegistryCache.accounts || []).find(a => String(a.id) === String(accId));
+  if (!target) return;
+
+  const ask = await Swal.fire({
+    title: 'Hapus PIN Pengawas?',
+    text: `Hapus kode akses untuk "${target.nama_akun}"?`,
+    icon: 'warning',
+    showCancelButton: true,
+    confirmButtonColor: '#dc3545',
+    confirmButtonText: 'Ya, Hapus',
+    cancelButtonText: 'Batal'
+  });
+  if (!ask.isConfirmed) return;
+
+  pengawasRegistryCache.accounts = (pengawasRegistryCache.accounts || []).filter(a => String(a.id) !== String(accId));
+  await DB.savePengawasRegistry(pengawasRegistryCache);
+  renderPengawasTable();
+}
+
+async function clearAllPengawasAccounts() {
+  if (!pengawasRegistryCache || !(pengawasRegistryCache.accounts || []).length) {
+    Swal.fire('Info', 'Daftar PIN ruang sudah kosong.', 'info');
+    return;
+  }
+  const ask = await Swal.fire({
+    title: 'Hapus Semua PIN Ruang?',
+    text: 'Seluruh kode PIN ruang spesifik di tabel ini akan dikosongkan (PIN Umum tetap aman).',
+    icon: 'warning',
+    showCancelButton: true,
+    confirmButtonColor: '#dc3545',
+    confirmButtonText: 'Ya, Kosongkan',
+    cancelButtonText: 'Batal'
+  });
+  if (!ask.isConfirmed) return;
+
+  pengawasRegistryCache.accounts = [];
+  await DB.savePengawasRegistry(pengawasRegistryCache);
+  renderPengawasTable();
+}
+
+async function generatePengawasAutoByRuang() {
+  if (!pengawasRegistryCache) pengawasRegistryCache = await DB.getPengawasRegistry();
+  const ruangs = getAllUniqueRuangNames();
+  if (ruangs.length === 0) {
+    Swal.fire(
+      'Kolom Ruang Belum Terisi',
+      'Data Peserta Anda belum memiliki isi pada kolom "Ruang". Anda dapat klik "Generate per Kelas" atau "+ Buat Akun Ruang / Campuran" untuk menggabungkan beberapa kelas ke dalam 1 ruangan.',
+      'info'
+    );
+    return;
+  }
+
+  const existingRuangSet = new Set();
+  (pengawasRegistryCache.accounts || []).forEach(a => {
+    if (a.mode_cakupan === 'ruang') {
+      (a.ruang_list || []).forEach(r => existingRuangSet.add(String(r).trim().toUpperCase()));
+    }
+  });
+
+  let added = 0;
+  ruangs.forEach((r, idx) => {
+    if (existingRuangSet.has(r.toUpperCase())) return;
+    const cleanCodePrefix = 'R' + String(idx + 1).padStart(2, '0');
+    pengawasRegistryCache.accounts.push({
+      id: DB.uuidv4(),
+      nama_akun: /^ruang/i.test(r) ? `Pengawas ${r}` : `Pengawas Ruang ${r}`,
+      kode_akses: makeRandomPinCode(cleanCodePrefix),
+      mode_cakupan: 'ruang',
+      ruang_list: [r],
+      kelas_list: [],
+      sesi_filter: '',
+      aktif: true,
+      created_at: new Date().toISOString()
+    });
+    added++;
+  });
+
+  await DB.savePengawasRegistry(pengawasRegistryCache);
+  renderPengawasTable();
+  Swal.fire('Berhasil!', added > 0 ? `Berhasil membuat ${added} kode PIN Pengawas otomatis berdasarkan Ruang Ujian.` : 'Seluruh Ruang Ujian sudah memiliki PIN Pengawas.', 'success');
+}
+
+async function generatePengawasAutoByKelas() {
+  if (!pengawasRegistryCache) pengawasRegistryCache = await DB.getPengawasRegistry();
+  const kelasAll = getAllAvailableKelasNames();
+  if (kelasAll.length === 0) {
+    Swal.fire('Data Kelas Kosong', 'Belum ada data kelas terdaftar.', 'info');
+    return;
+  }
+
+  const existingKlsSet = new Set();
+  (pengawasRegistryCache.accounts || []).forEach(a => {
+    if (a.mode_cakupan === 'kelas' && (a.kelas_list || []).length === 1) {
+      existingKlsSet.add(String(a.kelas_list[0]).trim().toUpperCase());
+    }
+  });
+
+  let added = 0;
+  kelasAll.forEach((k) => {
+    if (existingKlsSet.has(k.toUpperCase())) return;
+    const shortPref = k.replace(/[^A-Z0-9]/gi, '').slice(0, 4).toUpperCase() || 'KLS';
+    pengawasRegistryCache.accounts.push({
+      id: DB.uuidv4(),
+      nama_akun: `Pengawas Kelas ${k}`,
+      kode_akses: makeRandomPinCode(shortPref),
+      mode_cakupan: 'kelas',
+      ruang_list: [],
+      kelas_list: [k],
+      sesi_filter: '',
+      aktif: true,
+      created_at: new Date().toISOString()
+    });
+    added++;
+  });
+
+  await DB.savePengawasRegistry(pengawasRegistryCache);
+  renderPengawasTable();
+  Swal.fire('Berhasil!', added > 0 ? `Berhasil membuat ${added} kode PIN Pengawas per Kelas.` : 'Seluruh Kelas sudah memiliki PIN Pengawas.', 'success');
+}
+
+async function copyPortalPengawasUrl() {
+  if (!pengawasRegistryCache) pengawasRegistryCache = await DB.getPengawasRegistry();
+  const url = getPortalPengawasBaseUrl();
+  const cfg = pengawasRegistryCache.config || {};
+  const lines = [
+    `*PORTAL PENGAWAS RUANG UJIAN CBT*`,
+    `🔗 Link Portal: ${url}`,
+    cfg.pin_umum_aktif ? `🔑 PIN Pengawas Umum: *${cfg.pin_umum || 'CBT2026'}*` : '',
+    ``,
+    `Bapak/Ibu Pengawas dapat membuka link di atas melalui HP untuk melihat *Token Pembebas Live*, *Membuka Kunci Pelanggaran*, *Bantu Pindah HP Siswa*, dan *Menyalin Absensi Ruang*.`
+  ].filter(Boolean).join('\n');
+
+  try {
+    await navigator.clipboard.writeText(lines);
+    Swal.fire({ icon: 'success', title: 'Pesan WhatsApp Disalin!', text: 'Silakan Paste langsung ke grup WhatsApp Bapak/Ibu Pengawas.', timer: 2200, showConfirmButton: false });
+  } catch (e) {
+    Swal.fire({ title: 'Salin Link Pengawas', input: 'textarea', inputValue: lines });
+  }
+}
+
+async function copySinglePengawasWA(accId) {
+  const acc = (pengawasRegistryCache?.accounts || []).find(a => String(a.id) === String(accId));
+  if (!acc) return;
+  const directUrl = `${getPortalPengawasBaseUrl()}?kode=${encodeURIComponent(acc.kode_akses)}`;
+  const scopeStr = acc.mode_cakupan === 'ruang'
+    ? `Ruang: ${(acc.ruang_list || []).join(', ')}`
+    : acc.mode_cakupan === 'kelas'
+      ? `Kelas: ${(acc.kelas_list || []).join(', ')}`
+      : 'Fleksibel';
+
+  const msg = [
+    `*AKSES ${acc.nama_akun.toUpperCase()}*`,
+    `🏫 Cakupan: ${scopeStr}`,
+    `🔑 Kode PIN: *${acc.kode_akses}*`,
+    `🔗 Klik Login Cepat: ${directUrl}`
+  ].join('\n');
+
+  try {
+    await navigator.clipboard.writeText(msg);
+    Swal.fire({ toast: true, position: 'top-end', icon: 'success', title: `Akses "${acc.nama_akun}" disalin ke clipboard!`, showConfirmButton: false, timer: 2000 });
+  } catch (e) {
+    Swal.fire({ title: 'Salin Akses Ruang', input: 'textarea', inputValue: msg });
+  }
+}
+
+function cetakKartuPengawasRuang() {
+  const cfg = pengawasRegistryCache?.config || {};
+  const accounts = [...(pengawasRegistryCache?.accounts || [])];
+
+  // Jika belum ada akun spesifik tapi PIN umum aktif, cetak kartu PIN Umum
+  if (accounts.length === 0 && cfg.pin_umum_aktif) {
+    accounts.push({
+      id: 'PIN_UMUM',
+      nama_akun: 'Kartu Akses Pengawas Ruang (PIN Umum)',
+      kode_akses: cfg.pin_umum || 'CBT2026',
+      mode_cakupan: 'fleksibel',
+      ruang_list: [],
+      kelas_list: [],
+      sesi_filter: ''
+    });
+  }
+
+  if (accounts.length === 0) {
+    Swal.fire('Belum Ada Kartu', 'Aktifkan PIN Umum atau buat Akun Pengawas Ruang terlebih dahulu.', 'info');
+    return;
+  }
+
+  const baseUrl = getPortalPengawasBaseUrl();
+  const savedBrand = (typeof getSavedCetakBrandingSync === 'function' ? getSavedCetakBrandingSync() : null) || {};
+  const schoolName = savedBrand.namaSekolah || 'SMK NEGERI 1 LEMPUING';
+
+  const cardsHtml = accounts.map(acc => {
+    const loginUrl = `${baseUrl}?kode=${encodeURIComponent(acc.kode_akses)}`;
+    const qrSrc = `https://api.qrserver.com/v1/create-qr-code/?size=140x140&data=${encodeURIComponent(loginUrl)}`;
+    let scopeDesc = 'Pilih Ruang / Gabungan Kelas di HP';
+    if (acc.mode_cakupan === 'ruang') {
+      const kInside = getClassesInsideRuang(acc.ruang_list);
+      scopeDesc = `Ruang: ${(acc.ruang_list || []).join(', ')}` + (kInside.length ? ` (${kInside.join(', ')})` : '');
+    } else if (acc.mode_cakupan === 'kelas') {
+      scopeDesc = `Kelas: ${(acc.kelas_list || []).join(', ')}`;
+    }
+
+    return `
+      <div class="pcard">
+        <div class="pcard-head">
+          <div class="fw-bold">${escapeHtml(schoolName)}</div>
+          <div class="sub">KARTU AKSES MEJA PENGAWAS CBT</div>
+        </div>
+        <div class="pcard-body">
+          <div class="info">
+            <div class="rtitle">${escapeHtml(acc.nama_akun)}</div>
+            <div class="rscope">${escapeHtml(scopeDesc)}</div>
+            <div class="pinbox">PIN: <span>${escapeHtml(acc.kode_akses)}</span></div>
+            <div class="rurl">${escapeHtml(baseUrl)}</div>
+            <div class="rnote">Scan QR dengan kamera HP untuk melihat <b>Token Pembebas</b>, <b>Buka Kunci</b>, &amp; <b>Pindah HP Siswa</b>.</div>
+          </div>
+          <img class="qr" src="${qrSrc}" alt="QR">
+        </div>
+      </div>
+    `;
+  }).join('');
+
+  const w = window.open('', '_blank');
+  if (!w) {
+    Swal.fire('Pop-up Diblokir', 'Izinkan pop-up browser untuk mencetak kartu pengawas.', 'warning');
+    return;
+  }
+  w.document.write(`<!DOCTYPE html><html><head><meta charset="utf-8"><title>Cetak Kartu Pengawas CBT</title>
+    <style>
+      body { font-family: Arial, sans-serif; margin: 10mm; color: #111; }
+      .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 6mm; }
+      .pcard { border: 1.5px solid #1e3a8a; border-radius: 8px; overflow: hidden; page-break-inside: avoid; }
+      .pcard-head { background: #1e3a8a; color: #fff; padding: 6px 10px; text-align: center; font-size: 11px; }
+      .pcard-head .sub { font-size: 9.5px; color: #fde68a; margin-top: 2px; font-weight: bold; }
+      .pcard-body { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 10px; }
+      .rtitle { font-weight: bold; font-size: 13px; color: #0f172a; margin-bottom: 3px; }
+      .rscope { font-size: 10.5px; color: #334155; margin-bottom: 6px; }
+      .pinbox { display: inline-block; background: #fef3c7; border: 1px dashed #d97706; padding: 3px 8px; border-radius: 5px; font-size: 12px; font-weight: bold; margin-bottom: 5px; }
+      .pinbox span { font-family: monospace; font-size: 14px; color: #dc2626; letter-spacing: 1.5px; }
+      .rurl { font-size: 9px; color: #2563eb; word-break: break-all; margin-bottom: 4px; }
+      .rnote { font-size: 9px; color: #64748b; line-height: 1.3; }
+      .qr { width: 78px; height: 78px; border: 1px solid #e2e8f0; padding: 2px; border-radius: 4px; flex-shrink: 0; }
+      .no-print { margin-bottom: 12px; text-align: right; }
+      @media print { .no-print { display: none; } body { margin: 6mm; } }
+    </style>
+  </head><body>
+    <div class="no-print"><button onclick="window.print()" style="padding:8px 16px;font-weight:bold;cursor:pointer;">🖨️ Cetak Kartu Pengawas Sekarang</button></div>
+    <div class="grid">${cardsHtml}</div>
+  </body></html>`);
+  w.document.close();
+}
+
+window.loadPengawasManagement = loadPengawasManagement;
+window.randomizeGeneralPengawasPin = randomizeGeneralPengawasPin;
+window.savePengawasConfigFromUI = savePengawasConfigFromUI;
+window.openPengawasFormModal = openPengawasFormModal;
+window.randomizePengawasAccPin = randomizePengawasAccPin;
+window.onPengawasScopeModeChange = onPengawasScopeModeChange;
+window.syncPengawasChecklistToInput = syncPengawasChecklistToInput;
+window.deletePengawasAcc = deletePengawasAcc;
+window.clearAllPengawasAccounts = clearAllPengawasAccounts;
+window.generatePengawasAutoByRuang = generatePengawasAutoByRuang;
+window.generatePengawasAutoByKelas = generatePengawasAutoByKelas;
+window.copyPortalPengawasUrl = copyPortalPengawasUrl;
+window.copySinglePengawasWA = copySinglePengawasWA;
+window.cetakKartuPengawasRuang = cetakKartuPengawasRuang;
