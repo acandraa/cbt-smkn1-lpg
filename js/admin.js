@@ -12068,26 +12068,12 @@ function getPortalPengawasBaseUrl() {
 
 async function loadPengawasManagement() {
   if (isGuruMode()) return;
-  try {
-    if (!allPeserta || allPeserta.length === 0) {
-      allPeserta = (await DB.getPesertaList()) || [];
-    }
-    pengawasRegistryCache = await DB.getPengawasRegistry();
-    const cfg = pengawasRegistryCache.config || {};
-
-    const pinAktifEl = document.getElementById('cfg-pengawas-pin-aktif');
-    const pinValEl = document.getElementById('cfg-pengawas-pin-umum');
-    const allowResetEl = document.getElementById('cfg-pengawas-allow-reset-sesi');
-    const allowForceEl = document.getElementById('cfg-pengawas-allow-force-finish');
-
-    if (pinAktifEl) pinAktifEl.checked = cfg.pin_umum_aktif !== false;
-    if (pinValEl) pinValEl.value = cfg.pin_umum || 'CBT2026';
-    if (allowResetEl) allowResetEl.checked = cfg.izinkan_reset_sesi !== false;
-    if (allowForceEl) allowForceEl.checked = cfg.izinkan_paksa_selesai !== false;
-
-    renderPengawasTable();
-  } catch (err) {
-    console.error('Gagal memuat manajemen pengawas:', err);
+  const url = getPortalPengawasBaseUrl();
+  const inp = document.getElementById('inp-direct-pengawas-url');
+  if (inp) inp.value = url;
+  const qrImg = document.getElementById('img-qr-direct-pengawas');
+  if (qrImg) {
+    qrImg.src = `https://api.qrserver.com/v1/create-qr-code/?size=160x160&data=${encodeURIComponent(url)}`;
   }
 }
 
@@ -12501,20 +12487,18 @@ async function generatePengawasAutoByKelas() {
 }
 
 async function copyPortalPengawasUrl() {
-  if (!pengawasRegistryCache) pengawasRegistryCache = await DB.getPengawasRegistry();
   const url = getPortalPengawasBaseUrl();
-  const cfg = pengawasRegistryCache.config || {};
   const lines = [
-    `*PORTAL PENGAWAS RUANG UJIAN CBT*`,
-    `🔗 Link Portal: ${url}`,
-    cfg.pin_umum_aktif ? `🔑 PIN Pengawas Umum: *${cfg.pin_umum || 'CBT2026'}*` : '',
+    `*APLIKASI PENGAWAS RUANG UJIAN CBT*`,
+    `🔗 Klik Link: ${url}`,
     ``,
-    `Bapak/Ibu Pengawas dapat membuka link di atas melalui HP untuk melihat *Token Pembebas Live*, *Membuka Kunci Pelanggaran*, *Bantu Pindah HP Siswa*, dan *Menyalin Absensi Ruang*.`
-  ].filter(Boolean).join('\n');
+    `Tanpa perlu login: Bapak/Ibu Pengawas cukup membuka link di atas lewat HP, lalu *ketuk Kelas yang sedang diawasi* (bisa pilih lebih dari 1 kelas jika 1 ruangan digabung).`,
+    `Di dalamnya langsung tampil *Token Pembebas Live*, tombol *Buka Kunci Pelanggaran*, *Pindah HP Siswa*, dan *Salin Absensi Ruang*.`
+  ].join('\n');
 
   try {
     await navigator.clipboard.writeText(lines);
-    Swal.fire({ icon: 'success', title: 'Pesan WhatsApp Disalin!', text: 'Silakan Paste langsung ke grup WhatsApp Bapak/Ibu Pengawas.', timer: 2200, showConfirmButton: false });
+    Swal.fire({ icon: 'success', title: 'Link Pengawas Disalin!', text: 'Silakan Paste langsung ke grup WhatsApp Bapak/Ibu Guru Pengawas.', timer: 2200, showConfirmButton: false });
   } catch (e) {
     Swal.fire({ title: 'Salin Link Pengawas', input: 'textarea', inputValue: lines });
   }
@@ -12546,68 +12530,35 @@ async function copySinglePengawasWA(accId) {
 }
 
 function cetakKartuPengawasRuang() {
-  const cfg = pengawasRegistryCache?.config || {};
-  const accounts = [...(pengawasRegistryCache?.accounts || [])];
-
-  // Jika belum ada akun spesifik tapi PIN umum aktif, cetak kartu PIN Umum
-  if (accounts.length === 0 && cfg.pin_umum_aktif) {
-    accounts.push({
-      id: 'PIN_UMUM',
-      nama_akun: 'Kartu Akses Pengawas Ruang (PIN Umum)',
-      kode_akses: cfg.pin_umum || 'CBT2026',
-      mode_cakupan: 'fleksibel',
-      ruang_list: [],
-      kelas_list: [],
-      sesi_filter: ''
-    });
-  }
-
-  if (accounts.length === 0) {
-    Swal.fire('Belum Ada Kartu', 'Aktifkan PIN Umum atau buat Akun Pengawas Ruang terlebih dahulu.', 'info');
-    return;
-  }
-
   const baseUrl = getPortalPengawasBaseUrl();
   const savedBrand = (typeof getSavedCetakBrandingSync === 'function' ? getSavedCetakBrandingSync() : null) || {};
   const schoolName = savedBrand.namaSekolah || 'SMK NEGERI 1 LEMPUING';
+  const qrSrc = `https://api.qrserver.com/v1/create-qr-code/?size=160x160&data=${encodeURIComponent(baseUrl)}`;
 
-  const cardsHtml = accounts.map(acc => {
-    const loginUrl = `${baseUrl}?kode=${encodeURIComponent(acc.kode_akses)}`;
-    const qrSrc = `https://api.qrserver.com/v1/create-qr-code/?size=140x140&data=${encodeURIComponent(loginUrl)}`;
-    let scopeDesc = 'Pilih Ruang / Gabungan Kelas di HP';
-    if (acc.mode_cakupan === 'ruang') {
-      const kInside = getClassesInsideRuang(acc.ruang_list);
-      scopeDesc = `Ruang: ${(acc.ruang_list || []).join(', ')}` + (kInside.length ? ` (${kInside.join(', ')})` : '');
-    } else if (acc.mode_cakupan === 'kelas') {
-      scopeDesc = `Kelas: ${(acc.kelas_list || []).join(', ')}`;
-    }
-
-    return `
-      <div class="pcard">
-        <div class="pcard-head">
-          <div class="fw-bold">${escapeHtml(schoolName)}</div>
-          <div class="sub">KARTU AKSES MEJA PENGAWAS CBT</div>
-        </div>
-        <div class="pcard-body">
-          <div class="info">
-            <div class="rtitle">${escapeHtml(acc.nama_akun)}</div>
-            <div class="rscope">${escapeHtml(scopeDesc)}</div>
-            <div class="pinbox">PIN: <span>${escapeHtml(acc.kode_akses)}</span></div>
-            <div class="rurl">${escapeHtml(baseUrl)}</div>
-            <div class="rnote">Scan QR dengan kamera HP untuk melihat <b>Token Pembebas</b>, <b>Buka Kunci</b>, &amp; <b>Pindah HP Siswa</b>.</div>
-          </div>
-          <img class="qr" src="${qrSrc}" alt="QR">
-        </div>
+  // Cetak 8 kartu QR siap gunting dalam 1 lembar A4 untuk ditaruh di meja pengawas ruangan
+  const items = Array.from({ length: 8 }, (_, idx) => `
+    <div class="pcard">
+      <div class="pcard-head">
+        <div class="fw-bold">${escapeHtml(schoolName)}</div>
+        <div class="sub">QR APLIKASI MEJA PENGAWAS UJIAN CBT</div>
       </div>
-    `;
-  }).join('');
+      <div class="pcard-body">
+        <div class="info">
+          <div class="rtitle">Aplikasi Pengawas Ruang (Tanpa Login)</div>
+          <div class="rurl">${escapeHtml(baseUrl)}</div>
+          <div class="rnote">1. Scan QR ini dengan kamera HP Bapak/Ibu Pengawas.<br>2. Ketuk <b>1 atau beberapa Kelas</b> yang ada di ruangan ini.<br>3. Lihat <b>Token Pembebas</b>, <b>Buka Kunci</b>, &amp; <b>Pindah HP Siswa</b>.</div>
+        </div>
+        <img class="qr" src="${qrSrc}" alt="QR">
+      </div>
+    </div>
+  `).join('');
 
   const w = window.open('', '_blank');
   if (!w) {
-    Swal.fire('Pop-up Diblokir', 'Izinkan pop-up browser untuk mencetak kartu pengawas.', 'warning');
+    Swal.fire('Pop-up Diblokir', 'Izinkan pop-up browser untuk mencetak lembar QR pengawas.', 'warning');
     return;
   }
-  w.document.write(`<!DOCTYPE html><html><head><meta charset="utf-8"><title>Cetak Kartu Pengawas CBT</title>
+  w.document.write(`<!DOCTYPE html><html><head><meta charset="utf-8"><title>Cetak QR Meja Pengawas CBT</title>
     <style>
       body { font-family: Arial, sans-serif; margin: 10mm; color: #111; }
       .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 6mm; }
@@ -12615,19 +12566,16 @@ function cetakKartuPengawasRuang() {
       .pcard-head { background: #1e3a8a; color: #fff; padding: 6px 10px; text-align: center; font-size: 11px; }
       .pcard-head .sub { font-size: 9.5px; color: #fde68a; margin-top: 2px; font-weight: bold; }
       .pcard-body { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 10px; }
-      .rtitle { font-weight: bold; font-size: 13px; color: #0f172a; margin-bottom: 3px; }
-      .rscope { font-size: 10.5px; color: #334155; margin-bottom: 6px; }
-      .pinbox { display: inline-block; background: #fef3c7; border: 1px dashed #d97706; padding: 3px 8px; border-radius: 5px; font-size: 12px; font-weight: bold; margin-bottom: 5px; }
-      .pinbox span { font-family: monospace; font-size: 14px; color: #dc2626; letter-spacing: 1.5px; }
-      .rurl { font-size: 9px; color: #2563eb; word-break: break-all; margin-bottom: 4px; }
-      .rnote { font-size: 9px; color: #64748b; line-height: 1.3; }
-      .qr { width: 78px; height: 78px; border: 1px solid #e2e8f0; padding: 2px; border-radius: 4px; flex-shrink: 0; }
+      .rtitle { font-weight: bold; font-size: 12.5px; color: #0f172a; margin-bottom: 4px; }
+      .rurl { font-size: 9.5px; color: #2563eb; word-break: break-all; margin-bottom: 5px; font-weight: bold; }
+      .rnote { font-size: 9.5px; color: #334155; line-height: 1.38; }
+      .qr { width: 82px; height: 82px; border: 1px solid #e2e8f0; padding: 2px; border-radius: 4px; flex-shrink: 0; }
       .no-print { margin-bottom: 12px; text-align: right; }
       @media print { .no-print { display: none; } body { margin: 6mm; } }
     </style>
   </head><body>
-    <div class="no-print"><button onclick="window.print()" style="padding:8px 16px;font-weight:bold;cursor:pointer;">🖨️ Cetak Kartu Pengawas Sekarang</button></div>
-    <div class="grid">${cardsHtml}</div>
+    <div class="no-print"><button onclick="window.print()" style="padding:8px 16px;font-weight:bold;cursor:pointer;">🖨️ Cetak Lembar QR Pengawas (A4)</button></div>
+    <div class="grid">${items}</div>
   </body></html>`);
   w.document.close();
 }

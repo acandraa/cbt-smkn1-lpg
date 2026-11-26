@@ -4,7 +4,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Portal Pengawas Ruang - CBT</title>
+  <title>Aplikasi Pengawas Ruang - CBT</title>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
   <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.1/font/bootstrap-icons.css">
@@ -35,6 +35,34 @@
       color: #dc2626;
     }
 
+    .kelas-pill-btn {
+      cursor: pointer;
+      user-select: none;
+      border-radius: 10px;
+      padding: 0.45rem 0.75rem;
+      font-size: 0.82rem;
+      font-weight: 600;
+      border: 1.5px solid #cbd5e1;
+      background: #ffffff;
+      color: #1e293b;
+      transition: all 0.14s ease;
+      display: inline-flex;
+      align-items: center;
+      gap: 0.4rem;
+    }
+
+    .kelas-pill-btn:hover {
+      border-color: #3b82f6;
+      background: #eff6ff;
+    }
+
+    .kelas-pill-btn.selected {
+      background: #2563eb;
+      border-color: #1d4ed8;
+      color: #ffffff;
+      box-shadow: 0 3px 10px rgba(37, 99, 235, 0.25);
+    }
+
     .student-proctor-card {
       background: #fff;
       border: 1px solid #e2e8f0;
@@ -53,11 +81,6 @@
       border-color: #f59e0b;
     }
 
-    .kelas-chip-check {
-      cursor: pointer;
-      user-select: none;
-    }
-
     .kpi-mini-card {
       border-radius: 12px;
       background: #fff;
@@ -73,91 +96,119 @@
   </style>
 </head>
 
-<body>
+<body class="pb-5">
 
-  <!-- ==================== VIEW 1: LOGIN PENGAWAS RUANG ==================== -->
-  <div id="view-pengawas-login" class="min-vh-100 d-flex align-items-center justify-content-center p-3"
-    style="background: linear-gradient(135deg, #0f172a 0%, #1e40af 100%);">
-    <div class="card border-0 shadow-lg rounded-4 p-4 w-100" style="max-width: 430px;">
-      <div class="text-center mb-3">
-        <div class="d-inline-flex align-items-center justify-content-center rounded-circle bg-primary bg-opacity-10 text-primary mb-2"
-          style="width: 58px; height: 58px;">
-          <i class="bi bi-shield-check fs-2"></i>
+  <!-- Top Navbar -->
+  <nav class="proctor-topbar py-2 px-3 sticky-top shadow-sm">
+    <div class="container-lg d-flex justify-content-between align-items-center gap-2 px-0">
+      <div class="min-w-0">
+        <div class="fw-bold d-flex align-items-center gap-2 text-truncate" style="font-size: 0.98rem;">
+          <i class="bi bi-shield-check text-warning"></i>
+          <span>Aplikasi Pengawas Ruang CBT</span>
         </div>
-        <h4 class="fw-bold text-dark mb-1">Portal Pengawas Ruang</h4>
-        <p class="text-muted small mb-0">Pantau kehadiran, lihat Token Pembebas, buka blokir, &amp; bantu pindah HP siswa di ruangan Anda</p>
+        <div class="text-white-50 text-truncate" style="font-size: 0.74rem;" id="lbl-proctor-subtitle">
+          Pilih kelas yang sedang Bapak/Ibu awasi
+        </div>
       </div>
-
-      <form id="form-login-pengawas" autocomplete="off">
-        <div class="mb-3">
-          <label for="inp-nama-pengawas" class="form-label small fw-semibold mb-1">Nama Bapak/Ibu Pengawas Bertugas</label>
-          <div class="input-group">
-            <span class="input-group-text bg-light"><i class="bi bi-person-badge text-primary"></i></span>
-            <input type="text" class="form-control" id="inp-nama-pengawas" placeholder="Contoh: Budi Santoso, S.Pd" required>
-          </div>
-        </div>
-
-        <div class="mb-3">
-          <label for="inp-kode-pengawas" class="form-label small fw-semibold mb-1">Kode Akses Ruang / PIN Pengawas</label>
-          <div class="input-group">
-            <span class="input-group-text bg-light"><i class="bi bi-key-fill text-warning"></i></span>
-            <input type="text" class="form-control fw-bold text-uppercase font-monospace" id="inp-kode-pengawas"
-              placeholder="Masukkan Kode / PIN..." style="letter-spacing: 2px;" required>
-          </div>
-          <div class="form-text" style="font-size: 0.74rem;">
-            Masukkan PIN Ruang (otomatis mengunci ruang/kelas) atau PIN Pengawas Umum dari Panitia CBT.
-          </div>
-        </div>
-
-        <div class="d-grid mb-3">
-          <button type="submit" class="btn btn-primary fw-bold py-2 rounded-3 shadow-sm" id="btn-submit-pengawas">
-            <i class="bi bi-box-arrow-in-right me-1"></i> Masuk Ruang Ujian
-          </button>
-        </div>
-      </form>
-
-      <div class="text-center border-top pt-3 d-flex justify-content-center gap-3 flex-wrap small">
-        <a href="index.html?v=84" class="text-decoration-none text-muted"><i class="bi bi-mortarboard me-1"></i>Login Siswa</a>
-        <span class="text-muted opacity-50">&bull;</span>
-        <a href="login-admin.html?v=84" class="text-decoration-none text-muted"><i class="bi bi-shield-lock me-1"></i>Admin &amp; Guru</a>
+      <div class="d-flex align-items-center gap-2 flex-shrink-0">
+        <button class="btn btn-sm btn-warning fw-bold py-1 px-2 text-dark" type="button" onclick="toggleKelasPickerBox()" id="btn-toggle-picker">
+          <i class="bi bi-ui-checks-grid me-1"></i>Pilih Kelas
+        </button>
+        <button class="btn btn-sm btn-light fw-semibold py-1 px-2" type="button" onclick="refreshProctorData(true)" title="Segarkan Data">
+          <i class="bi bi-arrow-clockwise" id="icon-proctor-refresh"></i> <span class="d-none d-sm-inline">Refresh</span>
+        </button>
       </div>
     </div>
-  </div>
+  </nav>
 
-  <!-- ==================== VIEW 2: PANEL PENGAWAS RUANG ==================== -->
-  <div id="view-pengawas-main" class="d-none pb-5">
-    <!-- Top Navbar -->
-    <nav class="proctor-topbar py-2 px-3 sticky-top shadow-sm">
-      <div class="container-lg d-flex justify-content-between align-items-center gap-2 px-0">
-        <div class="min-w-0">
-          <div class="fw-bold d-flex align-items-center gap-1 text-truncate" style="font-size: 0.95rem;">
-            <i class="bi bi-shield-check text-warning"></i>
-            <span id="lbl-proctor-room-title">Panel Pengawas Ruang</span>
-          </div>
-          <div class="text-white-50 text-truncate" style="font-size: 0.75rem;">
-            Pengawas: <strong class="text-white" id="lbl-proctor-name">-</strong>
-          </div>
+  <div class="container-lg py-3 px-3">
+
+    <!-- 1. PANEL PILIH BEBERAPA KELAS YANG DIAWASI (Langsung Tampil Tanpa Login) -->
+    <div class="card border-0 shadow-sm rounded-4 p-3 p-md-4 mb-3 border-top border-4 border-primary" id="card-kelas-picker">
+      <div class="d-flex justify-content-between align-items-start flex-wrap gap-2 mb-3">
+        <div>
+          <h5 class="fw-bold text-dark mb-1">
+            <i class="bi bi-check2-square text-primary me-2"></i>Pilih Kelas yang Sedang Bapak/Ibu Awasi
+          </h5>
+          <p class="text-muted small mb-0">
+            Ketuk <strong>1 atau beberapa kelas sekaligus</strong> jika di dalam satu ruangan terdapat campuran beberapa kelas.
+          </p>
         </div>
-        <div class="d-flex align-items-center gap-2 flex-shrink-0">
-          <button class="btn btn-sm btn-light fw-semibold py-1 px-2" onclick="refreshProctorData(true)" id="btn-proctor-refresh" title="Segarkan Data">
-            <i class="bi bi-arrow-clockwise" id="icon-proctor-refresh"></i> <span class="d-none d-sm-inline">Refresh</span>
+        <div class="d-flex gap-2">
+          <button type="button" class="btn btn-outline-danger btn-sm rounded-pill px-3 d-none" id="btn-clear-kelas" onclick="resetAllSelectedScope()">
+            <i class="bi bi-x-circle me-1"></i>Reset Pilihan
           </button>
-          <button class="btn btn-sm btn-outline-light py-1 px-2" onclick="logoutPengawas()" title="Keluar">
-            <i class="bi bi-box-arrow-right"></i> <span class="d-none d-sm-inline">Keluar</span>
+          <button type="button" class="btn btn-primary btn-sm rounded-pill px-3 fw-semibold d-none" id="btn-hide-picker" onclick="setKelasPickerVisible(false)">
+            <i class="bi bi-chevron-up me-1"></i>Selesai Pilih
           </button>
         </div>
       </div>
-    </nav>
 
-    <div class="container-lg py-3 px-3">
-      <!-- 1. Banner Token Pembebas / Token Ujian Live (Read-Only, Tanpa Tombol Acak) -->
+      <!-- Loading indikator saat pertama ambil daftar kelas -->
+      <div id="picker-loading-box" class="text-center py-4 text-muted">
+        <span class="spinner-border spinner-border-sm text-primary me-2"></span> Memuat daftar kelas peserta ujian...
+      </div>
+
+      <!-- Daftar tombol kelas per Tingkat (X, XI, XII) -->
+      <div id="picker-kelas-groups" class="d-none"></div>
+
+      <!-- Filter Tambahan Opsional (Ruang & Sesi) -->
+      <div class="row g-2 mt-2 pt-3 border-top align-items-end" id="picker-extra-filters">
+        <div class="col-md-5 col-sm-6 d-none" id="col-select-ruang">
+          <label class="form-label small fw-semibold text-muted mb-1" style="font-size: 0.74rem;">Atau Pilih Berdasarkan Nama Ruang:</label>
+          <select class="form-select form-select-sm" id="proctor-select-ruang" onchange="onRuangSelectChange(this.value)">
+            <option value="">-- Semua Ruang --</option>
+          </select>
+        </div>
+        <div class="col-md-3 col-sm-6">
+          <label class="form-label small fw-semibold text-muted mb-1" style="font-size: 0.74rem;">Filter Sesi (Opsional):</label>
+          <select class="form-select form-select-sm" id="proctor-select-sesi" onchange="onSesiSelectChange(this.value)">
+            <option value="">Semua Sesi</option>
+            <option value="Sesi 1">Sesi 1</option>
+            <option value="Sesi 2">Sesi 2</option>
+            <option value="Sesi 3">Sesi 3</option>
+          </select>
+        </div>
+        <div class="col-md-4 col-sm-12">
+          <label class="form-label small fw-semibold text-muted mb-1" style="font-size: 0.74rem;">Nama Pengawas (Opsional untuk Laporan WA):</label>
+          <input type="text" class="form-control form-control-sm" id="inp-proctor-name" placeholder="Ketik nama Bapak/Ibu..." oninput="saveProctorName(this.value)">
+        </div>
+      </div>
+    </div>
+
+    <!-- Info kosong sebelum pengawas memilih kelas -->
+    <div id="empty-no-class-selected" class="card border-0 shadow-sm rounded-4 p-4 text-center my-3">
+      <div class="mb-2 text-primary">
+        <i class="bi bi-hand-index-thumb-fill fs-1"></i>
+      </div>
+      <h6 class="fw-bold text-dark mb-1">Belum Ada Kelas yang Dipilih</h6>
+      <p class="text-muted small mb-0">
+        Silakan ketuk satu atau beberapa tombol <strong>Kelas</strong> di atas sesuai kelas yang ada di ruangan Bapak/Ibu, maka daftar siswa &amp; Token Pembebas akan langsung tampil di bawah ini.
+      </p>
+    </div>
+
+    <!-- ==================== AREA KERJA PENGAWAS (MUNCUL BEGITU KELAS DIPILIH) ==================== -->
+    <div id="proctor-active-workspace" class="d-none">
+
+      <!-- Bar Info Kelas Aktif yang Sedang Diawasi -->
+      <div class="d-flex justify-content-between align-items-center flex-wrap gap-2 mb-3 bg-white p-2 px-3 rounded-3 border shadow-sm">
+        <div class="d-flex align-items-center flex-wrap gap-1">
+          <span class="small fw-bold text-secondary me-1"><i class="bi bi-eye-fill text-primary me-1"></i>Mengawasi:</span>
+          <div id="active-selected-badges" class="d-inline-flex flex-wrap gap-1"></div>
+        </div>
+        <button type="button" class="btn btn-outline-primary btn-sm py-0 px-2 fw-semibold" style="font-size: 0.76rem;" onclick="setKelasPickerVisible(true)">
+          <i class="bi bi-pencil-square me-1"></i>Tambah / Ganti Kelas
+        </button>
+      </div>
+
+      <!-- Banner Token Ujian / Pembebas Live -->
       <div class="token-live-bar p-3 mb-3 shadow-sm d-flex justify-content-between align-items-center flex-wrap gap-2">
         <div>
           <div class="small fw-bold text-dark d-flex align-items-center gap-1">
-            <i class="bi bi-key-fill text-warning"></i> TOKEN UJIAN / PEMBEBAS AKTIF
+            <i class="bi bi-key-fill text-warning"></i> TOKEN UJIAN / TOKEN PEMBEBAS AKTIF
           </div>
           <div class="text-muted" style="font-size: 0.74rem;">
-            Bacakan token ini jika siswa mulai ujian atau terkunci 3x pelanggaran (atau klik <strong>Buka Kunci</strong> langsung di bawah).
+            Bacakan token ini ke siswa, atau langsung tekan tombol hijau <strong>Buka Kunci</strong> pada nama siswa yang terkunci di bawah.
           </div>
         </div>
         <div class="d-flex align-items-center gap-2 ms-auto">
@@ -169,80 +220,11 @@
         </div>
       </div>
 
-      <!-- 2. Pemilih Ruang & Multi-Kelas Campuran (Muncul di Mode Fleksibel; Info Statis di Mode Terkunci) -->
-      <div class="card border-0 shadow-sm rounded-4 p-3 mb-3">
-        <!-- Banner jika akun sudah dikunci Admin ke Ruang / Kelas tertentu -->
-        <div id="proctor-locked-scope-banner" class="d-none">
-          <div class="d-flex justify-content-between align-items-center flex-wrap gap-2">
-            <div>
-              <span class="badge bg-primary-subtle text-primary border border-primary-subtle px-2 py-1">
-                <i class="bi bi-geo-alt-fill me-1"></i>Cakupan Ruang Anda: <strong id="lbl-locked-scope-desc">-</strong>
-              </span>
-            </div>
-            <select class="form-select form-select-sm" id="proctor-sesi-select-locked" style="width: auto;" onchange="onProctorSesiChange(this.value)">
-              <option value="">Semua Sesi</option>
-              <option value="Sesi 1">Sesi 1</option>
-              <option value="Sesi 2">Sesi 2</option>
-              <option value="Sesi 3">Sesi 3</option>
-            </select>
-          </div>
-        </div>
-
-        <!-- Pemilih Fleksibel (mendukung Pilih Ruang ATAU Centang Banyak Kelas Campuran!) -->
-        <div id="proctor-flexible-scope-box" class="d-none">
-          <div class="d-flex justify-content-between align-items-center flex-wrap gap-2 mb-2">
-            <div class="fw-bold small text-dark">
-              <i class="bi bi-building-check text-primary me-1"></i>Pilih Ruangan / Gabungan Kelas yang Anda Awasi:
-            </div>
-            <button type="button" class="btn btn-outline-secondary btn-sm py-0 px-2" style="font-size: 0.74rem;" onclick="resetFlexibleScopeSelection()">
-              <i class="bi bi-x-circle me-1"></i>Reset Pilihan Ruang/Kelas
-            </button>
-          </div>
-
-          <div class="row g-2 align-items-center">
-            <div class="col-md-5 col-sm-6">
-              <label class="form-label small text-muted mb-1" style="font-size: 0.73rem;">Filter Berdasarkan Ruang Ujian:</label>
-              <select class="form-select form-select-sm fw-semibold" id="proctor-select-ruang" onchange="onFlexibleRuangChange()">
-                <option value="">-- Semua Ruang / Pilih Lewat Kelas --</option>
-              </select>
-            </div>
-            <div class="col-md-4 col-sm-6">
-              <label class="form-label small text-muted mb-1" style="font-size: 0.73rem;">Filter Sesi:</label>
-              <select class="form-select form-select-sm" id="proctor-select-sesi" onchange="onProctorSesiChange(this.value)">
-                <option value="">Semua Sesi</option>
-                <option value="Sesi 1">Sesi 1</option>
-                <option value="Sesi 2">Sesi 2</option>
-                <option value="Sesi 3">Sesi 3</option>
-              </select>
-            </div>
-            <div class="col-md-3 col-sm-12">
-              <label class="form-label small text-muted mb-1 d-none d-md-block" style="font-size: 0.73rem;">&nbsp;</label>
-              <button class="btn btn-outline-primary btn-sm w-100 fw-semibold" type="button" data-bs-toggle="collapse" data-bs-target="#collapseMultiKelas">
-                <i class="bi bi-ui-checks-grid me-1"></i>Centang Kelas (<span id="badge-selected-kelas-count">Semua</span>)
-              </button>
-            </div>
-          </div>
-
-          <!-- Multi-Kelas Checklist (untuk ruangan berisi campuran >1 kelas tanpa kolom Ruang) -->
-          <div class="collapse mt-2" id="collapseMultiKelas">
-            <div class="p-2 border rounded-3 bg-light">
-              <div class="d-flex justify-content-between align-items-center mb-2">
-                <small class="fw-semibold text-dark">Centang 1 atau beberapa kelas yang digabung di ruangan Anda:</small>
-                <button type="button" class="btn btn-link btn-sm p-0 text-decoration-none" style="font-size: 0.74rem;" onclick="clearFlexibleKelasChecks()">Hapus Centang</button>
-              </div>
-              <div class="d-flex flex-wrap gap-1" id="proctor-multi-kelas-container">
-                <!-- Populated dynamically -->
-              </div>
-            </div>
-          </div>
-        </div>
-      </div>
-
-      <!-- 3. Ringkasan Kehadiran Ruang (Klik untuk Filter Cepat) -->
+      <!-- 4 Kartu Ringkas Kehadiran Kelas yang Diawasi -->
       <div class="row g-2 mb-3">
         <div class="col-6 col-md-3">
           <div class="kpi-mini-card p-2 px-3 active-kpi" id="kpi-card-all" onclick="setProctorStatusFilter('')">
-            <div class="text-muted" style="font-size: 0.72rem;">Total Siswa Ruang</div>
+            <div class="text-muted" style="font-size: 0.72rem;">Total Siswa Diawasi</div>
             <div class="fs-4 fw-bold text-dark" id="kpi-proctor-total">0</div>
           </div>
         </div>
@@ -266,13 +248,13 @@
         </div>
       </div>
 
-      <!-- 4. Bar Pencarian & Tombol Salin Absensi WA -->
+      <!-- Bar Pencarian & Salin Absensi WA -->
       <div class="d-flex flex-wrap gap-2 justify-content-between align-items-center mb-3">
         <div class="input-group input-group-sm" style="max-width: 400px;">
           <span class="input-group-text bg-white"><i class="bi bi-search text-muted"></i></span>
           <input type="text" class="form-control" id="proctor-search-input"
-            placeholder="Ketik nama / nomor peserta / kelas..." oninput="renderProctorStudentList()">
-          <button class="btn btn-outline-secondary" type="button" onclick="document.getElementById('proctor-search-input').value=''; renderProctorStudentList();">
+            placeholder="Cari nama / nomor peserta..." oninput="renderWatchedStudents()">
+          <button class="btn btn-outline-secondary" type="button" onclick="document.getElementById('proctor-search-input').value=''; renderWatchedStudents();">
             <i class="bi bi-x"></i>
           </button>
         </div>
@@ -288,25 +270,21 @@
         </div>
       </div>
 
-      <!-- 5. Daftar Siswa di Ruangan Ini -->
-      <div id="proctor-student-list-container" class="d-flex flex-column gap-2">
-        <div class="text-center py-5 text-muted">
-          <span class="spinner-border spinner-border-sm me-1"></span> Memuat daftar peserta ruangan...
-        </div>
-      </div>
+      <!-- Daftar Siswa Kelas yang Diawasi -->
+      <div id="proctor-student-list-container" class="d-flex flex-column gap-2"></div>
     </div>
+
   </div>
 
-  <!-- Scripts (Ringan: Tanpa Chart.js / SheetJS / Mammoth) -->
+  <!-- Scripts Ringan -->
   <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
   <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 
-  <script src="js/config.js?v=84"></script>
-  <script src="js/supabase-config.js?v=84"></script>
-  <script src="js/db-adapter.js?v=84"></script>
-  <script src="js/pengawas.js?v=84"></script>
+  <script src="js/config.js?v=85"></script>
+  <script src="js/supabase-config.js?v=85"></script>
+  <script src="js/db-adapter.js?v=85"></script>
+  <script src="js/pengawas.js?v=85"></script>
 </body>
 
 </html>
-
