@@ -100,10 +100,12 @@
   // 4. Mode Supabase (Multi-Shard hingga 5 Akun / Proyek)
   // -------------------------------------------------------------
   const validShards = [];
-  const isAdminPage = /(admin|login-admin)\.html/i.test(window.location.pathname || '');
-  const isPublicMultiShardPage = /daftar-guru\.html/i.test(window.location.pathname || '');
-  const SHARD_ID_KEY = isAdminPage ? 'CBT_ADMIN_ACTIVE_SHARD_ID' : 'CBT_PESERTA_ACTIVE_SHARD_ID';
-  const SHARD_NAME_KEY = isAdminPage ? 'CBT_ADMIN_ACTIVE_SHARD_NAME' : 'CBT_PESERTA_ACTIVE_SHARD_NAME';
+  const pathNow = window.location.pathname || '';
+  const isAdminPage = /(admin|login-admin)(\.html)?/i.test(pathNow);
+  const isPengawasPage = /pengawas(\.html)?/i.test(pathNow);
+  const isPublicMultiShardPage = /(daftar-guru|pengawas)(\.html)?/i.test(pathNow);
+  const SHARD_ID_KEY = isAdminPage ? 'CBT_ADMIN_ACTIVE_SHARD_ID' : (isPengawasPage ? 'CBT_PENGAWAS_ACTIVE_SHARD_ID' : 'CBT_PESERTA_ACTIVE_SHARD_ID');
+  const SHARD_NAME_KEY = isAdminPage ? 'CBT_ADMIN_ACTIVE_SHARD_NAME' : (isPengawasPage ? 'CBT_PENGAWAS_ACTIVE_SHARD_NAME' : 'CBT_PESERTA_ACTIVE_SHARD_NAME');
 
   if (shardsConfig.length > 0) {
     shardsConfig.forEach((shard, index) => {
@@ -116,7 +118,9 @@
           try {
             const clientOpts = isAdminPage
               ? { auth: { storageKey: `cbt_admin_shard_${sId}`, persistSession: true } }
-              : { auth: { storageKey: `cbt_peserta_shard_${sId}`, storage: window.sessionStorage, persistSession: true } };
+              : isPengawasPage
+                ? { auth: { storageKey: `cbt_pengawas_shard_${sId}`, storage: window.sessionStorage, persistSession: true } }
+                : { auth: { storageKey: `cbt_peserta_shard_${sId}`, storage: window.sessionStorage, persistSession: true } };
             clientInstance = window.supabase.createClient(cUrl, cKey, clientOpts);
           } catch (err) {
             console.error(`Gagal menginisialisasi Supabase Shard [${sId}]:`, err);

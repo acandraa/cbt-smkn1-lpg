@@ -132,6 +132,7 @@
           </h5>
           <p class="text-muted small mb-0">
             Ketuk <strong>1 atau beberapa kelas sekaligus</strong> jika di dalam satu ruangan terdapat campuran beberapa kelas.
+            <span class="badge bg-success-subtle text-success border border-success-subtle ms-1" id="badge-server-sync-info">Memuat semua server...</span>
           </p>
         </div>
         <div class="d-flex gap-2">
@@ -142,6 +143,12 @@
             <i class="bi bi-chevron-up me-1"></i>Selesai Pilih
           </button>
         </div>
+      </div>
+
+      <!-- Filter Cepat Jurusan (Agar mudah menyaring per Jurusan maupun melihat Semua Jurusan) -->
+      <div id="picker-jurusan-bar" class="mb-3 pb-2 border-bottom d-none">
+        <div class="small fw-semibold text-muted mb-1" style="font-size: 0.73rem;">Saring Tampilan Tombol Kelas Berdasarkan Jurusan:</div>
+        <div class="d-flex flex-wrap gap-1" id="picker-jurusan-chips"></div>
       </div>
 
       <!-- Loading indikator saat pertama ambil daftar kelas -->
@@ -281,10 +288,10 @@
   <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 
-  <script src="js/config.js?v=85"></script>
-  <script src="js/supabase-config.js?v=85"></script>
-  <script src="js/db-adapter.js?v=85"></script>
-  <script src="js/pengawas.js?v=85"></script>
+  <script src="js/config.js?v=86"></script>
+  <script src="js/supabase-config.js?v=86"></script>
+  <script src="js/db-adapter.js?v=86"></script>
+  <script src="js/pengawas.js?v=86"></script>
 </body>
 
 </html>

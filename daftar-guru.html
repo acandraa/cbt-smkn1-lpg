@@ -136,7 +136,7 @@
           <p class="text-muted small mb-0">Bapak/Ibu Guru dapat membuat akun baru atau mengatur mata pelajaran yang diampu secara mandiri tanpa login admin.</p>
         </div>
         <div class="d-flex gap-2 flex-wrap">
-          <a href="pengawas.html?v=85" target="_blank" class="btn btn-success fw-bold rounded-pill px-3 shadow-sm d-flex align-items-center" title="Buka Aplikasi Pengawas Ruang tanpa login (pilih kelas yang diawasi)">
+          <a href="pengawas.html?v=86" target="_blank" class="btn btn-success fw-bold rounded-pill px-3 shadow-sm d-flex align-items-center" title="Buka Aplikasi Pengawas Ruang tanpa login (pilih kelas yang diawasi)">
             <i class="bi bi-shield-check me-1"></i>Aplikasi Pengawas Ruang
           </a>
           <button type="button" class="btn btn-warning text-dark fw-semibold rounded-pill px-3 shadow-sm d-flex align-items-center" onclick="cleanupOrphanAndDuplicatePakets()" title="Sinkronkan penugasan guru dengan Bank Soal & bersihkan paket yatim / duplikat kosong">
@@ -615,9 +615,9 @@
   <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   
-  <script src="js/config.js?v=85"></script>
-  <script src="js/supabase-config.js?v=85"></script>
-  <script src="js/db-adapter.js?v=85"></script>
+  <script src="js/config.js?v=86"></script>
+  <script src="js/supabase-config.js?v=86"></script>
+  <script src="js/db-adapter.js?v=86"></script>
 
   <script>
     let allGuruList = [];
@@ -916,7 +916,7 @@
           : `<span class="badge bg-light text-muted border" style="font-size: 0.72rem;"><i class="bi bi-magic me-1"></i>Otomatis</span>`;
 
         // 3. Tombol Aksi (+ Tambah Mapel & Login Guru)
-        const loginUrl = `login-admin.html?v=85&role=guru&username=${encodeURIComponent(g.username || '')}`;
+        const loginUrl = `login-admin.html?v=86&role=guru&username=${encodeURIComponent(g.username || '')}`;
 
         return `
           <tr>
@@ -3475,7 +3475,7 @@
         }
         if (!paketHtml) paketHtml = `<span class="text-muted small fst-italic">Belum ada paket soal</span>`;
 
-        const loginUrl = `login-admin.html?v=85&role=guru&username=${encodeURIComponent(row.username || '')}`;
+        const loginUrl = `login-admin.html?v=86&role=guru&username=${encodeURIComponent(row.username || '')}`;
 
         return `
           <tr>

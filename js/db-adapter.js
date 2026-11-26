@@ -1703,22 +1703,34 @@ const DB = {
   // -------------------------------------------------------------
   // PESERTA (STUDENTS) MANAGEMENT
   // -------------------------------------------------------------
-  async getPesertaList() {
+  async getPesertaList(options = {}) {
     if (this.isLocal()) {
       this.initLocalData();
       return JSON.parse(localStorage.getItem('CBT_LOCAL_PESERTA'));
     } else {
       const shards = (window.getSupabaseShards && window.getSupabaseShards()) || [];
-      const isUnified = window.isUnifiedSupabaseMode && window.isUnifiedSupabaseMode();
+      const isUnified = (options && options.forceAllShards) || (window.isUnifiedSupabaseMode && window.isUnifiedSupabaseMode());
 
       if (isUnified && shards.length > 1) {
         // Tarik data seluruh siswa dari ke-5 server secara paralel
         const results = await Promise.allSettled(shards.map(async (shard) => {
           if (!shard.client) return [];
-          const { data, error } = await shard.client
+          let { data, error } = await shard.client
             .from('peserta')
             .select('*')
             .order('created_at', { ascending: false });
+          // Jika terkena RLS atau belum terautentikasi di shard ini, auto-auth lalu coba ulang
+          if (error || (options && options.forceAllShards && (!data || data.length === 0))) {
+            await this.ensureAdminAuth(shard.client);
+            const retry = await shard.client
+              .from('peserta')
+              .select('*')
+              .order('created_at', { ascending: false });
+            if (!retry.error) {
+              data = retry.data;
+              error = null;
+            }
+          }
           if (error) {
             console.warn(`Gagal mengambil data peserta dari ${shard.name}:`, error);
             return [];

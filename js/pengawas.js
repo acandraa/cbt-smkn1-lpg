@@ -3,12 +3,15 @@
 const PENGAWAS_STATE_KEY = 'CBT_PENGAWAS_WATCH_STATE_V2';
 
 let proctorAllPeserta = [];
+let proctorMasterKelas = [];
+let proctorMasterJurusan = [];
 let proctorExamSettings = null;
 let proctorTokenTimer = null;
 let proctorAutoRefreshTimer = null;
 
 // Pilihan Kelas / Ruang yang sedang diawasi guru di HP ini
 let selectedKelasSet = new Set();
+let selectedPickerJurusan = '';
 let selectedRuang = '';
 let selectedSesi = '';
 let selectedStatusFilter = '';
@@ -145,13 +148,55 @@ async function refreshProctorData(showSpin = false) {
   if (showSpin && icon) icon.classList.add('spin-anim');
 
   try {
-    const [pesertaData, settingsData] = await Promise.all([
-      DB.getPesertaList(),
-      DB.getSettings().catch(() => null)
+    // Pastikan autentikasi seluruh 5 shard aktif sebelum menarik peserta gabungan lintas jurusan
+    await DB.ensureAllShardsAdminAuth();
+
+    const [pesertaData, settingsData, masterCat, kelasTbl, jurusanTbl] = await Promise.all([
+      DB.getPesertaList({ forceAllShards: true }),
+      DB.getSettings().catch(() => null),
+      (typeof DB.getMasterCatalog === 'function' ? DB.getMasterCatalog().catch(() => null) : Promise.resolve(null)),
+      (typeof DB.getKelasList === 'function' ? DB.getKelasList().catch(() => []) : Promise.resolve([])),
+      (typeof DB.getJurusanList === 'function' ? DB.getJurusanList().catch(() => []) : Promise.resolve([]))
     ]);
 
     proctorAllPeserta = Array.isArray(pesertaData) ? pesertaData : [];
     if (settingsData) proctorExamSettings = settingsData;
+
+    // Gabungkan seluruh Master Kelas & Jurusan dari ke-5 server + Master Registry + Data Peserta agar 100% lengkap!
+    const kSet = new Set();
+    const jSet = new Set();
+
+    if (masterCat) {
+      (masterCat.kelas || []).forEach(k => { if (k) kSet.add(String(k).trim().toUpperCase()); });
+      (masterCat.jurusan || []).forEach(j => { if (j) jSet.add(String(j).trim().toUpperCase()); });
+    }
+    (kelasTbl || []).forEach(k => {
+      const n = String(k?.nama_kelas || k?.nama || '').trim().toUpperCase();
+      if (n) kSet.add(n);
+    });
+    (jurusanTbl || []).forEach(j => {
+      const n = String(j?.nama_jurusan || j?.nama || '').trim().toUpperCase();
+      if (n) jSet.add(n);
+    });
+    proctorAllPeserta.forEach(p => {
+      const k = String(p.kelas || '').trim().toUpperCase();
+      const j = String(p.jurusan || '').trim().toUpperCase();
+      if (k) kSet.add(k);
+      if (j) jSet.add(j);
+    });
+
+    // Normalisasi duplikat alias AKUNTANSI -> AKL di filter jurusan bila AKL sudah ada
+    if (jSet.has('AKL') && jSet.has('AKUNTANSI')) {
+      jSet.delete('AKUNTANSI');
+    }
+
+    proctorMasterKelas = Array.from(kSet)
+      .filter(k => k && k !== 'SEMUA' && !k.startsWith('TINGKAT:'))
+      .sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
+
+    proctorMasterJurusan = Array.from(jSet)
+      .filter(j => j && j !== 'SEMUA')
+      .sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
 
     renderKelasPickerButtons();
     renderWatchedStudents();
@@ -175,9 +220,31 @@ function detectTingkatGroup(kelasStr) {
   return 'Kelas Lainnya';
 }
 
+function inferJurusanFromKelasName(kelasUpper, jurusanMapByKelas) {
+  if (jurusanMapByKelas && jurusanMapByKelas.has(kelasUpper)) {
+    return jurusanMapByKelas.get(kelasUpper);
+  }
+  const u = String(kelasUpper || '').toUpperCase();
+  for (const j of proctorMasterJurusan) {
+    const re = new RegExp(`(^|[\\s\\-_])${j.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}([\\s\\-_]|$)`, 'i');
+    if (re.test(u)) return j;
+  }
+  if (u.includes('AKUNTANSI')) return 'AKL';
+  if (u.includes('TJKT')) return 'TKJ';
+  return '';
+}
+
+function setPickerJurusanFilter(jur) {
+  selectedPickerJurusan = (selectedPickerJurusan === jur) ? '' : String(jur || '').toUpperCase();
+  renderKelasPickerButtons();
+}
+
 function renderKelasPickerButtons() {
   const loadBox = document.getElementById('picker-loading-box');
   const groupsContainer = document.getElementById('picker-kelas-groups');
+  const jurBar = document.getElementById('picker-jurusan-bar');
+  const jurChips = document.getElementById('picker-jurusan-chips');
+  const syncBadge = document.getElementById('badge-server-sync-info');
   const colRuang = document.getElementById('col-select-ruang');
   const ruangSel = document.getElementById('proctor-select-ruang');
   const btnClear = document.getElementById('btn-clear-kelas');
@@ -191,12 +258,21 @@ function renderKelasPickerButtons() {
   if (btnHide) btnHide.classList.toggle('d-none', !active);
 
   const kelasCounts = new Map();
+  const kelasJurusanMap = new Map();
   const ruangCounts = new Map();
+
+  // Inisialisasi seluruh master kelas agar kelas yang pesertanya belum di-import (misal Kelas XII) tetap tampil lengkap!
+  proctorMasterKelas.forEach(k => {
+    kelasCounts.set(k, 0);
+  });
 
   proctorAllPeserta.forEach(p => {
     const k = String(p.kelas || '').trim().toUpperCase();
+    let j = String(p.jurusan || '').trim().toUpperCase();
+    if (j === 'AKUNTANSI') j = 'AKL';
     if (k) {
       kelasCounts.set(k, (kelasCounts.get(k) || 0) + 1);
+      if (j && !kelasJurusanMap.has(k)) kelasJurusanMap.set(k, j);
     }
     const r = String(p.ruang || '').trim();
     if (r) {
@@ -205,6 +281,36 @@ function renderKelasPickerButtons() {
       ruangCounts.get(rKey).count++;
     }
   });
+
+  if (syncBadge) {
+    const shardCount = (window.getSupabaseShards && window.getSupabaseShards().length) || 1;
+    syncBadge.innerText = `${kelasCounts.size} Kelas • ${proctorMasterJurusan.length} Jurusan • ${proctorAllPeserta.length} Siswa (${shardCount} Server)`;
+  }
+
+  // Render chip filter Jurusan
+  if (jurBar && jurChips) {
+    if (proctorMasterJurusan.length > 0) {
+      jurBar.classList.remove('d-none');
+      let chipsHtml = `
+        <button type="button" class="btn btn-sm rounded-pill py-0 px-3 fw-semibold ${!selectedPickerJurusan ? 'btn-dark' : 'btn-outline-secondary'}"
+          style="font-size: 0.75rem;" onclick="setPickerJurusanFilter('')">
+          Semua Jurusan (${kelasCounts.size})
+        </button>
+      `;
+      proctorMasterJurusan.forEach(j => {
+        const isAct = selectedPickerJurusan === j;
+        chipsHtml += `
+          <button type="button" class="btn btn-sm rounded-pill py-0 px-3 fw-semibold ${isAct ? 'btn-primary' : 'btn-outline-primary'}"
+            style="font-size: 0.75rem;" onclick="setPickerJurusanFilter('${escapeAttrP(j)}')">
+            ${escapeHtmlP(j)}
+          </button>
+        `;
+      });
+      jurChips.innerHTML = chipsHtml;
+    } else {
+      jurBar.classList.add('d-none');
+    }
+  }
 
   // Render dropdown Ruang jika ada data ruang pada peserta
   if (colRuang && ruangSel) {
@@ -226,12 +332,19 @@ function renderKelasPickerButtons() {
 
   if (!groupsContainer) return;
 
-  const allKelas = Array.from(kelasCounts.keys()).sort((a, b) =>
+  let allKelas = Array.from(kelasCounts.keys()).sort((a, b) =>
     a.localeCompare(b, undefined, { numeric: true })
   );
 
+  // Filter tampilan tombol kelas jika pengawas memilih salah satu chip Jurusan (kelas yang sudah tercentang tetap ditampilkan agar terlihat!)
+  if (selectedPickerJurusan) {
+    allKelas = allKelas.filter(k =>
+      selectedKelasSet.has(k) || inferJurusanFromKelasName(k, kelasJurusanMap) === selectedPickerJurusan
+    );
+  }
+
   if (allKelas.length === 0) {
-    groupsContainer.innerHTML = `<div class="alert alert-warning small mb-0">Belum ada data kelas peserta di sistem.</div>`;
+    groupsContainer.innerHTML = `<div class="alert alert-warning small mb-0">Belum ada kelas untuk filter jurusan ini.</div>`;
     return;
   }
 
@@ -256,7 +369,7 @@ function renderKelasPickerButtons() {
         <button type="button" class="kelas-pill-btn ${isSel ? 'selected' : ''}" onclick="toggleWatchedKelas('${escapeAttrP(k)}')">
           <i class="bi ${isSel ? 'bi-check-circle-fill' : 'bi-circle'}"></i>
           <span>${escapeHtmlP(k)}</span>
-          <span class="badge ${isSel ? 'bg-white text-primary' : 'bg-light text-secondary border'} rounded-pill">${cnt}</span>
+          <span class="badge ${isSel ? 'bg-white text-primary' : (cnt > 0 ? 'bg-light text-secondary border' : 'bg-warning-subtle text-dark border')} rounded-pill">${cnt}</span>
         </button>
       `;
     }).join('');
@@ -679,6 +792,7 @@ async function copyProctorAttendanceWA() {
 
 window.refreshProctorData = refreshProctorData;
 window.toggleWatchedKelas = toggleWatchedKelas;
+window.setPickerJurusanFilter = setPickerJurusanFilter;
 window.onRuangSelectChange = onRuangSelectChange;
 window.onSesiSelectChange = onSesiSelectChange;
 window.resetAllSelectedScope = resetAllSelectedScope;
