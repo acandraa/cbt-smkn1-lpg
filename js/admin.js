@@ -1316,6 +1316,8 @@ function resetMonitoringFullFilter() {
   filterMonitoringTable();
 }
 
+let currentMonitoringFilteredPeserta = [];
+
 function filterMonitoringTable() {
   const tbody = document.getElementById('table-live-monitoring-body');
   const badgeCount = document.getElementById('badge-live-table-count');
@@ -1347,6 +1349,7 @@ function filterMonitoringTable() {
     return nameMatch && jurMatch && klsMatch && stMatch;
   });
 
+  currentMonitoringFilteredPeserta = filtered;
   if (badgeCount) badgeCount.innerText = `${filtered.length} Peserta`;
 
   if (filtered.length === 0) {
@@ -1486,10 +1489,209 @@ async function handleProctorResetSesi(pesertaId, nama) {
     try {
       await DB.resetPesertaSesi(pesertaId);
       Swal.fire('Berhasil', `Sesi ujian "${nama}" telah berhasil direset.`, 'success');
-      await loadDashboardStats();
+      await Promise.all([loadDashboardStats(true), loadPeserta(), loadHasil()]);
     } catch (err) {
       Swal.fire('Gagal Reset', err.message || 'Terjadi kesalahan.', 'error');
     }
+  }
+}
+
+function onResetSemuaModeChange() {
+  const checkedMode = document.querySelector('input[name="rad-reset-semua-mode"]:checked')?.value || 'sesi_aman';
+  const confirmBox = document.getElementById('box-reset-total-confirm');
+  if (confirmBox) {
+    if (checkedMode === 'reset_total') {
+      confirmBox.classList.remove('d-none');
+      setTimeout(() => document.getElementById('inp-reset-total-keyword')?.focus(), 50);
+    } else {
+      confirmBox.classList.add('d-none');
+    }
+  }
+}
+
+async function openResetSemuaPesertaModal(source = 'peserta') {
+  if (isGuruMode()) {
+    Swal.fire('Akses Ditolak', 'Hanya Administrator Utama / Proktor yang berwenang mereset seluruh peserta ujian.', 'warning');
+    return;
+  }
+
+  if (!allPeserta || allPeserta.length === 0) {
+    try {
+      allPeserta = await DB.getPesertaList();
+    } catch (e) {}
+  }
+
+  const totalCount = (allPeserta || []).length;
+  if (totalCount === 0) {
+    Swal.fire('Data Peserta Kosong', 'Belum ada peserta terdaftar di sistem.', 'info');
+    return;
+  }
+
+  const sedangCount = allPeserta.filter(p => p.status_ujian === 'Sedang Ujian').length;
+  const sudahCount = allPeserta.filter(p => p.status_ujian === 'Sudah Ujian').length;
+  const lockedCount = allPeserta.filter(p => Boolean(p.is_locked) || parseInt(p.pelanggaran || 0) > 0 || Boolean(p.active_session_token)).length;
+
+  // Cek apakah di tabel asal sedang ada filter aktif sehingga admin juga bisa memilih mereset yang terfilter saja
+  let subsetList = [];
+  let subsetLabel = '';
+  if (source === 'monitoring') {
+    const q = (document.getElementById('monitor-search-input')?.value || '').trim();
+    const jur = (document.getElementById('monitor-table-filter-jurusan')?.value || '').trim();
+    const kls = (document.getElementById('monitor-table-filter-kelas')?.value || '').trim();
+    const st = (document.getElementById('monitor-table-filter-status')?.value || '').trim();
+    if ((q || jur || kls || st) && currentMonitoringFilteredPeserta.length > 0 && currentMonitoringFilteredPeserta.length < totalCount) {
+      subsetList = currentMonitoringFilteredPeserta;
+      const parts = [kls, jur, st === 'PELANGGARAN' ? 'Terkunci/Pelanggaran' : st, q ? `"${q}"` : ''].filter(Boolean);
+      subsetLabel = parts.join(' • ') || 'Filter Tabel Monitoring';
+    }
+  } else {
+    const q = (document.getElementById('search-peserta')?.value || '').trim();
+    const jur = (document.getElementById('filter-jurusan-peserta')?.value || '').trim();
+    const kls = (document.getElementById('filter-kelas-peserta')?.value || '').trim();
+    const ses = (document.getElementById('filter-sesi-peserta')?.value || '').trim();
+    const st = (document.getElementById('filter-status-peserta')?.value || '').trim();
+    if ((q || jur || kls || ses || st) && currentFilteredPeserta.length > 0 && currentFilteredPeserta.length < totalCount) {
+      subsetList = currentFilteredPeserta;
+      const parts = [kls, jur, ses, st, q ? `"${q}"` : ''].filter(Boolean);
+      subsetLabel = parts.join(' • ') || 'Filter Tabel Peserta';
+    }
+  }
+
+  const scopeHtml = subsetList.length > 0 ? `
+    <div class="mb-3 p-2 rounded-3 border bg-light">
+      <div class="small fw-bold text-dark mb-1"><i class="bi bi-bullseye me-1 text-primary"></i>Cakupan Peserta yang Direset:</div>
+      <div class="form-check mb-1">
+        <input class="form-check-input" type="radio" name="rad-reset-semua-scope" id="rad-scope-all" value="all" checked>
+        <label class="form-check-label small fw-semibold" for="rad-scope-all">
+          Seluruh Peserta di Semua Server (<strong>${totalCount} siswa</strong>)
+        </label>
+      </div>
+      <div class="form-check">
+        <input class="form-check-input" type="radio" name="rad-reset-semua-scope" id="rad-scope-filtered" value="filtered">
+        <label class="form-check-label small fw-semibold text-primary" for="rad-scope-filtered">
+          Hanya Peserta Sesuai Filter Saat Ini: <strong>${subsetList.length} siswa</strong> <span class="text-muted">(${escapeHtml(subsetLabel)})</span>
+        </label>
+      </div>
+    </div>
+  ` : '';
+
+  const result = await Swal.fire({
+    title: 'Reset Semua Peserta Ujian',
+    width: 620,
+    html: `
+      <div class="text-start">
+        <div class="d-flex flex-wrap gap-2 justify-content-between bg-light border rounded-3 p-2 px-3 mb-3 small">
+          <span>Total: <strong class="text-dark">${totalCount}</strong></span>
+          <span>Sedang Ujian: <strong class="text-success">${sedangCount}</strong></span>
+          <span>Selesai: <strong class="text-primary">${sudahCount}</strong></span>
+          <span>Terkunci / Aktif HP: <strong class="text-danger">${lockedCount}</strong></span>
+        </div>
+
+        ${scopeHtml}
+
+        <div class="small fw-bold text-dark mb-2"><i class="bi bi-sliders me-1 text-danger"></i>Pilih Jenis Reset Peserta:</div>
+
+        <!-- Opsi 1: Reset Sesi & Status (Nilai Aman) -->
+        <label class="d-flex align-items-start gap-2 p-2 px-3 mb-2 border rounded-3 bg-white shadow-sm" style="cursor: pointer;" for="rad-reset-mode-sesi">
+          <input class="form-check-input mt-1 flex-shrink-0" type="radio" name="rad-reset-semua-mode" id="rad-reset-mode-sesi" value="sesi_aman" checked onchange="onResetSemuaModeChange()">
+          <div class="small">
+            <div class="fw-bold text-dark">1. Reset Sesi &amp; Status ke "Belum Ujian" <span class="badge bg-success-subtle text-success border border-success-subtle ms-1">Nilai Tetap Aman</span></div>
+            <div class="text-muted" style="font-size: 0.78rem;">Mengembalikan status peserta ke <strong>Belum Ujian</strong>, melepas kunci login HP, mereset pelanggaran ke 0, &amp; membersihkan jawaban sementara. <strong>Rekap nilai yang sudah selesai TIDAK terhapus.</strong></div>
+          </div>
+        </label>
+
+        <!-- Opsi 2: Reset Kunci Login & Buka Blokir Saja -->
+        <label class="d-flex align-items-start gap-2 p-2 px-3 mb-2 border rounded-3 bg-white shadow-sm" style="cursor: pointer;" for="rad-reset-mode-login">
+          <input class="form-check-input mt-1 flex-shrink-0" type="radio" name="rad-reset-semua-mode" id="rad-reset-mode-login" value="login_lock" onchange="onResetSemuaModeChange()">
+          <div class="small">
+            <div class="fw-bold text-primary">2. Reset Kunci Login HP &amp; Buka Blokir Saja <span class="badge bg-info-subtle text-dark border ms-1">Jawaban &amp; Nilai Utuh</span></div>
+            <div class="text-muted" style="font-size: 0.78rem;">Melepas kunci perangkat HP lama &amp; membuka semua blokir pelanggaran agar seluruh siswa bisa login kembali tanpa menghapus jawaban yang sedang dikerjakan.</div>
+          </div>
+        </label>
+
+        <!-- Opsi 3: Reset Total dari Awal (Hapus Jawaban & Nilai, Akun Siswa Utuh) -->
+        <label class="d-flex align-items-start gap-2 p-2 px-3 mb-2 border border-danger border-opacity-50 rounded-3 bg-danger-subtle bg-opacity-10 shadow-sm" style="cursor: pointer;" for="rad-reset-mode-total">
+          <input class="form-check-input mt-1 flex-shrink-0" type="radio" name="rad-reset-semua-mode" id="rad-reset-mode-total" value="reset_total" onchange="onResetSemuaModeChange()">
+          <div class="small">
+            <div class="fw-bold text-danger">3. Reset Total Ujian dari Awal (Hapus Jawaban &amp; Nilai) <span class="badge bg-warning text-dark ms-1">Akun Siswa Tetap Ada</span></div>
+            <div class="text-muted" style="font-size: 0.78rem;">Mengulang ujian dari nol: menghapus jawaban &amp; rekap nilai ujian peserta serta mengembalikan status ke <strong>Belum Ujian</strong>. Data akun, username, password, &amp; kelas peserta <strong>100% tetap aman</strong>.</div>
+          </div>
+        </label>
+
+        <div id="box-reset-total-confirm" class="d-none mt-2 p-2 rounded-3 bg-danger-subtle border border-danger text-center">
+          <div class="small fw-bold text-danger mb-1">Ketik kata <span class="badge bg-danger">RESET</span> untuk mengonfirmasi penghapusan nilai:</div>
+          <input type="text" id="inp-reset-total-keyword" class="form-control form-control-sm text-center fw-bold text-uppercase mx-auto"
+            style="max-width: 220px; letter-spacing: 2px;" placeholder="Ketik RESET..." autocomplete="off">
+        </div>
+      </div>
+    `,
+    showCancelButton: true,
+    confirmButtonColor: '#dc3545',
+    confirmButtonText: '<i class="bi bi-arrow-counterclockwise me-1"></i> Jalankan Reset Sekarang',
+    cancelButtonColor: '#6c757d',
+    cancelButtonText: 'Batal',
+    reverseButtons: true,
+    preConfirm: () => {
+      const mode = document.querySelector('input[name="rad-reset-semua-mode"]:checked')?.value || 'sesi_aman';
+      const scope = document.querySelector('input[name="rad-reset-semua-scope"]:checked')?.value || 'all';
+      if (mode === 'reset_total') {
+        const kw = (document.getElementById('inp-reset-total-keyword')?.value || '').trim().toUpperCase();
+        if (kw !== 'RESET') {
+          Swal.showValidationMessage('Ketik kata RESET dengan tepat untuk mengonfirmasi Reset Total!');
+          return false;
+        }
+      }
+      return { mode, scope };
+    }
+  });
+
+  if (!result.isConfirmed || !result.value) return;
+
+  const { mode, scope } = result.value;
+  const targetIds = (scope === 'filtered' && subsetList.length > 0)
+    ? subsetList.map(p => p.id)
+    : null;
+  const affectedCount = targetIds ? targetIds.length : totalCount;
+
+  Swal.fire({
+    title: 'Mereset Data Peserta...',
+    html: `Memproses reset untuk <strong>${affectedCount} peserta</strong> di seluruh server...`,
+    allowOutsideClick: false,
+    didOpen: () => { Swal.showLoading(); }
+  });
+
+  try {
+    await DB.resetSemuaPeserta({ mode, pesertaIds: targetIds });
+    if (mode === 'reset_total' && !targetIds) {
+      allHasil = [];
+    }
+    await Promise.all([
+      loadPeserta(),
+      loadHasil(),
+      loadDashboardStats(true)
+    ]);
+
+    const modeSummary = mode === 'login_lock'
+      ? 'Seluruh kunci login perangkat & blokir pelanggaran peserta berhasil dibuka (jawaban & nilai tetap utuh).'
+      : mode === 'reset_total'
+        ? 'Seluruh sesi, jawaban, & rekap nilai peserta telah direset bersih ke kondisi awal (akun siswa tetap utuh).'
+        : 'Status peserta berhasil dikembalikan ke "Belum Ujian" & kunci dibuka (rekap nilai sebelumnya tetap aman).';
+
+    Swal.fire({
+      icon: 'success',
+      title: 'Reset Peserta Berhasil!',
+      html: `
+        <div class="text-center">
+          <p class="mb-2 fw-semibold text-success"><i class="bi bi-check-circle-fill me-1"></i> ${affectedCount} Peserta Telah Direset</p>
+          <p class="small text-muted mb-0">${modeSummary}</p>
+        </div>
+      `,
+      confirmButtonColor: '#0d6efd',
+      confirmButtonText: 'Selesai'
+    });
+  } catch (err) {
+    console.error('Gagal reset semua peserta:', err);
+    Swal.fire('Gagal Mereset Peserta', err.message || 'Terjadi kesalahan saat mereset peserta.', 'error');
   }
 }
 
@@ -11831,6 +12033,8 @@ window.resetMonitoringFullFilter = resetMonitoringFullFilter;
 window.handleProctorResetSesi = handleProctorResetSesi;
 window.handleProctorResetLogin = handleProctorResetLogin;
 window.bukaSesiMapelBaruModal = bukaSesiMapelBaruModal;
+window.openResetSemuaPesertaModal = openResetSemuaPesertaModal;
+window.onResetSemuaModeChange = onResetSemuaModeChange;
 window.openCetakKartuModal = openCetakKartuModal;
 window.handleCetakLogoUpload = handleCetakLogoUpload;
 window.resetCetakLogo = resetCetakLogo;

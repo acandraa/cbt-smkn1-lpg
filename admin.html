@@ -217,6 +217,11 @@
                 title="Buka sesi mapel berikutnya & bersihkan pelanggaran siswa tanpa menghapus nilai">
                 <i class="bi bi-skip-forward-circle-fill me-1 text-danger"></i> Buka Sesi Mapel Berikutnya
               </button>
+              <button class="btn btn-danger btn-sm rounded-pill px-3 fw-semibold shadow-sm"
+                onclick="openResetSemuaPesertaModal('monitoring')" id="btn-reset-semua-dashboard"
+                title="Reset sesi, kunci login, atau ulang ujian seluruh peserta">
+                <i class="bi bi-arrow-counterclockwise me-1"></i> Reset Semua Peserta
+              </button>
             </div>
           </div>
 
@@ -327,12 +332,19 @@
                 </h5>
                 <span class="badge bg-danger rounded-pill px-2 py-1 small" id="badge-live-table-count">0 Peserta</span>
               </div>
-              <div id="monitor-active-class-pill" class="d-none">
-                <span class="badge bg-primary-subtle text-primary border border-primary-subtle px-3 py-1 rounded-pill">
-                  Kelas: <strong id="monitor-active-class-name">-</strong>
-                  <button type="button" class="btn-close btn-close-sm ms-2" style="font-size: 0.65rem;"
-                    onclick="clearMonitoringClassFilter()"></button>
-                </span>
+              <div class="d-flex align-items-center flex-wrap gap-2">
+                <div id="monitor-active-class-pill" class="d-none">
+                  <span class="badge bg-primary-subtle text-primary border border-primary-subtle px-3 py-1 rounded-pill">
+                    Kelas: <strong id="monitor-active-class-name">-</strong>
+                    <button type="button" class="btn-close btn-close-sm ms-2" style="font-size: 0.65rem;"
+                      onclick="clearMonitoringClassFilter()"></button>
+                  </span>
+                </div>
+                <button class="btn btn-outline-danger btn-sm rounded-pill px-3 fw-semibold"
+                  onclick="openResetSemuaPesertaModal('monitoring')"
+                  title="Reset seluruh peserta atau peserta terfilter di tabel monitoring ini">
+                  <i class="bi bi-arrow-counterclockwise me-1"></i> Reset Semua Peserta
+                </button>
               </div>
             </div>
 
@@ -446,6 +458,11 @@
                 title="Buka sesi mapel berikutnya & reset kehadiran tanpa hapus nilai">
                 <i class="bi bi-skip-forward-circle-fill me-1 text-danger"></i> Buka Sesi Mapel Baru
               </button>
+              <button class="btn btn-danger btn-sm rounded-pill px-3 fw-semibold shadow-sm"
+                onclick="openResetSemuaPesertaModal('peserta')"
+                title="Reset sesi ujian, kunci login, atau nilai seluruh peserta tanpa menghapus akun siswa">
+                <i class="bi bi-arrow-counterclockwise me-1"></i> Reset Semua Peserta
+              </button>
               <button class="btn btn-outline-warning btn-sm rounded-pill px-3 text-dark fw-semibold"
                 onclick="openCetakKartuModal()">
                 <i class="bi bi-printer-fill me-1"></i> Cetak Kartu Ujian
@@ -463,8 +480,9 @@
               <button class="btn btn-primary btn-sm rounded-pill px-3" onclick="openPesertaForm()">
                 <i class="bi bi-plus-circle me-1"></i> Tambah Peserta
               </button>
-              <button class="btn btn-danger btn-sm rounded-pill px-3" onclick="deleteAllPeserta()">
-                <i class="bi bi-trash me-1"></i> Kosongkan Data
+              <button class="btn btn-outline-danger btn-sm rounded-pill px-3" onclick="deleteAllPeserta()"
+                title="Hapus seluruh akun peserta dari database secara permanen">
+                <i class="bi bi-trash me-1"></i> Kosongkan Akun
               </button>
             </div>
           </div>
@@ -2567,13 +2585,13 @@ Jawaban: B"></textarea>
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 
   <!-- CBT Modules -->
-  <script src="js/config.js?v=80"></script>
-  <script src="js/supabase-config.js?v=80"></script>
-  <script src="js/db-adapter.js?v=80"></script>
-  <script src="js/auth.js?v=80"></script>
-  <script src="js/excel-helpers.js?v=80"></script>
-  <script src="js/templates.js?v=80"></script>
-  <script src="js/admin.js?v=80"></script>
+  <script src="js/config.js?v=81"></script>
+  <script src="js/supabase-config.js?v=81"></script>
+  <script src="js/db-adapter.js?v=81"></script>
+  <script src="js/auth.js?v=81"></script>
+  <script src="js/excel-helpers.js?v=81"></script>
+  <script src="js/templates.js?v=81"></script>
+  <script src="js/admin.js?v=81"></script>
   <script>
     // Dark mode logic
     const themeToggleBtn = document.getElementById('theme-toggle-admin');

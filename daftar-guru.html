@@ -612,9 +612,9 @@
   <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   
-  <script src="js/config.js?v=80"></script>
-  <script src="js/supabase-config.js?v=80"></script>
-  <script src="js/db-adapter.js?v=80"></script>
+  <script src="js/config.js?v=81"></script>
+  <script src="js/supabase-config.js?v=81"></script>
+  <script src="js/db-adapter.js?v=81"></script>
 
   <script>
     let allGuruList = [];
@@ -913,7 +913,7 @@
           : `<span class="badge bg-light text-muted border" style="font-size: 0.72rem;"><i class="bi bi-magic me-1"></i>Otomatis</span>`;
 
         // 3. Tombol Aksi (+ Tambah Mapel & Login Guru)
-        const loginUrl = `login-admin.html?v=80&role=guru&username=${encodeURIComponent(g.username || '')}`;
+        const loginUrl = `login-admin.html?v=81&role=guru&username=${encodeURIComponent(g.username || '')}`;
 
         return `
           <tr>
@@ -3471,7 +3471,7 @@
         }
         if (!paketHtml) paketHtml = `<span class="text-muted small fst-italic">Belum ada paket soal</span>`;
 
-        const loginUrl = `login-admin.html?v=80&role=guru&username=${encodeURIComponent(row.username || '')}`;
+        const loginUrl = `login-admin.html?v=81&role=guru&username=${encodeURIComponent(row.username || '')}`;
 
         return `
           <tr>

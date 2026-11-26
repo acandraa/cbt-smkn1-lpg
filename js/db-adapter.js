@@ -2487,119 +2487,150 @@ const DB = {
     } else {
       const shards = (window.getSupabaseShards && window.getSupabaseShards()) || [];
       const targetShards = shardId ? shards.filter(s => String(s.id) === String(shardId)) : (shards.length > 0 ? shards : [{ client: window.supabaseClient }]);
-      for (const shard of targetShards) {
+      await Promise.allSettled(targetShards.map(async (shard) => {
         const client = shard.client || window.supabaseClient;
-        if (!client) continue;
-        await client.from('jawaban_peserta').delete().eq('peserta_id', pesertaId);
-        await client.from('hasil_ujian').delete().eq('peserta_id', pesertaId);
-        await client.from('peserta').update({ status_ujian: 'Belum Ujian', pelanggaran: 0, is_locked: false }).eq('id', pesertaId);
-        await this.setPesertaSessionToken(pesertaId, null, client);
-      }
+        if (!client) return;
+        await this.ensureAdminAuth(client);
+        await this.executeWithAdminAuth(client, async (c) => {
+          await c.from('jawaban_peserta').delete().eq('peserta_id', pesertaId);
+          await c.from('hasil_ujian').delete().eq('peserta_id', pesertaId);
+          const { error: uErr } = await c.from('peserta').update({
+            status_ujian: 'Belum Ujian',
+            pelanggaran: 0,
+            is_locked: false,
+            active_session_token: null
+          }).eq('id', pesertaId);
+          if (uErr && this._isMissingSessionColError(uErr)) {
+            await c.from('peserta').update({
+              status_ujian: 'Belum Ujian',
+              pelanggaran: 0,
+              is_locked: false
+            }).eq('id', pesertaId);
+          }
+        });
+      }));
     }
   },
 
   async bukaSesiMapelBaru() {
+    return await this.resetSemuaPeserta({ mode: 'sesi_aman', pesertaIds: null });
+  },
+
+  async bersihkanHasilSimulasi() {
+    return await this.resetSemuaPeserta({ mode: 'reset_total', pesertaIds: null });
+  },
+
+  /**
+   * Reset Massal Peserta Ujian (mendukung Multi-Shard Supabase, Local, & PHP)
+   * @param {Object} options
+   * @param {'sesi_aman'|'login_lock'|'reset_total'} options.mode
+   *   - 'login_lock' : Lepas kunci login perangkat & buka blokir pelanggaran (jawaban & nilai tetap utuh)
+   *   - 'sesi_aman'  : Kembalikan status ke 'Belum Ujian', buka kunci, & hapus jawaban sementara (nilai di hasil_ujian tetap utuh)
+   *   - 'reset_total': Hapus hasil_ujian + jawaban_peserta & kembalikan status seluruh peserta ke 'Belum Ujian' (akun peserta tetap utuh)
+   * @param {Array<string>|null} options.pesertaIds Jika diisi array ID, hanya mereset peserta tersebut; jika null, mereset seluruh peserta.
+   */
+  async resetSemuaPeserta(options = {}) {
+    const mode = options.mode || 'sesi_aman';
+    const subsetIds = Array.isArray(options.pesertaIds) && options.pesertaIds.length > 0
+      ? Array.from(new Set(options.pesertaIds.map(id => String(id).trim()).filter(Boolean)))
+      : null;
+
     if (this.isLocal()) {
-      let list = JSON.parse(localStorage.getItem('CBT_LOCAL_PESERTA')) || [];
+      const idSet = subsetIds ? new Set(subsetIds) : null;
+      const list = JSON.parse(localStorage.getItem('CBT_LOCAL_PESERTA')) || [];
       list.forEach(p => {
-        p.status_ujian = 'Belum Ujian';
+        if (idSet && !idSet.has(String(p.id))) return;
+        if (mode !== 'login_lock') {
+          p.status_ujian = 'Belum Ujian';
+        }
         p.pelanggaran = 0;
         p.is_locked = false;
         p.active_session_token = null;
       });
       localStorage.setItem('CBT_LOCAL_PESERTA', JSON.stringify(list));
-      localStorage.setItem('CBT_LOCAL_JAWABAN', JSON.stringify([]));
-      // CATATAN PENTING: CBT_LOCAL_HASIL TETAP UTUH & AMAN
-      return { ok: true };
-    }
 
-    if (this.isPhp()) {
-      return DB.api('bukaSesiMapelBaru');
-    }
-
-    // Mode Supabase (Multi-Shard atau Single Shard)
-    const shards = (window.getSupabaseShards && window.getSupabaseShards()) || [];
-    const targetShards = shards.length > 0 ? shards : [{ client: window.supabaseClient }];
-    for (const shard of targetShards) {
-      const client = shard.client || window.supabaseClient;
-      if (!client) continue;
-      // 1. Bersihkan draft jawaban sementara
-      try {
-        await client.from('jawaban_peserta').delete().neq('id', '00000000-0000-0000-0000-000000000000');
-      } catch (err) {
-        console.warn("Gagal hapus jawaban_peserta di shard Supabase:", err);
-      }
-      // 2. Kembalikan status seluruh peserta ke 'Belum Ujian' & buka kuncinya (0 pelanggaran)
-      // PENTING: Tabel hasil_ujian TIDAK DIHAPUS, nilai mapel sebelumnya tetap aman!
-      try {
-        const { error: uErr } = await client.from('peserta').update({
-          status_ujian: 'Belum Ujian',
-          pelanggaran: 0,
-          is_locked: false,
-          active_session_token: null
-        }).neq('id', '00000000-0000-0000-0000-000000000000');
-        if (uErr && this._isMissingSessionColError(uErr)) {
-          await client.from('peserta').update({
-            status_ujian: 'Belum Ujian',
-            pelanggaran: 0,
-            is_locked: false
-          }).neq('id', '00000000-0000-0000-0000-000000000000');
+      if (mode === 'sesi_aman' || mode === 'reset_total') {
+        if (idSet) {
+          const answers = (JSON.parse(localStorage.getItem('CBT_LOCAL_JAWABAN')) || [])
+            .filter(a => !idSet.has(String(a.peserta_id)));
+          localStorage.setItem('CBT_LOCAL_JAWABAN', JSON.stringify(answers));
+        } else {
+          localStorage.setItem('CBT_LOCAL_JAWABAN', JSON.stringify([]));
         }
-      } catch (err) {
-        console.warn("Gagal update status peserta di shard Supabase:", err);
       }
-    }
-    return { ok: true };
-  },
 
-  async bersihkanHasilSimulasi() {
-    if (this.isLocal()) {
-      let list = JSON.parse(localStorage.getItem('CBT_LOCAL_PESERTA')) || [];
-      list.forEach(p => {
-        p.status_ujian = 'Belum Ujian';
-        p.pelanggaran = 0;
-        p.is_locked = false;
-      });
-      localStorage.setItem('CBT_LOCAL_PESERTA', JSON.stringify(list));
-      localStorage.setItem('CBT_LOCAL_JAWABAN', JSON.stringify([]));
-      localStorage.setItem('CBT_LOCAL_HASIL', JSON.stringify([]));
-      return { ok: true };
+      if (mode === 'reset_total') {
+        if (idSet) {
+          const hasil = (JSON.parse(localStorage.getItem('CBT_LOCAL_HASIL')) || [])
+            .filter(h => !idSet.has(String(h.peserta_id)));
+          localStorage.setItem('CBT_LOCAL_HASIL', JSON.stringify(hasil));
+        } else {
+          localStorage.setItem('CBT_LOCAL_HASIL', JSON.stringify([]));
+        }
+      }
+      return { ok: true, mode, count: subsetIds ? subsetIds.length : list.length };
     }
 
     if (this.isPhp()) {
-      return DB.api('bersihkanHasilSimulasi');
+      return DB_PHP.resetSemuaPeserta.call(this, options);
     }
 
-    // Mode Supabase (Multi-Shard atau Single Shard)
+    // Mode Supabase (Multi-Shard atau Single Shard) dengan autentikasi Admin penuh di tiap server
     const shards = (window.getSupabaseShards && window.getSupabaseShards()) || [];
     const targetShards = shards.length > 0 ? shards : [{ client: window.supabaseClient }];
-    for (const shard of targetShards) {
+    const ZERO_UUID = '00000000-0000-0000-0000-000000000000';
+
+    const chunkArray = (arr, size = 100) => {
+      const out = [];
+      for (let i = 0; i < arr.length; i += size) {
+        out.push(arr.slice(i, i + size));
+      }
+      return out;
+    };
+
+    const pesertaPayloadWithToken = mode === 'login_lock'
+      ? { pelanggaran: 0, is_locked: false, active_session_token: null }
+      : { status_ujian: 'Belum Ujian', pelanggaran: 0, is_locked: false, active_session_token: null };
+
+    const pesertaPayloadFallback = mode === 'login_lock'
+      ? { pelanggaran: 0, is_locked: false }
+      : { status_ujian: 'Belum Ujian', pelanggaran: 0, is_locked: false };
+
+    await Promise.allSettled(targetShards.map(async (shard) => {
       const client = shard.client || window.supabaseClient;
-      if (!client) continue;
-      // 1. Kosongkan seluruh rekaman hasil_ujian simulasi
-      try {
-        await client.from('hasil_ujian').delete().neq('id', '00000000-0000-0000-0000-000000000000');
-      } catch (err) {
-        console.warn("Gagal kosongkan hasil_ujian di Supabase shard:", err);
-      }
-      // 2. Kosongkan draft jawaban peserta
-      try {
-        await client.from('jawaban_peserta').delete().neq('id', '00000000-0000-0000-0000-000000000000');
-      } catch (err) {
-        console.warn("Gagal kosongkan jawaban_peserta di Supabase shard:", err);
-      }
-      // 3. Kembalikan status seluruh peserta ke 'Belum Ujian', bersihkan pelanggaran ke 0, dan buka kuncinya
-      try {
-        await client.from('peserta').update({
-          status_ujian: 'Belum Ujian',
-          pelanggaran: 0,
-          is_locked: false
-        }).neq('id', '00000000-0000-0000-0000-000000000000');
-      } catch (err) {
-        console.warn("Gagal update peserta di Supabase shard:", err);
-      }
-    }
-    return { ok: true };
+      if (!client) return;
+      await this.ensureAdminAuth(client);
+      await this.executeWithAdminAuth(client, async (c) => {
+        if (subsetIds) {
+          const chunks = chunkArray(subsetIds, 100);
+          for (const ids of chunks) {
+            if (mode === 'reset_total') {
+              try { await c.from('hasil_ujian').delete().in('peserta_id', ids); } catch (e) {}
+            }
+            if (mode === 'sesi_aman' || mode === 'reset_total') {
+              try { await c.from('jawaban_peserta').delete().in('peserta_id', ids); } catch (e) {}
+            }
+            const { error: uErr } = await c.from('peserta').update(pesertaPayloadWithToken).in('id', ids);
+            if (uErr && this._isMissingSessionColError(uErr)) {
+              await c.from('peserta').update(pesertaPayloadFallback).in('id', ids);
+            }
+          }
+        } else {
+          if (mode === 'reset_total') {
+            try { await c.from('hasil_ujian').delete().neq('id', ZERO_UUID); } catch (e) {}
+          }
+          if (mode === 'sesi_aman' || mode === 'reset_total') {
+            try { await c.from('jawaban_peserta').delete().neq('id', ZERO_UUID); } catch (e) {}
+          }
+          const { error: uErr } = await c.from('peserta').update(pesertaPayloadWithToken).neq('id', ZERO_UUID);
+          if (uErr && this._isMissingSessionColError(uErr)) {
+            await c.from('peserta').update(pesertaPayloadFallback).neq('id', ZERO_UUID);
+          }
+        }
+      });
+    }));
+
+    return { ok: true, mode };
   },
 
   // -------------------------------------------------------------
@@ -3110,6 +3141,33 @@ const DB_PHP = {
   bukaSesiMapelBaru() { return DB.api('bukaSesiMapelBaru'); },
 
   bersihkanHasilSimulasi() { return DB.api('bersihkanHasilSimulasi'); },
+
+  async resetSemuaPeserta(options = {}) {
+    const mode = options.mode || 'sesi_aman';
+    const subsetIds = Array.isArray(options.pesertaIds) && options.pesertaIds.length > 0
+      ? options.pesertaIds
+      : null;
+
+    if (!subsetIds) {
+      if (mode === 'reset_total') return DB.api('bersihkanHasilSimulasi');
+      if (mode === 'sesi_aman') return DB.api('bukaSesiMapelBaru');
+    }
+
+    const targets = subsetIds || (await DB.api('getPesertaList') || []).map(p => p.id);
+    const batchSize = 20;
+    for (let i = 0; i < targets.length; i += batchSize) {
+      const batch = targets.slice(i, i + batchSize);
+      await Promise.allSettled(batch.map(async (pid) => {
+        if (mode === 'login_lock') {
+          await DB.api('resetPesertaLoginSession', { peserta_id: pid });
+          await DB.api('toggleLockPeserta', { peserta_id: pid, is_locked: false });
+        } else {
+          await DB.api('resetPesertaSesi', { peserta_id: pid });
+        }
+      }));
+    }
+    return { ok: true, mode };
+  },
 
   getJawabanList(pesertaId) { return DB.api('getJawabanList', { peserta_id: pesertaId }); },
 
