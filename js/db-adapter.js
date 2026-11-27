@@ -2858,15 +2858,26 @@ const DB = {
     } else {
       const shards = (window.getSupabaseShards && window.getSupabaseShards()) || [];
       const targetShards = shardId ? shards.filter(s => String(s.id) === String(shardId)) : (shards.length > 0 ? shards : [{ client: window.supabaseClient }]);
-      for (const shard of targetShards) {
+      await Promise.allSettled(targetShards.map(async (shard) => {
         const client = shard.client || window.supabaseClient;
-        if (!client) continue;
-        if (hasilId) await client.from('hasil_ujian').delete().eq('id', hasilId);
-        if (pesertaId) {
-          await client.from('jawaban_peserta').delete().eq('peserta_id', pesertaId);
-          await client.from('peserta').update({ status_ujian: 'Belum Ujian', pelanggaran: 0 }).eq('id', pesertaId);
-        }
-      }
+        if (!client) return;
+        await this.ensureAdminAuth(client);
+        await this.executeWithAdminAuth(client, async (c) => {
+          if (hasilId) await c.from('hasil_ujian').delete().eq('id', hasilId);
+          if (pesertaId) {
+            await c.from('jawaban_peserta').delete().eq('peserta_id', pesertaId);
+            const useTok = !this._hasNoSessionCol(c);
+            const uPayload = useTok
+              ? { status_ujian: 'Belum Ujian', pelanggaran: 0, is_locked: false, active_session_token: null }
+              : { status_ujian: 'Belum Ujian', pelanggaran: 0, is_locked: false };
+            const { error: uErr } = await c.from('peserta').update(uPayload).eq('id', pesertaId);
+            if (uErr && useTok && this._isMissingSessionColError(uErr)) {
+              this._markNoSessionCol(c);
+              await c.from('peserta').update({ status_ujian: 'Belum Ujian', pelanggaran: 0, is_locked: false }).eq('id', pesertaId);
+            }
+          }
+        });
+      }));
     }
   },
 

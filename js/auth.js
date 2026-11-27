@@ -434,20 +434,26 @@ const Auth = {
     const isSameDevice = remoteDeviceId && remoteDeviceId === myDeviceId;
     const forceTakeover = Boolean(options && options.forceTakeover);
 
-    // 1. Jika perangkat yang SAMA (HP A refresh / buka ulang browser) -> izinkan Auto-Resume langsung
+    // 1. Jika perangkat yang SAMA (HP A refresh / buka ulang browser) atau Pindah HP resmi -> izinkan langsung
     if (isSameDevice || forceTakeover) {
       return { blocked: false, newToken };
     }
 
-    // 2. Cek apakah sesi HP lama masih aktif:
-    //    - Jika status 'Sedang Ujian' -> SELALU blokir HP kedua
-    //    - Jika di dashboard ('Belum Ujian'/'Sudah Ujian') -> blokir bila login HP lama < 3 jam terakhir
-    const isExamActiveRemote = profile.status_ujian === 'Sedang Ujian';
-    const isRecentSession = tsPart > 0 ? ((Date.now() - tsPart) < (3 * 60 * 60 * 1000)) : true;
+    // 2. PENTING: Kunci perangkat tunggal HANYA berlaku saat siswa benar-benar berstatus 'Sedang Ujian'!
+    //    Jika status masih 'Belum Ujian' (misal baru buka dari browser WA lalu pindah ke Chrome)
+    //    atau 'Sudah Ujian', JANGAN PERNAH memblokir login siswa!
+    if (!profile.status_ujian || profile.status_ujian !== 'Sedang Ujian') {
+      return { blocked: false, newToken };
+    }
 
-    if (isExamActiveRemote || isRecentSession) {
+    // 3. Saat status 'Sedang Ujian', blokir perangkat kedua hanya jika sesi di HP pertama masih aktif (< 2 jam).
+    //    Jika sudah > 2 jam tidak selesai (HP pertama mati total/ditinggal), izinkan auto-recovery.
+    const MAX_ACTIVE_EXAM_LOCK_MS = 2 * 60 * 60 * 1000;
+    const isStillActiveExamSession = tsPart > 0 ? ((Date.now() - tsPart) < MAX_ACTIVE_EXAM_LOCK_MS) : false;
+
+    if (isStillActiveExamSession) {
       const err = new Error(
-        `Akun "${profile.nama_lengkap || profile.username}" sedang aktif digunakan di perangkat lain.`
+        `Akun "${profile.nama_lengkap || profile.username}" sedang mengerjakan ujian di perangkat lain.`
       );
       err.code = 'MULTI_DEVICE_ACTIVE';
       err.pesertaName = profile.nama_lengkap || profile.username || '';
@@ -455,7 +461,6 @@ const Auth = {
       return { blocked: true, error: err };
     }
 
-    // Sesi lama sudah kadaluarsa (> 3 jam & tidak sedang ujian) -> izinkan masuk
     return { blocked: false, newToken };
   },
 
@@ -585,13 +590,14 @@ const Auth = {
       sessionStorage.setItem('CBT_ACTIVE_SHARD_NAME', winner.shardName || '');
     }
 
-    // Simpan token sesi baru ke DB (1 UPDATE ringan < 5ms, fail-safe jika kolom belum dimigrasi)
+    // Simpan token sesi hanya jika siswa belum selesai ujian; jika Sudah Ujian pastikan token bersih (null)
+    const tokenToStore = (winner.profile && winner.profile.status_ujian === 'Sudah Ujian') ? null : lockCheck.newToken;
     if (typeof DB !== 'undefined' && typeof DB.setPesertaSessionToken === 'function' && winner.profile && winner.profile.id) {
-      await DB.setPesertaSessionToken(winner.profile.id, lockCheck.newToken, winningClient);
+      await DB.setPesertaSessionToken(winner.profile.id, tokenToStore, winningClient);
     }
 
     if (winner.profile) {
-      winner.profile.active_session_token = lockCheck.newToken;
+      winner.profile.active_session_token = tokenToStore;
     }
 
     try {

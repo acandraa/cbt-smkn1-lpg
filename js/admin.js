@@ -562,17 +562,35 @@ async function refreshAllData() {
     allJurusan = jurRes || [];
     allKelas = klsRes || [];
 
-    // Render komponen langsung dari memory cache secara instan
+    // Backfill nama_mapel & relasi peserta pada allHasil agar pengelompokan per kelas selalu konsisten
+    const pesertaById = new Map((allPeserta || []).map(p => [String(p.id), p]));
+    (allHasil || []).forEach(h => {
+      if ((!h.nama_mapel || h.nama_mapel === 'Umum') && h.paket_soal_id && Array.isArray(allPaketUnfiltered)) {
+        const matchedPaket = allPaketUnfiltered.find(pk => String(pk.id) === String(h.paket_soal_id));
+        if (matchedPaket && matchedPaket.nama_paket) {
+          h.nama_mapel = matchedPaket.nama_paket;
+        }
+      }
+      if ((!h.peserta || !h.peserta.kelas) && h.peserta_id && pesertaById.has(String(h.peserta_id))) {
+        h.peserta = pesertaById.get(String(h.peserta_id));
+      }
+    });
+
+    // Render komponen langsung dari memory cache dengan tetap mempertahankan filter kelas/jurusan/mapel aktif!
     renderDashboardStatsView();
     populateJurusanDropdowns();
     populateKelasDropdowns();
     populateHasilFilterDropdowns();
-    renderPesertaTable(allPeserta);
+    filterPesertaList(true);
     renderGuruTable(allGuru);
-    renderPaketList(allPaket);
+    if (typeof filterPaketList === 'function') {
+      filterPaketList();
+    } else {
+      renderPaketList(allPaket);
+    }
     renderJurusanTable();
     renderKelasTable();
-    renderHasilTable(allHasil);
+    filterHasilList(true);
     if (typeof updateKesiapanSidebarBadge === 'function') {
       updateKesiapanSidebarBadge();
     }
@@ -2020,21 +2038,27 @@ async function deleteJurusan(id, nama, fromModal = false) {
 }
 
 function populateJurusanDropdowns() {
-  const masterNames = (allJurusan || []).map(j => (j.nama_jurusan || '').toUpperCase()).filter(Boolean);
+  const masterNames = (allJurusan || []).map(j => normalizeLabelSpace(j.nama_jurusan).toUpperCase()).filter(Boolean);
 
-  // Kumpulkan juga jika ada peserta/paket dengan jurusan kustom
+  // Kumpulkan juga jika ada peserta/paket dengan jurusan kustom (abaikan gabungan koma)
   const allNamesSet = new Set(masterNames);
-  (allPeserta || []).forEach(p => { if (p.jurusan) allNamesSet.add(p.jurusan.toUpperCase()); });
-  (allPaket || []).forEach(pk => {
-    if (pk.jurusan && pk.jurusan.toLowerCase() !== 'semua') allNamesSet.add(pk.jurusan.toUpperCase());
+  (allPeserta || []).forEach(p => {
+    const j = normalizeLabelSpace(p.jurusan).toUpperCase();
+    if (j) allNamesSet.add(j);
   });
-  const sortedList = Array.from(allNamesSet).sort();
+  (allPaket || []).forEach(pk => {
+    const pkJur = normalizeLabelSpace(pk.jurusan);
+    if (pkJur && pkJur.toLowerCase() !== 'semua' && !pkJur.includes(',')) {
+      allNamesSet.add(pkJur.toUpperCase());
+    }
+  });
+  const sortedList = Array.from(allNamesSet).sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
   const optionsHtml = sortedList.map(j => `<option value="${escapeHtml(j)}">${escapeHtml(j)}</option>`).join('');
 
   // 1. Dropdown Form Peserta (crud-peserta-jurusan)
   const selPeserta = document.getElementById('crud-peserta-jurusan');
   if (selPeserta) {
-    const cur = selPeserta.value;
+    const cur = normalizeLabelSpace(selPeserta.value).toUpperCase();
     selPeserta.innerHTML = '<option value="">Pilih Jurusan...</option>' + optionsHtml;
     if (cur) selPeserta.value = cur;
   }
@@ -2048,7 +2072,7 @@ function populateJurusanDropdowns() {
   // 3. Filter Jurusan Paket Soal (filter-jurusan-paket)
   const fPaket = document.getElementById('filter-jurusan-paket');
   if (fPaket) {
-    const cur = fPaket.value;
+    const cur = normalizeLabelSpace(fPaket.value).toUpperCase();
     fPaket.innerHTML = '<option value="">Semua Jurusan</option>' + optionsHtml;
     if (cur) fPaket.value = cur;
   }
@@ -2056,16 +2080,18 @@ function populateJurusanDropdowns() {
   // 4. Filter Jurusan Peserta (filter-jurusan-peserta)
   const fPeserta = document.getElementById('filter-jurusan-peserta');
   if (fPeserta) {
-    const cur = fPeserta.value;
-    fPeserta.innerHTML = '<option value="">Semua Jurusan</option>' + optionsHtml;
+    const cur = normalizeLabelSpace(fPeserta.value).toUpperCase();
+    const extraOpt = (cur && !allNamesSet.has(cur)) ? `<option value="${escapeHtml(cur)}">${escapeHtml(cur)}</option>` : '';
+    fPeserta.innerHTML = '<option value="">Semua Jurusan</option>' + extraOpt + optionsHtml;
     if (cur) fPeserta.value = cur;
   }
 
   // 5. Filter Jurusan Hasil (filter-jurusan-hasil)
   const fHasil = document.getElementById('filter-jurusan-hasil');
   if (fHasil) {
-    const cur = fHasil.value;
-    fHasil.innerHTML = '<option value="">Semua Jurusan</option>' + optionsHtml;
+    const cur = normalizeLabelSpace(fHasil.value).toUpperCase();
+    const extraOpt = (cur && !allNamesSet.has(cur)) ? `<option value="${escapeHtml(cur)}">${escapeHtml(cur)}</option>` : '';
+    fHasil.innerHTML = '<option value="">Semua Jurusan</option>' + extraOpt + optionsHtml;
     if (cur) fHasil.value = cur;
   }
 }
@@ -2277,23 +2303,32 @@ function checkKelasMatch(pKelas, studentKelas) {
   return { match: false, specificity: 0 };
 }
 
+function normalizeLabelSpace(str, fallback = '') {
+  const clean = String(str ?? '').replace(/\s+/g, ' ').trim();
+  return clean || fallback;
+}
+
 function populateKelasDropdowns() {
-  const masterNames = (allKelas || []).map(k => (k.nama_kelas || '').toUpperCase()).filter(Boolean);
+  const masterNames = (allKelas || []).map(k => normalizeLabelSpace(k.nama_kelas).toUpperCase()).filter(Boolean);
 
   const allNamesSet = new Set(masterNames);
-  (allPeserta || []).forEach(p => { if (p.kelas) allNamesSet.add(p.kelas.toUpperCase()); });
+  (allPeserta || []).forEach(p => {
+    const k = normalizeLabelSpace(p.kelas).toUpperCase();
+    if (k) allNamesSet.add(k);
+  });
   (allPaket || []).forEach(pk => {
-    if (pk.kelas && pk.kelas.toLowerCase() !== 'semua' && !pk.kelas.toUpperCase().startsWith('TINGKAT:')) {
-      allNamesSet.add(pk.kelas.toUpperCase());
+    const pkKls = normalizeLabelSpace(pk.kelas);
+    if (pkKls && pkKls.toLowerCase() !== 'semua' && !pkKls.toUpperCase().startsWith('TINGKAT:') && !pkKls.includes(',')) {
+      allNamesSet.add(pkKls.toUpperCase());
     }
   });
-  const sortedList = Array.from(allNamesSet).sort();
+  const sortedList = Array.from(allNamesSet).sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
   const rawOptionsHtml = sortedList.map(k => `<option value="${escapeHtml(k)}">${escapeHtml(k)}</option>`).join('');
 
   // 1. Dropdown Form Peserta (crud-peserta-kelas)
   const selPeserta = document.getElementById('crud-peserta-kelas');
   if (selPeserta) {
-    const cur = selPeserta.value;
+    const cur = normalizeLabelSpace(selPeserta.value).toUpperCase();
     selPeserta.innerHTML = '<option value="">Pilih Kelas...</option>' + rawOptionsHtml;
     if (cur) selPeserta.value = cur;
   }
@@ -2307,7 +2342,7 @@ function populateKelasDropdowns() {
   // 3. Filter Kelas Paket Soal (filter-kelas-paket)
   const fPaket = document.getElementById('filter-kelas-paket');
   if (fPaket) {
-    const cur = fPaket.value;
+    const cur = normalizeLabelSpace(fPaket.value).toUpperCase();
     fPaket.innerHTML = `
       <option value="">Semua Kelas</option>
       <optgroup label="Tingkat / Angkatan">
@@ -2325,16 +2360,18 @@ function populateKelasDropdowns() {
   // 4. Filter Kelas Peserta (filter-kelas-peserta)
   const fPeserta = document.getElementById('filter-kelas-peserta');
   if (fPeserta) {
-    const cur = fPeserta.value;
-    fPeserta.innerHTML = '<option value="">Semua Kelas</option>' + rawOptionsHtml;
+    const cur = normalizeLabelSpace(fPeserta.value).toUpperCase();
+    const extraOpt = (cur && !allNamesSet.has(cur)) ? `<option value="${escapeHtml(cur)}">${escapeHtml(cur)}</option>` : '';
+    fPeserta.innerHTML = '<option value="">Semua Kelas</option>' + extraOpt + rawOptionsHtml;
     if (cur) fPeserta.value = cur;
   }
 
   // 5. Filter Kelas Hasil (filter-kelas-hasil)
   const fHasil = document.getElementById('filter-kelas-hasil');
   if (fHasil) {
-    const cur = fHasil.value;
-    fHasil.innerHTML = '<option value="">Semua Kelas</option>' + rawOptionsHtml;
+    const cur = normalizeLabelSpace(fHasil.value).toUpperCase();
+    const extraOpt = (cur && !allNamesSet.has(cur)) ? `<option value="${escapeHtml(cur)}">${escapeHtml(cur)}</option>` : '';
+    fHasil.innerHTML = '<option value="">Semua Kelas</option>' + extraOpt + rawOptionsHtml;
     if (cur) fHasil.value = cur;
   }
 }
@@ -2348,7 +2385,7 @@ async function loadPeserta() {
     allPeserta = await DB.getPesertaList();
     populateJurusanDropdowns();
     populateKelasDropdowns();
-    renderPesertaTable(allPeserta);
+    filterPesertaList(true);
   } catch (err) {
     console.error("Gagal memuat peserta:", err);
   }
@@ -2437,13 +2474,19 @@ function renderPesertaTable(list, keepPage = false) {
     return;
   }
 
-  // Sort list by Jurusan first, then Name
+  // Sort list by Jurusan, then Kelas (natural sort), then Nama Lengkap
   const sortedList = [...list].sort((a, b) => {
-    const jA = (a.jurusan || 'Tanpa Jurusan').toUpperCase();
-    const jB = (b.jurusan || 'Tanpa Jurusan').toUpperCase();
-    if (jA < jB) return -1;
-    if (jA > jB) return 1;
-    return (a.nama_lengkap || '').localeCompare(b.nama_lengkap || '');
+    const jA = normalizeLabelSpace(a.jurusan, 'Tanpa Jurusan').toUpperCase();
+    const jB = normalizeLabelSpace(b.jurusan, 'Tanpa Jurusan').toUpperCase();
+    const jCmp = jA.localeCompare(jB, undefined, { numeric: true });
+    if (jCmp !== 0) return jCmp;
+
+    const kA = normalizeLabelSpace(a.kelas, 'Tanpa Kelas').toUpperCase();
+    const kB = normalizeLabelSpace(b.kelas, 'Tanpa Kelas').toUpperCase();
+    const kCmp = kA.localeCompare(kB, undefined, { numeric: true });
+    if (kCmp !== 0) return kCmp;
+
+    return normalizeLabelSpace(a.nama_lengkap).localeCompare(normalizeLabelSpace(b.nama_lengkap), undefined, { numeric: true });
   });
 
   const totalItems = sortedList.length;
@@ -2473,7 +2516,7 @@ function renderPesertaTable(list, keepPage = false) {
     renderPaginationNav(navEl, pesertaCurrentPage, totalPages, 'goToPesertaPage');
   }
 
-  let currentJurusan = null;
+  let currentGroup = null;
   const rows = [];
 
   pagedItems.forEach(p => {
@@ -2481,18 +2524,22 @@ function renderPesertaTable(list, keepPage = false) {
     if (p.status_ujian === 'Sedang Ujian') statusClass = "bg-warning text-dark";
     if (p.status_ujian === 'Sudah Ujian') statusClass = "bg-success";
     
-    const pJurusan = (p.jurusan || 'Tanpa Jurusan').toUpperCase();
+    const pJurusan = normalizeLabelSpace(p.jurusan, 'Tanpa Jurusan').toUpperCase();
+    const pKelas = normalizeLabelSpace(p.kelas, 'Tanpa Kelas').toUpperCase();
+    const groupKey = `${pJurusan} || ${pKelas}`;
 
-    // Group Header Row
-    if (currentJurusan !== pJurusan) {
+    // Group Header Row per Jurusan & Kelas
+    if (currentGroup !== groupKey) {
       rows.push(`
         <tr class="table-light">
           <td colspan="9" class="fw-bold text-primary py-2" style="background-color: #f8f9fa;">
             <i class="bi bi-bookmark-fill me-2"></i>JURUSAN: ${escapeHtml(pJurusan)}
+            <span class="mx-2 text-muted">|</span>
+            <i class="bi bi-mortarboard-fill me-1 text-success"></i><span class="text-success">KELAS: ${escapeHtml(pKelas)}</span>
           </td>
         </tr>
       `);
-      currentJurusan = pJurusan;
+      currentGroup = groupKey;
     }
 
     rows.push(`
@@ -2537,33 +2584,39 @@ function renderPesertaTable(list, keepPage = false) {
   tbody.innerHTML = rows.join('');
 }
 
-function filterPesertaList() {
-  const q = document.getElementById('search-peserta').value.toLowerCase().trim();
-  const jurusan = document.getElementById('filter-jurusan-peserta').value.toUpperCase();
+function filterPesertaList(keepPage = false) {
+  const q = (document.getElementById('search-peserta')?.value || '').toLowerCase().trim();
+  const jurusan = normalizeLabelSpace(document.getElementById('filter-jurusan-peserta')?.value || '').toUpperCase();
   const filterKelasEl = document.getElementById('filter-kelas-peserta');
-  const kelas = filterKelasEl ? filterKelasEl.value.toUpperCase() : '';
-  const sesi = document.getElementById('filter-sesi-peserta').value;
-  const status = document.getElementById('filter-status-peserta').value;
+  const kelas = filterKelasEl ? normalizeLabelSpace(filterKelasEl.value).toUpperCase() : '';
+  const sesi = (document.getElementById('filter-sesi-peserta')?.value || '').trim();
+  const status = (document.getElementById('filter-status-peserta')?.value || '').trim();
 
-  const filtered = allPeserta.filter(p => {
-    const matchesSearch = p.nama_lengkap.toLowerCase().includes(q) || 
-                          p.username.toLowerCase().includes(q) || 
-                          (p.jurusan && p.jurusan.toLowerCase().includes(q)) || 
-                          (p.kelas && p.kelas.toLowerCase().includes(q));
+  const filtered = (allPeserta || []).filter(p => {
+    const pNama = (p.nama_lengkap || '').toLowerCase();
+    const pUser = (p.username || '').toLowerCase();
+    const pJurRaw = normalizeLabelSpace(p.jurusan);
+    const pKlsRaw = normalizeLabelSpace(p.kelas);
+
+    const matchesSearch = !q ||
+                          pNama.includes(q) || 
+                          pUser.includes(q) || 
+                          pJurRaw.toLowerCase().includes(q) || 
+                          pKlsRaw.toLowerCase().includes(q);
     
-    const pJurusan = (p.jurusan || '').toUpperCase();
+    const pJurusan = pJurRaw.toUpperCase();
     const matchesJurusan = !jurusan || pJurusan === jurusan;
 
-    const pKelas = (p.kelas || '').toUpperCase();
+    const pKelas = pKlsRaw.toUpperCase();
     const matchesKelas = !kelas || pKelas === kelas;
     
-    const matchesSesi = !sesi || p.sesi === sesi;
+    const matchesSesi = !sesi || String(p.sesi || '').trim() === sesi;
     const matchesStatus = !status || p.status_ujian === status;
 
     return matchesSearch && matchesJurusan && matchesKelas && matchesSesi && matchesStatus;
   });
 
-  renderPesertaTable(filtered, false);
+  renderPesertaTable(filtered, keepPage === true);
 }
 
 function openPesertaForm() {
@@ -6111,10 +6164,14 @@ async function loadPaket() {
       ? allPaketUnfiltered.filter(p => isPaketAllowedForGuru(p))
       : allPaketUnfiltered;
 
-    renderPaketList(allPaket);
+    if (typeof filterPaketList === 'function') {
+      filterPaketList();
+    } else {
+      renderPaketList(allPaket);
+    }
     populateHasilFilterDropdowns();
     if (allHasil && allHasil.length > 0) {
-      filterHasilList();
+      filterHasilList(true);
     }
     
     if (allPaket.length > 0 && !activePaketId) {
@@ -8477,52 +8534,93 @@ async function exportAllBankSoalExcel() {
 // -------------------------------------------------------------
 
 function populateHasilFilterDropdowns() {
-  const mapelSet = new Set();
+  const mapelMap = new Map(); // normalizedUpper -> displayLabel
   const jurusanSet = new Set();
   const kelasSet = new Set();
 
-  // Collect from allPaket
-  (allPaket || []).forEach(pk => {
-    if (pk.nama_paket) mapelSet.add(pk.nama_paket);
+  // Sertakan Master Jurusan, Master Kelas, & Data Peserta agar pilihan filter Kelas/Jurusan TIDAK hilang ketika siswa terakhir di kelas tsb di-reset!
+  (allJurusan || []).forEach(j => {
+    const n = normalizeLabelSpace(j.nama_jurusan || j.nama).toUpperCase();
+    if (n) jurusanSet.add(n);
+  });
+  (allKelas || []).forEach(k => {
+    const n = normalizeLabelSpace(k.nama_kelas || k.nama).toUpperCase();
+    if (n) kelasSet.add(n);
+  });
+  (allPeserta || []).forEach(p => {
+    const j = normalizeLabelSpace(p.jurusan).toUpperCase();
+    const k = normalizeLabelSpace(p.kelas).toUpperCase();
+    if (j) jurusanSet.add(j);
+    if (k) kelasSet.add(k);
   });
 
-  // Backfill nama_mapel from allPaket if needed and collect from actual results
+  // Collect from allPaket
+  (allPaket || []).forEach(pk => {
+    const cleanM = normalizeLabelSpace(pk.nama_paket);
+    if (cleanM && !mapelMap.has(cleanM.toUpperCase())) {
+      mapelMap.set(cleanM.toUpperCase(), cleanM);
+    }
+  });
+
+  // Backfill nama_mapel & peserta from cache if needed and collect from actual results
+  const pesertaById = new Map((allPeserta || []).map(p => [String(p.id), p]));
   (allHasil || []).forEach(h => {
     if ((!h.nama_mapel || h.nama_mapel === 'Umum') && h.paket_soal_id && Array.isArray(allPaket)) {
-      const matchedPaket = allPaket.find(pk => pk.id === h.paket_soal_id);
+      const matchedPaket = allPaket.find(pk => String(pk.id) === String(h.paket_soal_id));
       if (matchedPaket && matchedPaket.nama_paket) {
         h.nama_mapel = matchedPaket.nama_paket;
       }
     }
-    if (h.nama_mapel) mapelSet.add(h.nama_mapel);
+    if ((!h.peserta || !h.peserta.kelas) && h.peserta_id && pesertaById.has(String(h.peserta_id))) {
+      h.peserta = pesertaById.get(String(h.peserta_id));
+    }
+    if (h.nama_mapel) {
+      h.nama_mapel = normalizeLabelSpace(h.nama_mapel, 'Umum');
+      if (!mapelMap.has(h.nama_mapel.toUpperCase())) {
+        mapelMap.set(h.nama_mapel.toUpperCase(), h.nama_mapel);
+      }
+    }
     const p = h.peserta;
     if (p) {
-      if (p.jurusan) jurusanSet.add(p.jurusan.toUpperCase());
-      if (p.kelas) kelasSet.add(p.kelas.toUpperCase());
+      const j = normalizeLabelSpace(p.jurusan).toUpperCase();
+      const k = normalizeLabelSpace(p.kelas).toUpperCase();
+      if (j) jurusanSet.add(j);
+      if (k) kelasSet.add(k);
     }
   });
 
   const fMapel = document.getElementById('filter-mapel-hasil');
   if (fMapel) {
-    const fMapelVal = fMapel.value;
+    const fMapelVal = normalizeLabelSpace(fMapel.value);
+    if (fMapelVal && !mapelMap.has(fMapelVal.toUpperCase())) {
+      mapelMap.set(fMapelVal.toUpperCase(), fMapelVal);
+    }
+    const sortedMapels = Array.from(mapelMap.values()).sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
     fMapel.innerHTML = '<option value="">📚 Semua Mata Pelajaran</option>' + 
-      Array.from(mapelSet).sort().map(m => `<option value="${escapeHtml(m)}">${escapeHtml(m)}</option>`).join('');
-    fMapel.value = fMapelVal;
+      sortedMapels.map(m => `<option value="${escapeHtml(m)}">${escapeHtml(m)}</option>`).join('');
+    if (fMapelVal) {
+      const matchOpt = sortedMapels.find(m => m.toUpperCase() === fMapelVal.toUpperCase());
+      fMapel.value = matchOpt || fMapelVal;
+    }
   }
 
   const fJurusan = document.getElementById('filter-jurusan-hasil');
   if (fJurusan) {
-    const fJurusanVal = fJurusan.value;
+    const fJurusanVal = normalizeLabelSpace(fJurusan.value).toUpperCase();
+    if (fJurusanVal) jurusanSet.add(fJurusanVal);
+    const sortedJur = Array.from(jurusanSet).sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
     fJurusan.innerHTML = '<option value="">Semua Jurusan</option>' + 
-      Array.from(jurusanSet).sort().map(j => `<option value="${escapeHtml(j)}">${escapeHtml(j)}</option>`).join('');
+      sortedJur.map(j => `<option value="${escapeHtml(j)}">${escapeHtml(j)}</option>`).join('');
     fJurusan.value = fJurusanVal;
   }
 
   const fKelas = document.getElementById('filter-kelas-hasil');
   if (fKelas) {
-    const fKelasVal = fKelas.value;
+    const fKelasVal = normalizeLabelSpace(fKelas.value).toUpperCase();
+    if (fKelasVal) kelasSet.add(fKelasVal);
+    const sortedKls = Array.from(kelasSet).sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
     fKelas.innerHTML = '<option value="">Semua Kelas</option>' + 
-      Array.from(kelasSet).sort().map(k => `<option value="${escapeHtml(k)}">${escapeHtml(k)}</option>`).join('');
+      sortedKls.map(k => `<option value="${escapeHtml(k)}">${escapeHtml(k)}</option>`).join('');
     fKelas.value = fKelasVal;
   }
 }
@@ -8530,20 +8628,24 @@ function populateHasilFilterDropdowns() {
 async function loadHasil() {
   try {
     const rawHasil = await DB.getHasilList();
-    // Backfill nama_mapel terlebih dahulu sebelum difilter untuk Guru
+    const pesertaById = new Map((allPeserta || []).map(p => [String(p.id), p]));
+    // Backfill nama_mapel & relasi peserta terlebih dahulu sebelum difilter
     (rawHasil || []).forEach(h => {
       if ((!h.nama_mapel || h.nama_mapel === 'Umum') && h.paket_soal_id && Array.isArray(allPaketUnfiltered)) {
-        const matchedPaket = allPaketUnfiltered.find(pk => pk.id === h.paket_soal_id);
+        const matchedPaket = allPaketUnfiltered.find(pk => String(pk.id) === String(h.paket_soal_id));
         if (matchedPaket && matchedPaket.nama_paket) {
           h.nama_mapel = matchedPaket.nama_paket;
         }
+      }
+      if ((!h.peserta || !h.peserta.kelas) && h.peserta_id && pesertaById.has(String(h.peserta_id))) {
+        h.peserta = pesertaById.get(String(h.peserta_id));
       }
     });
     allHasil = isGuruMode()
       ? (rawHasil || []).filter(h => isHasilAllowedForGuru(h))
       : (rawHasil || []);
     populateHasilFilterDropdowns();
-    filterHasilList();
+    filterHasilList(true);
   } catch (err) {
     console.error("Gagal memuat hasil ujian:", err);
   }
@@ -8578,26 +8680,28 @@ function renderHasilTable(list, keepPage = false) {
     return;
   }
 
-  // Sort list by Mapel, then Jurusan, then Kelas, then Nilai (descending)
+  // Sort list by Mapel, then Jurusan, then Kelas (natural sort), then Nilai (descending), then Nama
   const sortedList = [...list].sort((a, b) => {
-    const mA = (a.nama_mapel || 'Umum').toUpperCase();
-    const mB = (b.nama_mapel || 'Umum').toUpperCase();
-    if (mA < mB) return -1;
-    if (mA > mB) return 1;
+    const mA = normalizeLabelSpace(a.nama_mapel, 'Umum').toUpperCase();
+    const mB = normalizeLabelSpace(b.nama_mapel, 'Umum').toUpperCase();
+    const mCmp = mA.localeCompare(mB, undefined, { numeric: true });
+    if (mCmp !== 0) return mCmp;
 
     const pA = a.peserta || {};
     const pB = b.peserta || {};
-    const jA = (pA.jurusan || 'Tanpa Jurusan').toUpperCase();
-    const jB = (pB.jurusan || 'Tanpa Jurusan').toUpperCase();
-    if (jA < jB) return -1;
-    if (jA > jB) return 1;
+    const jA = normalizeLabelSpace(pA.jurusan, 'Tanpa Jurusan').toUpperCase();
+    const jB = normalizeLabelSpace(pB.jurusan, 'Tanpa Jurusan').toUpperCase();
+    const jCmp = jA.localeCompare(jB, undefined, { numeric: true });
+    if (jCmp !== 0) return jCmp;
     
-    const kA = (pA.kelas || 'Tanpa Kelas').toUpperCase();
-    const kB = (pB.kelas || 'Tanpa Kelas').toUpperCase();
-    if (kA < kB) return -1;
-    if (kA > kB) return 1;
+    const kA = normalizeLabelSpace(pA.kelas, 'Tanpa Kelas').toUpperCase();
+    const kB = normalizeLabelSpace(pB.kelas, 'Tanpa Kelas').toUpperCase();
+    const kCmp = kA.localeCompare(kB, undefined, { numeric: true });
+    if (kCmp !== 0) return kCmp;
     
-    return (parseFloat(b.nilai) || 0) - (parseFloat(a.nilai) || 0);
+    const nDiff = (parseFloat(b.nilai) || 0) - (parseFloat(a.nilai) || 0);
+    if (nDiff !== 0) return nDiff;
+    return normalizeLabelSpace(pA.nama_lengkap).localeCompare(normalizeLabelSpace(pB.nama_lengkap), undefined, { numeric: true });
   });
 
   const totalItems = sortedList.length;
@@ -8632,10 +8736,10 @@ function renderHasilTable(list, keepPage = false) {
 
   pagedItems.forEach(h => {
     const p = h.peserta || { username: '-', nama_lengkap: 'Akun Terhapus', kelas: '-', jurusan: '-' };
-    const pMapel = h.nama_mapel || 'Umum';
-    const pJurusan = (p.jurusan || 'Tanpa Jurusan').toUpperCase();
-    const pKelas = (p.kelas || 'Tanpa Kelas').toUpperCase();
-    const groupKey = `${pMapel} - ${pJurusan} - ${pKelas}`;
+    const pMapel = normalizeLabelSpace(h.nama_mapel, 'Umum');
+    const pJurusan = normalizeLabelSpace(p.jurusan, 'Tanpa Jurusan').toUpperCase();
+    const pKelas = normalizeLabelSpace(p.kelas, 'Tanpa Kelas').toUpperCase();
+    const groupKey = `${pMapel.toUpperCase()} || ${pJurusan} || ${pKelas}`;
 
     // Group Header Row
     if (currentGroup !== groupKey) {
@@ -8681,9 +8785,9 @@ function renderHasilTable(list, keepPage = false) {
 
 function getFilteredHasilList() {
   const q = (document.getElementById('search-nilai')?.value || '').toLowerCase().trim();
-  const mapel = (document.getElementById('filter-mapel-hasil')?.value || '').toLowerCase().trim();
-  const jurusan = (document.getElementById('filter-jurusan-hasil')?.value || '').toUpperCase().trim();
-  const kelas = (document.getElementById('filter-kelas-hasil')?.value || '').toUpperCase().trim();
+  const mapel = normalizeLabelSpace(document.getElementById('filter-mapel-hasil')?.value || '').toLowerCase();
+  const jurusan = normalizeLabelSpace(document.getElementById('filter-jurusan-hasil')?.value || '').toUpperCase();
+  const kelas = normalizeLabelSpace(document.getElementById('filter-kelas-hasil')?.value || '').toUpperCase();
 
   return (allHasil || []).filter(h => {
     const p = h.peserta || { username: '', nama_lengkap: '', jurusan: '', kelas: '' };
@@ -8691,22 +8795,22 @@ function getFilteredHasilList() {
                           (p.nama_lengkap || '').toLowerCase().includes(q) || 
                           (p.username || '').toLowerCase().includes(q);
                           
-    const hMapel = (h.nama_mapel || '').toLowerCase().trim();
+    const hMapel = normalizeLabelSpace(h.nama_mapel).toLowerCase();
     const matchesMapel = !mapel || hMapel === mapel;
 
-    const pJurusan = (p.jurusan || '').toUpperCase().trim();
+    const pJurusan = normalizeLabelSpace(p.jurusan).toUpperCase();
     const matchesJurusan = !jurusan || pJurusan === jurusan;
     
-    const pKelas = (p.kelas || '').toUpperCase().trim();
+    const pKelas = normalizeLabelSpace(p.kelas).toUpperCase();
     const matchesKelas = !kelas || pKelas === kelas;
 
     return matchesSearch && matchesMapel && matchesJurusan && matchesKelas;
   });
 }
 
-function filterHasilList() {
+function filterHasilList(keepPage = false) {
   const filtered = getFilteredHasilList();
-  renderHasilTable(filtered, false);
+  renderHasilTable(filtered, keepPage === true);
 }
 
 async function resetUjianPeserta(hasilId, pesertaId, name) {
@@ -8729,7 +8833,7 @@ async function resetUjianPeserta(hasilId, pesertaId, name) {
     });
 
     try {
-      const hTarget = allHasil.find(item => item.id === hasilId);
+      const hTarget = allHasil.find(item => String(item.id) === String(hasilId));
       await DB.resetHasilUjian(hasilId, pesertaId, hTarget ? hTarget._shardId : null);
       Swal.fire('Ujian Direset!', `Status ujian "${name}" berhasil direset.`, 'success');
       await refreshAllData();

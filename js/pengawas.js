@@ -537,7 +537,7 @@ function renderWatchedStudents() {
     return true;
   });
 
-  // Prioritas urutan: 1) Siswa TERKUNCI paling atas, 2) Ada pelanggaran, 3) Kelas & Nama
+  // Prioritas urutan: 1) Siswa TERKUNCI paling atas, 2) Ada pelanggaran, 3) Kelas (natural sort) & Nama
   filtered.sort((a, b) => {
     const aLock = a.is_locked ? 1 : 0;
     const bLock = b.is_locked ? 1 : 0;
@@ -547,9 +547,11 @@ function renderWatchedStudents() {
     const bViol = parseInt(b.pelanggaran || 0);
     if ((bViol > 0 ? 1 : 0) !== (aViol > 0 ? 1 : 0)) return bViol - aViol;
 
-    const klsCmp = String(a.kelas || '').localeCompare(String(b.kelas || ''), undefined, { numeric: true });
+    const kA = String(a.kelas || '').replace(/\s+/g, ' ').trim().toUpperCase();
+    const kB = String(b.kelas || '').replace(/\s+/g, ' ').trim().toUpperCase();
+    const klsCmp = kA.localeCompare(kB, undefined, { numeric: true });
     if (klsCmp !== 0) return klsCmp;
-    return String(a.nama_lengkap || '').localeCompare(String(b.nama_lengkap || ''));
+    return String(a.nama_lengkap || '').localeCompare(String(b.nama_lengkap || ''), undefined, { numeric: true });
   });
 
   if (filtered.length === 0) {
@@ -562,9 +564,37 @@ function renderWatchedStudents() {
     return;
   }
 
-  container.innerHTML = filtered.map((p, idx) => {
+  let currentGroupKey = null;
+  let nomorPerKelas = 0;
+  const htmlItems = [];
+
+  filtered.forEach((p) => {
     const pel = parseInt(p.pelanggaran || 0);
     const isLocked = Boolean(p.is_locked);
+    const isAlertGroup = isLocked || pel > 0;
+    const pKelasNorm = String(p.kelas || 'Tanpa Kelas').replace(/\s+/g, ' ').trim().toUpperCase();
+    const groupKey = isAlertGroup ? '__ALERT_PRIORITY__' : `KELAS:${pKelasNorm}`;
+
+    if (currentGroupKey !== groupKey) {
+      currentGroupKey = groupKey;
+      nomorPerKelas = 0;
+      if (isAlertGroup) {
+        htmlItems.push(`
+          <div class="px-2 py-1 mt-1 rounded-3 bg-danger-subtle border border-danger-subtle text-danger fw-bold small d-flex align-items-center gap-2">
+            <i class="bi bi-exclamation-octagon-fill"></i>
+            <span>PERLU TINDAKAN PENGAWAS (TERKUNCI / PELANGGARAN)</span>
+          </div>
+        `);
+      } else {
+        htmlItems.push(`
+          <div class="px-3 py-2 mt-1 rounded-3 bg-primary-subtle border border-primary-subtle text-primary fw-bold small d-flex align-items-center justify-content-between">
+            <span><i class="bi bi-mortarboard-fill me-2"></i>KELAS: ${escapeHtmlP(pKelasNorm)}</span>
+          </div>
+        `);
+      }
+    }
+    nomorPerKelas++;
+    const idx = nomorPerKelas - 1;
     const status = p.status_ujian || 'Belum Ujian';
     const hasDevice = Boolean(p.active_session_token);
     const shardId = p._shardId || p._shard_id || '';
@@ -611,7 +641,7 @@ function renderWatchedStudents() {
          </button>`
       : '';
 
-    return `
+    htmlItems.push(`
       <div class="${cardCls}">
         <div class="d-flex justify-content-between align-items-center flex-wrap gap-2">
           <div class="min-w-0">
@@ -637,8 +667,10 @@ function renderWatchedStudents() {
           </div>
         </div>
       </div>
-    `;
-  }).join('');
+    `);
+  });
+
+  container.innerHTML = htmlItems.join('');
 }
 
 // ==================== AKSI BANTUAN PER-SISWA ====================

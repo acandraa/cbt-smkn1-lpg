@@ -34,13 +34,15 @@ function saveAnswersToLocalStorage() {
   }
 }
 
-// Bersihkan seluruh cache lokal ujian (jawaban lama, timer lama, & paket aktif lama) milik siswa ini
+// Bersihkan seluruh cache lokal ujian (jawaban lama, timer lama, & pilihan mapel/agama lama) milik siswa ini
 function clearStudentExamLocalCache(pesertaId) {
   const pid = pesertaId || (studentProfile && studentProfile.id);
   if (!pid) return;
   try {
     localStorage.removeItem(`CBT_TIMER_END_${pid}`);
     localStorage.removeItem(`CBT_IN_PROGRESS_PAKET_${pid}`);
+    localStorage.removeItem(`CBT_SELECTED_PAKET_${pid}`);
+    localStorage.removeItem(`CBT_STUDENT_AGAMA_${pid}`);
     const ansPrefix = `CBT_LOCAL_ANS_${pid}_`;
     const keysToRemove = [];
     for (let i = 0; i < localStorage.length; i++) {
@@ -66,6 +68,7 @@ function clearStudentExamLocalCache(pesertaId) {
     }
   } catch (e) {}
 
+  chosenAgamaKey = null;
   savedAnswers = {};
   hasPendingSync = false;
   examTimerEndTimestamp = null;
@@ -367,43 +370,35 @@ function checkKelasMatch(pKelas, studentKelas) {
 
 let candidateActivePakets = []; // Seluruh paket yang aktif saat ini untuk rombel siswa
 let candidateAgamaPakets = [];   // Khusus paket ujian agama aktif
+let finishedActivePaketIds = new Set(); // Paket aktif yang sudah selesai dikerjakan siswa
 let chosenAgamaKey = null;       // Pilihan agama siswa (misal: 'islam', 'kristen')
 
-// Daftar 6 agama resmi di Indonesia dengan ikon & kata kunci pencocokan nama paket
+// Daftar 6 agama resmi di Indonesia (mendukung mapel PAI maupun varian mapel lain per agama seperti Kepramukaan Islam/Katolik/Protestan/Hindu + toleransi typo pengetikan guru)
 const AGAMA_DEFINITIONS = [
-  { key: 'islam', name: 'Pendidikan Agama Islam (PAI)', icon: 'bi-moon-stars-fill', iconText: '🕌', color: 'success', keywords: ['islam', 'pai', 'paibp'] },
-  { key: 'kristen', name: 'Pendidikan Agama Kristen', icon: 'bi-cross', iconText: '✝️', color: 'primary', keywords: ['kristen', 'protestan', 'pakp', 'pak'] },
-  { key: 'katolik', name: 'Pendidikan Agama Katolik', icon: 'bi-hospital', iconText: '⛪', color: 'danger', keywords: ['katolik'] },
-  { key: 'hindu', name: 'Pendidikan Agama Hindu', iconText: '🕉️', color: 'warning', keywords: ['hindu', 'pah'] },
-  { key: 'buddha', name: 'Pendidikan Agama Buddha', iconText: '☸️', color: 'info', keywords: ['buddha', 'budha'] },
-  { key: 'konghucu', name: 'Pendidikan Agama Konghucu', iconText: '☯️', color: 'secondary', keywords: ['konghucu', 'khonghucu'] }
+  { key: 'islam', name: 'Agama Islam', icon: 'bi-moon-stars-fill', iconText: '🕌', color: 'success', regex: /\b(islam|pai|paibp|muslim)\b/i },
+  { key: 'kristen', name: 'Agama Kristen / Protestan', icon: 'bi-cross', iconText: '✝️', color: 'primary', regex: /\b(kristen|protestan|potestan|pakp|pak)\b/i },
+  { key: 'katolik', name: 'Agama Katolik', icon: 'bi-hospital', iconText: '⛪', color: 'danger', regex: /\b(katolik|katholik|katoiik|kathoiik)\b/i },
+  { key: 'hindu', name: 'Agama Hindu', iconText: '🕉️', color: 'warning', regex: /\b(hindu|hlndu|pah)\b/i },
+  { key: 'buddha', name: 'Agama Buddha', iconText: '☸️', color: 'info', regex: /\b(buddha|budha|pab)\b/i },
+  { key: 'konghucu', name: 'Agama Konghucu', iconText: '☯️', color: 'secondary', regex: /\b(konghucu|khonghucu)\b/i }
 ];
 
-// Deteksi apakah nama paket adalah mata pelajaran Agama
-function isAgamaPaket(namaPaket) {
-  if (!namaPaket) return false;
-  const n = namaPaket.toLowerCase();
-  return n.includes('agama') || 
-         n.includes('pai') || 
-         n.includes('paibp') || 
-         n.includes('pakp') || 
-         n.includes('kristen') || 
-         n.includes('katolik') || 
-         n.includes('hindu') || 
-         n.includes('buddha') || 
-         n.includes('konghucu');
-}
-
-// Deteksi kategori agama dari nama paket
+// Deteksi kategori agama dari nama paket (aman dari false-positive kata 'paket' vs 'pak')
 function detectAgamaCategory(namaPaket) {
   if (!namaPaket) return null;
-  const n = namaPaket.toLowerCase();
+  const s = String(namaPaket);
   for (const a of AGAMA_DEFINITIONS) {
-    if (a.keywords.some(kw => n.includes(kw))) {
+    if (a.regex.test(s)) {
       return a;
     }
   }
   return null;
+}
+
+// Deteksi apakah nama paket merupakan paket varian berdasarkan Agama (PAI maupun mapel berbasis agama seperti Kepramukaan Islam/Katolik/dll)
+function isAgamaPaket(namaPaket) {
+  if (!namaPaket) return false;
+  return /\bagama\b/i.test(String(namaPaket)) || Boolean(detectAgamaCategory(namaPaket));
 }
 
 // Helper: Mencocokkan seluruh paket soal aktif untuk siswa berdasarkan jadwal, jurusan, dan kelas
@@ -451,6 +446,34 @@ function findAllActivePaketsForStudent(allPaket, profile) {
   return matching;
 }
 
+// Ekstrak nama dasar mapel tanpa kata agama/tingkat agar beberapa mapel berbasis agama (misal PAI vs Kepramukaan) bisa dibedakan dengan rapi
+function getAgamaSubjectBaseKey(namaPaket) {
+  return String(namaPaket || '')
+    .toLowerCase()
+    .replace(/\b(pendidikan|agama| dan |budi|pekerti|islam|pai|paibp|muslim|kristen|protestan|potestan|pakp|pak|katolik|katholik|katoiik|kathoiik|hindu|hlndu|pah|buddha|budha|pab|konghucu|khonghucu|tingkat|kelas|x|xi|xii|10|11|12)\b/gi, ' ')
+    .replace(/[\-\(\)\[\]:\/]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim() || 'agama';
+}
+
+function getAgamaVariantsForPaket(basePaket) {
+  if (!basePaket || !isAgamaPaket(basePaket.nama_paket)) return [];
+  const targetBase = getAgamaSubjectBaseKey(basePaket.nama_paket);
+  const matching = candidateAgamaPakets.filter(p => getAgamaSubjectBaseKey(p.nama_paket) === targetBase);
+  return matching.length > 0 ? matching : candidateAgamaPakets;
+}
+
+function shouldShowMultiMapelSelector() {
+  if (!candidateActivePakets || candidateActivePakets.length <= 1) return false;
+  const nonAgamaCount = candidateActivePakets.filter(p => !isAgamaPaket(p.nama_paket)).length;
+  // Jika ada mapel umum sekaligus mapel agama terbuka bersamaan, atau >1 mapel umum terbuka
+  if (nonAgamaCount > 1) return true;
+  if (nonAgamaCount >= 1 && candidateAgamaPakets.length >= 1) return true;
+  // Jika ada lebih dari 1 kelompok mapel berbasis agama berbeda (misal PAI + Kepramukaan aktif bersamaan)
+  const agamaBases = new Set(candidateAgamaPakets.map(p => getAgamaSubjectBaseKey(p.nama_paket)));
+  return agamaBases.size > 1;
+}
+
 // Render Opsi Pemilihan Agama di Dashboard Siswa
 function renderAgamaSelector(agamaPakets) {
   const container = document.getElementById('card-pilih-agama');
@@ -466,10 +489,13 @@ function renderAgamaSelector(agamaPakets) {
   container.classList.remove('d-none');
   if (countBadge) countBadge.innerText = `${agamaPakets.length} Paket Agama Tersedia`;
 
-  // Cek preferensi agama yang pernah dipilih sebelumnya dari localStorage
-  const savedAgama = localStorage.getItem(`CBT_STUDENT_AGAMA_${studentProfile.id}`);
-  if (savedAgama) {
-    chosenAgamaKey = savedAgama;
+  // Sinkronkan highlight pilihan agama dengan paket aktif saat ini atau preferensi tersimpan
+  const activeCat = currentActivePaket ? detectAgamaCategory(currentActivePaket.nama_paket) : null;
+  if (activeCat) {
+    chosenAgamaKey = activeCat.key;
+  } else {
+    const savedAgama = localStorage.getItem(`CBT_STUDENT_AGAMA_${studentProfile.id}`);
+    if (savedAgama) chosenAgamaKey = savedAgama;
   }
 
   listEl.innerHTML = '';
@@ -482,8 +508,8 @@ function renderAgamaSelector(agamaPakets) {
     });
 
     const isAvailable = Boolean(matchedPaket);
-    const isSelected = chosenAgamaKey === def.key || (!chosenAgamaKey && isAvailable && def.key === 'islam');
-    if (isSelected && isAvailable) {
+    const isSelected = isAvailable && (chosenAgamaKey === def.key || (!chosenAgamaKey && def.key === 'islam'));
+    if (isSelected) {
       chosenAgamaKey = def.key;
     }
 
@@ -491,6 +517,9 @@ function renderAgamaSelector(agamaPakets) {
     cardCol.className = 'col-md-6 col-12';
     
     const iconDisplay = def.iconText ? `<span class="fs-5 me-2">${def.iconText}</span>` : `<i class="bi ${def.icon} fs-5 me-2 text-${def.color}"></i>`;
+    const doneBadge = (isAvailable && finishedActivePaketIds.has(String(matchedPaket.id)))
+      ? `<span class="badge bg-success-subtle text-success border border-success-subtle ms-1" style="font-size:0.65rem;">Selesai</span>`
+      : '';
 
     if (isAvailable) {
       cardCol.innerHTML = `
@@ -501,7 +530,7 @@ function renderAgamaSelector(agamaPakets) {
             <div class="d-flex align-items-center">
               ${iconDisplay}
               <div>
-                <strong class="text-dark d-block">${def.name}</strong>
+                <strong class="text-dark d-block">${def.name}${doneBadge}</strong>
                 <small class="text-muted">${escapeHtml(matchedPaket.nama_paket)}</small>
               </div>
             </div>
@@ -536,7 +565,14 @@ async function selectStudentAgama(agamaKey) {
   chosenAgamaKey = agamaKey;
   localStorage.setItem(`CBT_STUDENT_AGAMA_${studentProfile.id}`, agamaKey);
 
-  const matchedPaket = candidateAgamaPakets.find(p => {
+  const pool = (currentActivePaket && isAgamaPaket(currentActivePaket.nama_paket))
+    ? getAgamaVariantsForPaket(currentActivePaket)
+    : candidateAgamaPakets;
+
+  const matchedPaket = pool.find(p => {
+    const cat = detectAgamaCategory(p.nama_paket);
+    return cat && cat.key === agamaKey;
+  }) || candidateAgamaPakets.find(p => {
     const cat = detectAgamaCategory(p.nama_paket);
     return cat && cat.key === agamaKey;
   });
@@ -545,11 +581,14 @@ async function selectStudentAgama(agamaKey) {
     currentActivePaket = matchedPaket;
     localStorage.setItem(`CBT_SELECTED_PAKET_${studentProfile.id}`, matchedPaket.id);
     await updateDashboardForSelectedPaket(matchedPaket);
-    renderAgamaSelector(candidateAgamaPakets);
+    renderAgamaSelector(getAgamaVariantsForPaket(matchedPaket));
+    if (shouldShowMultiMapelSelector()) {
+      renderPaketSelector(candidateActivePakets);
+    }
   }
 }
 
-// Render dropdown jika ada beberapa paket non-agama aktif serentak
+// Render dropdown jika ada beberapa mata pelajaran aktif serentak agar siswa bebas memilih mapel
 function renderPaketSelector(pakets) {
   const container = document.getElementById('card-pilih-paket');
   const selEl = document.getElementById('select-active-paket');
@@ -563,16 +602,28 @@ function renderPaketSelector(pakets) {
   container.classList.remove('d-none');
   selEl.innerHTML = '';
   pakets.forEach((p, idx) => {
-    const isSel = currentActivePaket && currentActivePaket.id === p.id ? 'selected' : '';
-    selEl.innerHTML += `<option value="${p.id}" ${isSel}>${idx + 1}. ${escapeHtml(p.nama_paket)}</option>`;
+    const isSel = currentActivePaket && String(currentActivePaket.id) === String(p.id) ? 'selected' : '';
+    const isDone = finishedActivePaketIds.has(String(p.id));
+    const suffix = isDone ? ' — [Sudah Selesai]' : '';
+    selEl.innerHTML += `<option value="${p.id}" ${isSel}>${idx + 1}. ${escapeHtml(p.nama_paket)}${suffix}</option>`;
   });
 }
 
 async function switchActivePaketManually(paketId) {
-  const target = candidateActivePakets.find(p => p.id === paketId);
+  const target = candidateActivePakets.find(p => String(p.id) === String(paketId));
   if (target) {
     currentActivePaket = target;
     localStorage.setItem(`CBT_SELECTED_PAKET_${studentProfile.id}`, target.id);
+    if (isAgamaPaket(target.nama_paket)) {
+      const cat = detectAgamaCategory(target.nama_paket);
+      if (cat) {
+        chosenAgamaKey = cat.key;
+        localStorage.setItem(`CBT_STUDENT_AGAMA_${studentProfile.id}`, cat.key);
+      }
+      renderAgamaSelector(getAgamaVariantsForPaket(target));
+    } else {
+      renderAgamaSelector([]);
+    }
     await updateDashboardForSelectedPaket(target);
   }
 }
@@ -684,9 +735,20 @@ async function loadExamSetupAndVerify() {
 
     // 3. Tentukan paket aktif yang akan digunakan:
     // PENTING: Jika status siswa di server adalah 'Belum Ujian' (baru mulai / habis di-reset Admin),
-    // WAJIB bersihkan seluruh cache paket, timer, dan jawaban lama di localStorage agar tidak nyangkut di soal yang tadi!
+    // WAJIB bersihkan seluruh cache paket, timer, jawaban, & pilihan mapel/agama lama di localStorage agar siswa bisa memilih mapel/agama dari awal!
     if (studentProfile.status_ujian !== 'Sedang Ujian') {
       clearStudentExamLocalCache(studentProfile.id);
+    }
+
+    // Cek paralel paket mana saja yang sudah pernah diselesaikan siswa (jika habis Reset Total / Reset Ujian, finishedActivePaketIds otomatis kosong!)
+    finishedActivePaketIds = new Set();
+    if (candidateActivePakets.length > 0) {
+      await Promise.all(candidateActivePakets.map(async (p) => {
+        try {
+          const done = await DB.checkExistingHasil(studentProfile.id, p.id);
+          if (done) finishedActivePaketIds.add(String(p.id));
+        } catch (e) {}
+      }));
     }
 
     let activePaket = null;
@@ -694,7 +756,7 @@ async function loadExamSetupAndVerify() {
       const inProgressId = localStorage.getItem(`CBT_IN_PROGRESS_PAKET_${studentProfile.id}`);
       if (inProgressId) {
         // Hanya lanjutkan paket jika masih masuk dalam daftar paket yang aktif & cocok saat ini
-        activePaket = candidateActivePakets.find(p => p.id === inProgressId) || null;
+        activePaket = candidateActivePakets.find(p => String(p.id) === String(inProgressId)) || null;
         if (!activePaket) {
           localStorage.removeItem(`CBT_IN_PROGRESS_PAKET_${studentProfile.id}`);
           localStorage.removeItem(`CBT_TIMER_END_${studentProfile.id}`);
@@ -702,38 +764,40 @@ async function loadExamSetupAndVerify() {
       }
     }
 
-    // Prioritas 2: Jika terdeteksi paket Agama aktif
-    if (!activePaket && candidateAgamaPakets.length > 0) {
-      const savedAgama = localStorage.getItem(`CBT_STUDENT_AGAMA_${studentProfile.id}`);
-      if (savedAgama) {
-        activePaket = candidateAgamaPakets.find(p => {
+    // Pilih paket default terbaik: utamakan paket yang BELUM selesai dikerjakan!
+    if (!activePaket && candidateActivePakets.length > 0) {
+      const unfinishedPakets = candidateActivePakets.filter(p => !finishedActivePaketIds.has(String(p.id)));
+      const pool = unfinishedPakets.length > 0 ? unfinishedPakets : candidateActivePakets;
+
+      const savedAgama = localStorage.getItem(`CBT_STUDENT_AGAMA_${studentProfile.id}`) || 'islam';
+      const firstCandidate = pool[0];
+
+      if (firstCandidate && isAgamaPaket(firstCandidate.nama_paket)) {
+        const variants = getAgamaVariantsForPaket(firstCandidate).filter(p => pool.some(u => String(u.id) === String(p.id)));
+        const searchPool = variants.length > 0 ? variants : getAgamaVariantsForPaket(firstCandidate);
+        activePaket = searchPool.find(p => {
           const cat = detectAgamaCategory(p.nama_paket);
           return cat && cat.key === savedAgama;
-        });
-      }
-      if (!activePaket) {
-        activePaket = candidateAgamaPakets[0];
-      }
-      renderAgamaSelector(candidateAgamaPakets);
-    } else if (!activePaket && candidateActivePakets.length > 0) {
-      // Prioritaskan paket yang BELUM dikerjakan siswa jika ada beberapa paket aktif (misal Mapel 1 selesai, otomatis beralih ke Mapel 2)
-      let firstUnfinished = null;
-      for (const p of candidateActivePakets) {
-        try {
-          const hasDone = await DB.checkExistingHasil(studentProfile.id, p.id);
-          if (!hasDone) {
-            firstUnfinished = p;
-            break;
-          }
-        } catch (e) {}
-      }
-      activePaket = firstUnfinished || candidateActivePakets[0];
-      if (candidateActivePakets.length > 1) {
-        renderPaketSelector(candidateActivePakets);
+        }) || firstCandidate;
+      } else {
+        activePaket = firstCandidate;
       }
     }
 
     currentActivePaket = activePaket;
+
+    // Tampilkan pemilih Agama dan/atau pemilih Mata Pelajaran sesuai paket yang sedang aktif
+    if (activePaket && isAgamaPaket(activePaket.nama_paket)) {
+      renderAgamaSelector(getAgamaVariantsForPaket(activePaket));
+    } else {
+      renderAgamaSelector([]);
+    }
+
+    if (shouldShowMultiMapelSelector()) {
+      renderPaketSelector(candidateActivePakets);
+    } else {
+      renderPaketSelector([]);
+    }
 
     // 4. Ambil Pengaturan Umum Ujian (Durasi, Passing Grade, Nilai)
     const settings = await DB.getSettings();
