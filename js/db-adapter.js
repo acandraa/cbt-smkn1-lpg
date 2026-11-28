@@ -3296,18 +3296,40 @@ const DB = {
   // -------------------------------------------------------------
   // EXTRA HELPERS (backup / bulk operations)
   // -------------------------------------------------------------
-  async getSoalList() {
+  async getSoalList(options = {}) {
     if (this.isLocal()) {
       this.initLocalData();
       const list = JSON.parse(localStorage.getItem('CBT_LOCAL_SOAL')) || [];
       return list.filter(s => s.id !== this.GURU_SYS_ROW_ID && s.id !== this.MASTER_SYS_ROW_ID && s.id !== this.PAKET_SYS_ROW_ID && s.id !== this.SETTINGS_SYS_ROW_ID && s.id !== this.PENGAWAS_SYS_ROW_ID && s.opsi_a !== '__CBT_SYS_GURU__' && s.opsi_a !== '__CBT_SYS_MASTER__' && s.opsi_a !== '__CBT_SYS_PAKET__' && s.opsi_a !== '__CBT_SYS_SETTINGS__' && s.opsi_a !== '__CBT_SYS_PENGAWAS__' && s.nomor !== -999 && s.nomor !== -998 && s.nomor !== -997 && s.nomor !== -996 && s.nomor !== -995);
     } else {
+      const shards = (window.getSupabaseShards && window.getSupabaseShards()) || [];
+      const mergeAll = Boolean(options && options.forceAllShards) && shards.length > 1;
+      const isSys = (s) => !s || s.id === this.GURU_SYS_ROW_ID || s.id === this.MASTER_SYS_ROW_ID || s.id === this.PAKET_SYS_ROW_ID || s.id === this.SETTINGS_SYS_ROW_ID || s.id === this.PENGAWAS_SYS_ROW_ID || s.opsi_a === '__CBT_SYS_GURU__' || s.opsi_a === '__CBT_SYS_MASTER__' || s.opsi_a === '__CBT_SYS_PAKET__' || s.opsi_a === '__CBT_SYS_SETTINGS__' || s.opsi_a === '__CBT_SYS_PENGAWAS__' || (typeof s.nomor === 'number' && s.nomor <= -990);
+
+      if (mergeAll) {
+        const results = await Promise.allSettled(shards.map(async (shard) => {
+          if (!shard.client) return [];
+          const { data, error } = await shard.client.from('soal').select('*').order('nomor', { ascending: true });
+          if (error) return [];
+          return (data || []).filter(s => !isSys(s));
+        }));
+        const byId = new Map();
+        results.forEach(res => {
+          if (res.status === 'fulfilled' && Array.isArray(res.value)) {
+            res.value.forEach(s => {
+              if (s && s.id && !byId.has(String(s.id))) byId.set(String(s.id), s);
+            });
+          }
+        });
+        return Array.from(byId.values()).sort((a, b) => (a.nomor || 0) - (b.nomor || 0));
+      }
+
       const { data, error } = await window.supabaseClient
         .from('soal')
         .select('*')
         .order('nomor', { ascending: true });
       if (error) throw error;
-      return (data || []).filter(s => s.id !== this.GURU_SYS_ROW_ID && s.id !== this.MASTER_SYS_ROW_ID && s.id !== this.PAKET_SYS_ROW_ID && s.id !== this.SETTINGS_SYS_ROW_ID && s.id !== this.PENGAWAS_SYS_ROW_ID && s.opsi_a !== '__CBT_SYS_GURU__' && s.opsi_a !== '__CBT_SYS_MASTER__' && s.opsi_a !== '__CBT_SYS_PAKET__' && s.opsi_a !== '__CBT_SYS_SETTINGS__' && s.opsi_a !== '__CBT_SYS_PENGAWAS__' && s.nomor !== -999 && s.nomor !== -998 && s.nomor !== -997 && s.nomor !== -996 && s.nomor !== -995);
+      return (data || []).filter(s => !isSys(s));
     }
   },
 
@@ -3319,82 +3341,789 @@ const DB = {
     } else {
       // Since there's no bulk delete RPC, loop through all participants
       for (const p of (list || [])) {
-        await this.deletePeserta(p.id);
+        await this.deletePeserta(p.id, p._shardId || null);
       }
     }
   },
 
-  async restoreBackup(backupData) {
-    if (this.isLocal()) {
-      localStorage.setItem('CBT_LOCAL_SOAL', JSON.stringify(backupData.soal || []));
-      if (Array.isArray(backupData.paket_soal)) {
-        localStorage.setItem('CBT_LOCAL_PAKET', JSON.stringify(backupData.paket_soal));
-      }
-      if (Array.isArray(backupData.jurusan)) {
-        localStorage.setItem('CBT_LOCAL_JURUSAN', JSON.stringify(backupData.jurusan));
-      }
-      if (Array.isArray(backupData.kelas)) {
-        localStorage.setItem('CBT_LOCAL_KELAS', JSON.stringify(backupData.kelas));
-      }
-      if (backupData.pengaturan_ujian && backupData.pengaturan_ujian.length > 0) {
-        localStorage.setItem('CBT_LOCAL_PENGATURAN', JSON.stringify(backupData.pengaturan_ujian[0]));
-      }
-      return;
+  // Hitung rencana distribusi peserta ke beberapa server (default 5 server)
+  computePesertaShardDistribution(pesertaList = [], strategy = 'auto_jurusan', shardsInput = null) {
+    const rawShards = Array.isArray(shardsInput) && shardsInput.length > 0
+      ? shardsInput
+      : ((window.getSupabaseShards && window.getSupabaseShards()) || []);
+    const shards = rawShards.length > 0
+      ? rawShards
+      : [{ id: 1, name: 'Server Utama', client: window.supabaseClient }];
+
+    const buckets = shards.map((s, idx) => ({
+      shardIndex: idx,
+      shardId: s.id || (idx + 1),
+      shardName: s.name || `Server ${idx + 1}`,
+      shard: s,
+      items: []
+    }));
+
+    const list = Array.isArray(pesertaList) ? pesertaList : [];
+    if (list.length === 0) return buckets;
+
+    if (strategy === 'preserve_shard') {
+      const byId = new Map(buckets.map(b => [String(b.shardId), b]));
+      list.forEach((p, i) => {
+        const sid = p && (p._shardId || p.shard_id);
+        if (sid && byId.has(String(sid))) {
+          byId.get(String(sid)).items.push(p);
+        } else {
+          const autoTarget = (window.getShardForPeserta && window.getShardForPeserta(p.jurusan, p.sesi)) || null;
+          const b = (autoTarget && byId.get(String(autoTarget.id))) || buckets[i % buckets.length];
+          b.items.push(p);
+        }
+      });
+      return buckets;
     }
 
-    if (Array.isArray(backupData.jurusan) && backupData.jurusan.length > 0) {
-      try {
-        await window.supabaseClient.from('jurusan').delete().neq('id', '00000000-0000-0000-0000-000000000000');
-        await window.supabaseClient.from('jurusan').insert(backupData.jurusan.map(j => ({ id: j.id, nama_jurusan: j.nama_jurusan || j.nama || j.kode })));
-      } catch (e) {
-        console.warn('Gagal restore jurusan di Supabase:', e);
-      }
+    if (strategy === 'balanced_even') {
+      // Kelompokkan per kelas agar 1 rombel tetap utuh di 1 server, lalu alokasikan ke server dengan beban paling sedikit
+      const classGroups = new Map();
+      list.forEach(p => {
+        const kKey = String(p.kelas || p.jurusan || 'UMUM').replace(/\s+/g, ' ').trim().toUpperCase();
+        if (!classGroups.has(kKey)) classGroups.set(kKey, []);
+        classGroups.get(kKey).push(p);
+      });
+      const sortedGroups = Array.from(classGroups.entries())
+        .sort((a, b) => b[1].length - a[1].length || a[0].localeCompare(b[0], undefined, { numeric: true }));
+
+      const idealPerServer = Math.ceil(list.length / buckets.length);
+      sortedGroups.forEach(([, groupStudents]) => {
+        let minBucket = buckets[0];
+        for (let i = 1; i < buckets.length; i++) {
+          if (buckets[i].items.length < minBucket.items.length) {
+            minBucket = buckets[i];
+          }
+        }
+        // Pertahankan 1 rombel utuh di 1 server selama tidak membuat beban server tersebut timpang jauh di atas rata-rata
+        if (buckets.length <= 1 || (minBucket.items.length + groupStudents.length) <= idealPerServer + 2) {
+          minBucket.items.push(...groupStudents);
+        } else {
+          groupStudents.forEach(st => {
+            let bLeast = buckets[0];
+            for (let i = 1; i < buckets.length; i++) {
+              if (buckets[i].items.length < bLeast.items.length) bLeast = buckets[i];
+            }
+            bLeast.items.push(st);
+          });
+        }
+      });
+      return buckets;
     }
 
-    if (Array.isArray(backupData.kelas) && backupData.kelas.length > 0) {
-      try {
-        await window.supabaseClient.from('kelas').delete().neq('id', '00000000-0000-0000-0000-000000000000');
-        await window.supabaseClient.from('kelas').insert(backupData.kelas.map(k => ({ id: k.id, nama_kelas: k.nama_kelas || k.nama })));
-      } catch (e) {
-        console.warn('Gagal restore kelas di Supabase:', e);
+    // Default: 'auto_jurusan' — cocokkan dengan aturan jurusan/sesi di config.js; sisanya dibagi rata ke server paling kosong!
+    const byId = new Map(buckets.map(b => [String(b.shardId), b]));
+    const unmatchedByKelas = new Map();
+    const matchByExplicitKeywords = (p) => {
+      if (buckets.length <= 1) return buckets[0];
+      const j = String(p.jurusan || '').toUpperCase();
+      const s = String(p.sesi || '').toUpperCase();
+      for (const b of buckets) {
+        const sName = (b.shardName || '').toUpperCase();
+        if (j) {
+          if (j.includes('TKJ') && sName.includes('TKJ')) return b;
+          if (j.includes('ATP') && sName.includes('ATP')) return b;
+          if (j.includes('TKRO') && sName.includes('TKRO')) return b;
+          if (j.includes('TBSM') && sName.includes('TBSM')) return b;
+          if ((j.includes('AKL') || j.includes('AKUN')) && (sName.includes('AKL') || sName.includes('AKUN'))) return b;
+          if (j.includes('MM') && sName.includes('MM')) return b;
+          if (j.includes('RPL') && sName.includes('RPL')) return b;
+        }
       }
-    }
+      for (const b of buckets) {
+        const sName = (b.shardName || '').toUpperCase();
+        if (s && sName.includes(s)) return b;
+      }
+      return null;
+    };
 
-    const { error: delSoalErr } = await window.supabaseClient.from('soal').delete().neq('id', '00000000-0000-0000-0000-000000000000');
-    if (delSoalErr) throw delSoalErr;
+    list.forEach(p => {
+      const matched = matchByExplicitKeywords(p);
+      if (matched) {
+        matched.items.push(p);
+      } else {
+        const kKey = String(p.kelas || p.jurusan || 'LAINNYA').replace(/\s+/g, ' ').trim().toUpperCase();
+        if (!unmatchedByKelas.has(kKey)) unmatchedByKelas.set(kKey, []);
+        unmatchedByKelas.get(kKey).push(p);
+      }
+    });
 
-    const newSoal = backupData.soal || [];
-    if (newSoal.length > 0) {
-      // Hanya pertahankan relasi paket yang masih ada di database
-      const { data: paketRows } = await window.supabaseClient.from('paket_soal').select('id');
-      const paketIds = new Set((paketRows || []).map(p => p.id));
-      const cleanSoal = newSoal.map(s => {
+    // Untuk siswa yang jurusannya belum ada di nama server, sebarkan merata ke server yang paling sedikit bebannya
+    Array.from(unmatchedByKelas.values()).forEach(groupStudents => {
+      let minBucket = buckets[0];
+      for (let i = 1; i < buckets.length; i++) {
+        if (buckets[i].items.length < minBucket.items.length) minBucket = buckets[i];
+      }
+      minBucket.items.push(...groupStudents);
+    });
+
+    // Pastikan shard id map tetap valid bila dipanggil eksternal
+    void byId;
+    return buckets;
+  },
+
+  // Kumpulkan cadangan SELURUH DATA dari seluruh server (5 shard sekaligus)
+  async collectFullBackupData(options = {}, onProgress = null) {
+    const includeAnswers = options.includeAnswers !== false;
+    const includeHasil = options.includeHasil !== false;
+    const report = (pct, msg) => {
+      if (typeof onProgress === 'function') onProgress(pct, msg);
+    };
+
+    report(5, 'Mengautentikasi akses ke seluruh server...');
+    await this.ensureAllShardsAdminAuth();
+
+    report(15, 'Mengambil Master Jurusan, Kelas, Guru & Pengaturan...');
+    const [jurusan, kelas, guru, paket, settings, branding, masterCat, pengawasReg] = await Promise.all([
+      this.getJurusanList().catch(() => []),
+      this.getKelasList().catch(() => []),
+      this.getGuruList().catch(() => []),
+      this.getPaketList().catch(() => []),
+      this.getSettings().catch(() => null),
+      this.getCardBranding().catch(() => null),
+      this.getMasterCatalog().catch(() => ({ kelas: [], jurusan: [] })),
+      this.getPengawasRegistry().catch(() => null)
+    ]);
+
+    report(35, 'Mengambil seluruh Bank Soal dari server...');
+    const soal = await this.getSoalList({ forceAllShards: true }).catch(() => []);
+
+    report(55, 'Mengambil seluruh Data Peserta dari ke-5 server...');
+    const pesertaRaw = await this.getPesertaList({ forceAllShards: true }).catch(() => []);
+    const pesertaById = new Map();
+    const peserta = (pesertaRaw || []).map(p => {
+      if (p && p.id) pesertaById.set(String(p.id), p);
+      return {
+        id: p.id,
+        username: p.username,
+        nama_lengkap: p.nama_lengkap,
+        password_plain: p.password_plain || p.password || '',
+        password_hash: p.password_hash || '',
+        jurusan: p.jurusan || '',
+        kelas: p.kelas || '',
+        ruang: p.ruang || '',
+        sesi: p.sesi || '',
+        status_ujian: p.status_ujian || 'Belum Ujian',
+        pelanggaran: parseInt(p.pelanggaran || 0),
+        is_locked: Boolean(p.is_locked),
+        created_at: p.created_at || null,
+        _shardId: p._shardId || null,
+        _shardName: p._shardName || ''
+      };
+    });
+
+    let hasil = [];
+    if (includeHasil) {
+      report(72, 'Mengambil Rekap Hasil Ujian dari seluruh server...');
+      const hasilRaw = await this.getHasilList().catch(() => []);
+      hasil = (hasilRaw || []).map(h => {
+        const pInfo = h.peserta || pesertaById.get(String(h.peserta_id)) || {};
         return {
-          paket_soal_id: paketIds.has(s.paket_soal_id) ? s.paket_soal_id : null,
-          nomor: s.nomor,
-          pertanyaan: s.pertanyaan,
-          opsi_a: s.opsi_a,
-          opsi_b: s.opsi_b,
-          opsi_c: s.opsi_c,
-          opsi_d: s.opsi_d,
-          jawaban_benar: s.jawaban_benar,
-          bobot: s.bobot,
-          gambar: s.gambar || null
+          ...h,
+          peserta_username: pInfo.username || '',
+          peserta: h.peserta || (pInfo.username ? {
+            id: pInfo.id,
+            username: pInfo.username,
+            nama_lengkap: pInfo.nama_lengkap,
+            kelas: pInfo.kelas,
+            jurusan: pInfo.jurusan
+          } : null)
         };
       });
-      const { error: insSoalErr } = await window.supabaseClient.from('soal').insert(cleanSoal);
-      if (insSoalErr) throw insSoalErr;
     }
 
-    const settings = backupData.pengaturan_ujian;
-    if (settings && settings.length > 0) {
-      const s = settings[0];
-      await window.supabaseClient.from('pengaturan_ujian').upsert({
-        id: 1,
-        durasi_menit: s.durasi_menit,
-        passing_grade: s.passing_grade
-      });
+    let jawaban_peserta = [];
+    if (includeAnswers) {
+      report(85, 'Mengambil detail jawaban peserta dari seluruh server...');
+      if (this.isLocal()) {
+        jawaban_peserta = JSON.parse(localStorage.getItem('CBT_LOCAL_JAWABAN')) || [];
+      } else if (!this.isPhp()) {
+        const shards = (window.getSupabaseShards && window.getSupabaseShards()) || [];
+        const targetShards = shards.length > 0 ? shards : [{ id: 1, name: 'Server Utama', client: window.supabaseClient }];
+        const resArr = await Promise.allSettled(targetShards.map(async (sh) => {
+          if (!sh.client) return [];
+          await this.ensureAdminAuth(sh.client);
+          const { data, error } = await sh.client.from('jawaban_peserta').select('*');
+          if (error || !Array.isArray(data)) return [];
+          return data.map(row => ({
+            ...row,
+            peserta_username: (pesertaById.get(String(row.peserta_id)) || {}).username || '',
+            _shardId: sh.id || null
+          }));
+        }));
+        resArr.forEach(r => {
+          if (r.status === 'fulfilled' && Array.isArray(r.value)) {
+            jawaban_peserta = jawaban_peserta.concat(r.value);
+          }
+        });
+      }
     }
+
+    const shards = (window.getSupabaseShards && window.getSupabaseShards()) || [];
+    const shardSummary = shards.map(sh => ({
+      id: sh.id,
+      name: sh.name,
+      url: sh.url,
+      peserta_count: peserta.filter(p => String(p._shardId) === String(sh.id)).length,
+      hasil_count: hasil.filter(h => String(h._shardId) === String(sh.id)).length
+    }));
+
+    report(98, 'Menyusun berkas cadangan lengkap...');
+    return {
+      version: '2.0',
+      timestamp: new Date().toISOString(),
+      school: 'SMK Negeri 1 Lempuing',
+      backend: this.isPhp() ? 'php' : (this.isLocal() ? 'local' : 'supabase-multi-shard'),
+      shard_summary: shardSummary,
+      data: {
+        peserta,
+        paket_soal: paket || [],
+        jurusan: jurusan || [],
+        kelas: kelas || [],
+        guru: guru || [],
+        soal: soal || [],
+        hasil_ujian: hasil || [],
+        jawaban_peserta: jawaban_peserta || [],
+        pengaturan_ujian: settings ? [settings] : [],
+        card_branding: branding || null,
+        master_catalog: masterCat || { kelas: [], jurusan: [] },
+        pengawas_registry: pengawasReg || null
+      }
+    };
+  },
+
+  async restoreBackup(backupData, options = {}, onProgress = null) {
+    const opts = {
+      restoreMaster: options.restoreMaster !== false,
+      restoreBankSoal: options.restoreBankSoal !== false,
+      restorePeserta: options.restorePeserta !== false,
+      restoreHasil: options.restoreHasil !== false,
+      restoreAnswers: Boolean(options.restoreAnswers),
+      clearExisting: options.clearExisting !== false,
+      preserveStudentStatus: Boolean(options.preserveStudentStatus),
+      distributionStrategy: options.distributionStrategy || 'auto_jurusan',
+      defaultPassword: String(options.defaultPassword || '123456').trim() || '123456'
+    };
+
+    const report = (pct, msg) => {
+      if (typeof onProgress === 'function') onProgress(pct, msg);
+    };
+
+    if (this.isLocal()) {
+      report(20, 'Memulihkan data ke penyimpanan lokal browser...');
+      if (opts.restoreBankSoal) {
+        localStorage.setItem('CBT_LOCAL_SOAL', JSON.stringify(backupData.soal || []));
+        if (Array.isArray(backupData.paket_soal)) {
+          localStorage.setItem('CBT_LOCAL_PAKET', JSON.stringify(backupData.paket_soal));
+        }
+      }
+      if (opts.restoreMaster) {
+        if (Array.isArray(backupData.jurusan)) localStorage.setItem('CBT_LOCAL_JURUSAN', JSON.stringify(backupData.jurusan));
+        if (Array.isArray(backupData.kelas)) localStorage.setItem('CBT_LOCAL_KELAS', JSON.stringify(backupData.kelas));
+        if (Array.isArray(backupData.guru)) localStorage.setItem('CBT_LOCAL_GURU', JSON.stringify(backupData.guru));
+        if (Array.isArray(backupData.pengaturan_ujian) && backupData.pengaturan_ujian.length > 0) {
+          localStorage.setItem('CBT_LOCAL_PENGATURAN', JSON.stringify(backupData.pengaturan_ujian[0]));
+        }
+        if (backupData.card_branding) {
+          localStorage.setItem('CBT_CETAK_KARTU_BRANDING_V1', JSON.stringify(backupData.card_branding));
+        }
+      }
+      if (opts.restorePeserta && Array.isArray(backupData.peserta)) {
+        const cleanPeserta = backupData.peserta.map(p => ({
+          ...p,
+          password_plain: p.password_plain || p.password || opts.defaultPassword,
+          password: p.password_plain || p.password || opts.defaultPassword,
+          status_ujian: opts.preserveStudentStatus ? (p.status_ujian || 'Belum Ujian') : 'Belum Ujian',
+          pelanggaran: opts.preserveStudentStatus ? parseInt(p.pelanggaran || 0) : 0,
+          is_locked: opts.preserveStudentStatus ? Boolean(p.is_locked) : false
+        }));
+        localStorage.setItem('CBT_LOCAL_PESERTA', JSON.stringify(cleanPeserta));
+      }
+      if (opts.restoreHasil && Array.isArray(backupData.hasil_ujian)) {
+        localStorage.setItem('CBT_LOCAL_HASIL', JSON.stringify(backupData.hasil_ujian));
+      }
+      if (opts.restoreAnswers && Array.isArray(backupData.jawaban_peserta)) {
+        localStorage.setItem('CBT_LOCAL_JAWABAN', JSON.stringify(backupData.jawaban_peserta));
+      }
+      report(100, 'Pemulihan lokal selesai.');
+      return { ok: true, shardReports: [{ id: 1, name: 'Lokal Browser', pesertaOk: (backupData.peserta || []).length, pesertaFail: 0 }] };
+    }
+
+    // Mode Supabase (Single atau Multi-Shard 5 Server sekaligus!)
+    const ZERO_UUID = '00000000-0000-0000-0000-000000000000';
+    const sysIds = [
+      this.GURU_SYS_ROW_ID,
+      this.MASTER_SYS_ROW_ID,
+      this.PAKET_SYS_ROW_ID,
+      this.SETTINGS_SYS_ROW_ID,
+      this.PENGAWAS_SYS_ROW_ID
+    ].filter(Boolean);
+
+    const shards = (window.getSupabaseShards && window.getSupabaseShards()) || [];
+    const targetShards = shards.length > 0
+      ? shards.filter(s => s && s.client)
+      : (window.supabaseClient ? [{ id: 1, name: 'Server Utama', client: window.supabaseClient }] : []);
+
+    if (targetShards.length === 0) {
+      throw new Error('Tidak ada server database Supabase yang aktif untuk dipulihkan.');
+    }
+
+    const chunkArr = (arr, size) => {
+      const out = [];
+      for (let i = 0; i < arr.length; i += size) out.push(arr.slice(i, i + size));
+      return out;
+    };
+
+    report(5, `Menghubungkan & mengautentikasi ${targetShards.length} server sekaligus...`);
+    await this.ensureAllShardsAdminAuth();
+
+    // ---------------------------------------------------------
+    // LANGKAH 1: SINKRONKAN MASTER DATA & PENGATURAN KE SEMUA SERVER (5 SERVER)
+    // ---------------------------------------------------------
+    if (opts.restoreMaster) {
+      report(14, `Memulihkan Jurusan, Kelas, Guru & Pengaturan ke ${targetShards.length} server...`);
+      const jurRows = (Array.isArray(backupData.jurusan) ? backupData.jurusan : [])
+        .map(j => ({
+          id: j.id || this.uuidv4(),
+          nama_jurusan: String(j.nama_jurusan || j.nama || j.kode || '').trim().toUpperCase()
+        }))
+        .filter(j => j.nama_jurusan);
+
+      const klsRows = (Array.isArray(backupData.kelas) ? backupData.kelas : [])
+        .map(k => ({
+          id: k.id || this.uuidv4(),
+          nama_kelas: String(k.nama_kelas || k.nama || '').trim().toUpperCase()
+        }))
+        .filter(k => k.nama_kelas);
+
+      const guruList = Array.isArray(backupData.guru) ? backupData.guru : [];
+      const setArr = Array.isArray(backupData.pengaturan_ujian) ? backupData.pengaturan_ujian : [];
+      const s0 = setArr[0] || null;
+
+      await Promise.allSettled(targetShards.map(async (sh) => {
+        await this.executeWithAdminAuth(sh.client, async (c) => {
+          if (jurRows.length > 0) {
+            if (opts.clearExisting) {
+              try { await c.from('jurusan').delete().neq('id', ZERO_UUID); } catch (e) {}
+            }
+            for (const row of jurRows) {
+              try {
+                await c.from('jurusan').upsert(row, { onConflict: 'nama_jurusan' });
+              } catch (e) {
+                try { await c.from('jurusan').insert(row); } catch (e2) {}
+              }
+            }
+          }
+
+          if (klsRows.length > 0) {
+            if (opts.clearExisting) {
+              try { await c.from('kelas').delete().neq('id', ZERO_UUID); } catch (e) {}
+            }
+            for (const row of klsRows) {
+              try {
+                await c.from('kelas').upsert(row, { onConflict: 'nama_kelas' });
+              } catch (e) {
+                try { await c.from('kelas').insert(row); } catch (e2) {}
+              }
+            }
+          }
+
+          if (guruList.length > 0) {
+            if (opts.clearExisting) {
+              try { await c.from('guru').delete().neq('id', ZERO_UUID); } catch (e) {}
+            }
+            for (const g of guruList) {
+              try {
+                await c.from('guru').upsert({
+                  id: g.id || this.uuidv4(),
+                  username: String(g.username || '').trim().toLowerCase(),
+                  password_hash: g.password_hash || '',
+                  nama_lengkap: g.nama_lengkap || '',
+                  mapel_diampu: g.mapel_diampu || '',
+                  jurusan_diampu: g.jurusan_diampu || '',
+                  kelas_diampu: g.kelas_diampu || '',
+                  paket_ids: typeof g.paket_ids === 'string' ? g.paket_ids : JSON.stringify(g.paket_ids || []),
+                  penugasan_mapel: typeof g.penugasan_mapel === 'string' ? g.penugasan_mapel : JSON.stringify(g.penugasan_mapel || [])
+                }, { onConflict: 'id' });
+              } catch (e) {}
+            }
+            try { await this._writeGuruToSysRow(c, guruList); } catch (e) {}
+          }
+
+          if (s0) {
+            const setPayload = {
+              id: 1,
+              durasi_menit: Number(s0.durasi_menit) || 60,
+              passing_grade: Number(s0.passing_grade) || 60,
+              tampilkan_nilai: s0.tampilkan_nilai !== undefined ? Boolean(s0.tampilkan_nilai) : true,
+              token_ujian: s0.token_ujian || 'CBT123',
+              token_aktif: Boolean(s0.token_aktif),
+              acak_soal: s0.acak_soal !== undefined ? Boolean(s0.acak_soal) : true,
+              updated_at: s0.updated_at || new Date().toISOString()
+            };
+            try { await c.from('pengaturan_ujian').upsert(setPayload, { onConflict: 'id' }); } catch (e) {}
+            const sysSet = {
+              ...setPayload,
+              card_branding: backupData.card_branding || s0.card_branding || null
+            };
+            try { await this._writeSettingsToSysRow(c, sysSet); } catch (e) {}
+          } else if (backupData.card_branding) {
+            try {
+              const curSys = (await this._readSettingsFromSysRow(c)) || {};
+              await this._writeSettingsToSysRow(c, { ...curSys, card_branding: backupData.card_branding });
+            } catch (e) {}
+          }
+
+          if (backupData.master_catalog) {
+            try { await this._writeMasterCatalogToSysRow(c, backupData.master_catalog); } catch (e) {}
+          }
+          if (backupData.pengawas_registry) {
+            try { await this._writePengawasRegistryToSysRow(c, backupData.pengawas_registry); } catch (e) {}
+          }
+        });
+      }));
+    }
+
+    // ---------------------------------------------------------
+    // LANGKAH 2: SINKRONKAN PAKET SOAL & BANK SOAL KE SEMUA SERVER (5 SERVER)
+    // ---------------------------------------------------------
+    const validPaketIdSet = new Set();
+    if (opts.restoreBankSoal) {
+      const paketList = Array.isArray(backupData.paket_soal) ? backupData.paket_soal : [];
+      const soalList = Array.isArray(backupData.soal) ? backupData.soal : [];
+
+      report(28, `Menyebarkan ${paketList.length} Paket & ${soalList.length} Butir Soal ke ${targetShards.length} server...`);
+
+      const cleanPakets = paketList
+        .filter(p => p && p.nama_paket)
+        .map(p => {
+          const pid = p.id || this.uuidv4();
+          validPaketIdSet.add(String(pid));
+          return this._compactPaketForVarchar50({
+            id: pid,
+            nama_paket: p.nama_paket,
+            jurusan: p.jurusan || null,
+            kelas: p.kelas || null,
+            jadwal_mulai: p.jadwal_mulai || null,
+            jadwal_selesai: p.jadwal_selesai || null,
+            created_at: p.created_at || new Date().toISOString()
+          });
+        });
+
+      await Promise.allSettled(targetShards.map(async (sh) => {
+        await this.executeWithAdminAuth(sh.client, async (c) => {
+          if (opts.clearExisting) {
+            // Hapus hanya soal asli (>= 0 / bukan baris registri sistem -999..-995) secara bertahap
+            try {
+              const { data: existingSoalIds } = await c.from('soal').select('id, nomor');
+              const delIds = (existingSoalIds || [])
+                .filter(row => row && row.id && !sysIds.includes(row.id) && (row.nomor === null || row.nomor >= 0))
+                .map(row => row.id);
+              for (const batch of chunkArr(delIds, 100)) {
+                await c.from('soal').delete().in('id', batch);
+              }
+            } catch (e) {}
+
+            if (cleanPakets.length > 0) {
+              try { await c.from('paket_soal').delete().neq('id', ZERO_UUID); } catch (e) {}
+            }
+          }
+
+          if (cleanPakets.length > 0) {
+            for (const pkChunk of chunkArr(cleanPakets, 50)) {
+              const { error: pkErr } = await c.from('paket_soal').upsert(pkChunk, { onConflict: 'id' });
+              if (pkErr) throw pkErr;
+            }
+            try { await this._writePaketCatalogToSysRow(c, cleanPakets); } catch (e) {}
+          }
+
+          // Cek paket yang tersedia di server ini untuk menjamin foreign key soal valid
+          const { data: existingPk } = await c.from('paket_soal').select('id');
+          const serverPkSet = new Set((existingPk || []).map(x => String(x.id)));
+
+          if (soalList.length > 0) {
+            const cleanSoal = soalList
+              .filter(s => s && !sysIds.includes(s.id) && (s.nomor === null || s.nomor === undefined || s.nomor >= 0))
+              .map(s => {
+                const sid = s.id || this.uuidv4();
+                const row = {
+                  id: sid,
+                  paket_soal_id: (s.paket_soal_id && serverPkSet.has(String(s.paket_soal_id))) ? s.paket_soal_id : null,
+                  nomor: s.nomor !== undefined ? s.nomor : 1,
+                  pertanyaan: s.pertanyaan || '-',
+                  opsi_a: s.opsi_a || '-',
+                  opsi_b: s.opsi_b || '-',
+                  opsi_c: s.opsi_c !== undefined ? s.opsi_c : null,
+                  opsi_d: s.opsi_d !== undefined ? s.opsi_d : null,
+                  opsi_e: s.opsi_e !== undefined ? s.opsi_e : null,
+                  jawaban_benar: s.jawaban_benar || 'A',
+                  bobot: parseInt(s.bobot || 1) || 1,
+                  gambar: s.gambar || null
+                };
+                return row;
+              });
+
+            // Chunk kecil (15 baris) agar aman bila terdapat soal bergambar Base64
+            for (const sBatch of chunkArr(cleanSoal, 15)) {
+              try {
+                const { error: sErr } = await c.from('soal').upsert(sBatch, { onConflict: 'id' });
+                if (sErr) throw sErr;
+              } catch (err) {
+                const msg = ((err && err.message) || '') + ' ' + ((err && err.details) || '');
+                if (msg.includes('opsi_e')) {
+                  const noOptE = sBatch.map(item => {
+                    const copy = { ...item };
+                    delete copy.opsi_e;
+                    return copy;
+                  });
+                  const { error: e2 } = await c.from('soal').upsert(noOptE, { onConflict: 'id' });
+                  if (e2) throw e2;
+                } else {
+                  throw err;
+                }
+              }
+            }
+          }
+        });
+      }));
+    }
+
+    // ---------------------------------------------------------
+    // LANGKAH 3: BAGI & PULIHKAN DATA PESERTA KE 5 SERVER SEKALIGUS
+    // ---------------------------------------------------------
+    const shardReports = targetShards.map((sh, idx) => ({
+      shardIndex: idx,
+      id: sh.id || (idx + 1),
+      name: sh.name || `Server ${idx + 1}`,
+      planned: 0,
+      pesertaOk: 0,
+      pesertaFail: 0,
+      hasilOk: 0,
+      jawabanOk: 0,
+      errors: []
+    }));
+
+    // Map usernameLower -> { pesertaId, shardIndex, client } untuk keperluan restore hasil & jawaban
+    const restoredPesertaMap = new Map();
+
+    if (opts.restorePeserta) {
+      const pesertaSource = Array.isArray(backupData.peserta) ? backupData.peserta : [];
+
+      if (opts.clearExisting) {
+        report(42, `Membersihkan peserta lama di ${targetShards.length} server sebelum membagi ulang...`);
+        await Promise.allSettled(targetShards.map(async (sh) => {
+          await this.executeWithAdminAuth(sh.client, async (c) => {
+            try { await c.from('jawaban_peserta').delete().neq('id', ZERO_UUID); } catch (e) {}
+            try { await c.from('hasil_ujian').delete().neq('id', ZERO_UUID); } catch (e) {}
+            const { data: oldPeserta } = await c.from('peserta').select('id');
+            const oldIds = (oldPeserta || []).map(x => x.id).filter(Boolean);
+            for (const idBatch of chunkArr(oldIds, 12)) {
+              await Promise.allSettled(idBatch.map(pid => c.rpc('delete_peserta_user', { p_peserta_id: pid })));
+            }
+          });
+        }));
+      }
+
+      if (pesertaSource.length > 0) {
+        const buckets = this.computePesertaShardDistribution(pesertaSource, opts.distributionStrategy, targetShards);
+        let processedCount = 0;
+        const totalPeserta = pesertaSource.length;
+
+        report(50, `Membagi ${totalPeserta} peserta ke ${targetShards.length} server sekaligus...`);
+
+        await Promise.allSettled(buckets.map(async (bucket) => {
+          const rep = shardReports[bucket.shardIndex];
+          rep.planned = bucket.items.length;
+          if (bucket.items.length === 0) return;
+
+          const client = bucket.shard.client;
+          await this.ensureAdminAuth(client);
+
+          // Proses paralel 6 akun per gelombang di setiap server (5 server x 6 = 30 paralel serentak)
+          for (const wave of chunkArr(bucket.items, 6)) {
+            await Promise.allSettled(wave.map(async (p) => {
+              const cleanUser = String(p.username || '').trim().replace(/\s+/g, '').toLowerCase();
+              const cleanPass = String(p.password_plain || p.password || opts.defaultPassword).trim() || opts.defaultPassword;
+              const cleanNama = String(p.nama_lengkap || cleanUser).trim();
+              const cleanJurusan = String(p.jurusan || '').trim();
+              const cleanKelas = String(p.kelas || '').trim();
+              const cleanRuang = String(p.ruang || '').trim();
+              const cleanSesi = String(p.sesi || '').trim();
+
+              if (!cleanUser) {
+                rep.pesertaFail++;
+                return;
+              }
+
+              try {
+                let actualId = null;
+                await this.executeWithAdminAuth(client, async (c) => {
+                  const { data: createdId, error: cErr } = await c.rpc('create_peserta_user', {
+                    p_username: cleanUser,
+                    p_password: cleanPass,
+                    p_nama_lengkap: cleanNama,
+                    p_jurusan: cleanJurusan,
+                    p_kelas: cleanKelas,
+                    p_ruang: cleanRuang,
+                    p_sesi: cleanSesi
+                  });
+
+                  if (!cErr && createdId) {
+                    actualId = createdId;
+                  } else {
+                    const errMsg = ((cErr && cErr.message) || '') + ' ' + ((cErr && cErr.details) || '');
+                    if (errMsg.toLowerCase().includes('duplicate') || errMsg.toLowerCase().includes('unique') || errMsg.toLowerCase().includes('already exists')) {
+                      const { data: existing } = await c.from('peserta').select('id').ilike('username', cleanUser).maybeSingle();
+                      if (existing && existing.id) {
+                        actualId = existing.id;
+                        const passHash = await this.sha256(cleanPass);
+                        await c.from('peserta').update({
+                          username: cleanUser,
+                          password_hash: passHash,
+                          password_plain: cleanPass,
+                          nama_lengkap: cleanNama,
+                          jurusan: cleanJurusan,
+                          kelas: cleanKelas,
+                          ruang: cleanRuang,
+                          sesi: cleanSesi
+                        }).eq('id', actualId);
+                        try {
+                          await c.rpc('update_peserta_password', { p_peserta_id: actualId, p_password: cleanPass });
+                        } catch (ePass) {}
+                      } else {
+                        throw cErr;
+                      }
+                    } else {
+                      throw cErr || new Error('Gagal membuat akun peserta');
+                    }
+                  }
+
+                  if (actualId && opts.preserveStudentStatus) {
+                    const st = ['Belum Ujian', 'Sedang Ujian', 'Sudah Ujian'].includes(p.status_ujian) ? p.status_ujian : 'Belum Ujian';
+                    await c.from('peserta').update({
+                      status_ujian: st,
+                      pelanggaran: parseInt(p.pelanggaran || 0) || 0,
+                      is_locked: Boolean(p.is_locked)
+                    }).eq('id', actualId);
+                  }
+                });
+
+                if (actualId) {
+                  restoredPesertaMap.set(cleanUser, { id: actualId, shardIndex: bucket.shardIndex, client });
+                  rep.pesertaOk++;
+                } else {
+                  rep.pesertaFail++;
+                }
+              } catch (err) {
+                rep.pesertaFail++;
+                if (rep.errors.length < 5) rep.errors.push(`${cleanUser}: ${err.message || 'Gagal'}`);
+              } finally {
+                processedCount++;
+                const pct = 50 + Math.round((processedCount / totalPeserta) * 35);
+                report(Math.min(85, pct), `Membagi peserta ke ${targetShards.length} server (${processedCount}/${totalPeserta})...`);
+              }
+            }));
+          }
+        }));
+      }
+    }
+
+    // Jika peserta tidak ikut di-restore tetapi hasil ingin dipulihkan, indeks peserta yang sedang aktif di semua server
+    if ((opts.restoreHasil || opts.restoreAnswers) && restoredPesertaMap.size === 0) {
+      await Promise.allSettled(targetShards.map(async (sh, idx) => {
+        const { data } = await sh.client.from('peserta').select('id, username');
+        (data || []).forEach(p => {
+          const u = String(p.username || '').trim().toLowerCase();
+          if (u) restoredPesertaMap.set(u, { id: p.id, shardIndex: idx, client: sh.client });
+        });
+      }));
+    }
+
+    // ---------------------------------------------------------
+    // LANGKAH 4: PULIHKAN HASIL UJIAN & JAWABAN KE SERVER MASING-MASING SISWA
+    // ---------------------------------------------------------
+    if (opts.restoreHasil && Array.isArray(backupData.hasil_ujian) && backupData.hasil_ujian.length > 0) {
+      report(88, 'Memulihkan rekap hasil ujian ke server masing-masing siswa...');
+      const hasilByShard = targetShards.map(() => []);
+      const oldIdToUser = new Map((backupData.peserta || []).map(p => [String(p.id), String(p.username || '').trim().toLowerCase()]));
+
+      backupData.hasil_ujian.forEach(h => {
+        const uName = String(
+          h.peserta_username ||
+          (h.peserta && h.peserta.username) ||
+          oldIdToUser.get(String(h.peserta_id)) ||
+          ''
+        ).trim().toLowerCase();
+        const target = restoredPesertaMap.get(uName);
+        if (!target) return;
+
+        hasilByShard[target.shardIndex].push({
+          peserta_id: target.id,
+          paket_soal_id: h.paket_soal_id || null,
+          jumlah_benar: parseInt(h.jumlah_benar || 0) || 0,
+          jumlah_salah: parseInt(h.jumlah_salah || 0) || 0,
+          nilai: parseFloat(h.nilai || 0) || 0,
+          status_kelulusan: h.status_kelulusan || 'Selesai',
+          waktu_mulai: h.waktu_mulai || null,
+          waktu_selesai: h.waktu_selesai || new Date().toISOString()
+        });
+      });
+
+      await Promise.allSettled(hasilByShard.map(async (rows, idx) => {
+        if (rows.length === 0) return;
+        const sh = targetShards[idx];
+        await this.executeWithAdminAuth(sh.client, async (c) => {
+          const { data: pkRows } = await c.from('paket_soal').select('id');
+          const pkSet = new Set((pkRows || []).map(x => String(x.id)));
+          const sanitized = rows.map(r => ({
+            ...r,
+            paket_soal_id: (r.paket_soal_id && pkSet.has(String(r.paket_soal_id))) ? r.paket_soal_id : null
+          }));
+          for (const batch of chunkArr(sanitized, 50)) {
+            const { error } = await c.from('hasil_ujian').insert(batch);
+            if (!error) shardReports[idx].hasilOk += batch.length;
+          }
+        });
+      }));
+    }
+
+    if (opts.restoreAnswers && Array.isArray(backupData.jawaban_peserta) && backupData.jawaban_peserta.length > 0) {
+      report(94, 'Memulihkan detail jawaban peserta ke server masing-masing siswa...');
+      const jwbByShard = targetShards.map(() => []);
+      const oldIdToUser = new Map((backupData.peserta || []).map(p => [String(p.id), String(p.username || '').trim().toLowerCase()]));
+
+      backupData.jawaban_peserta.forEach(a => {
+        const uName = String(a.peserta_username || oldIdToUser.get(String(a.peserta_id)) || '').trim().toLowerCase();
+        const target = restoredPesertaMap.get(uName);
+        if (!target || !a.soal_id) return;
+        jwbByShard[target.shardIndex].push({
+          peserta_id: target.id,
+          soal_id: a.soal_id,
+          jawaban: a.jawaban || null,
+          benar: Boolean(a.benar),
+          ragu_ragu: Boolean(a.ragu_ragu)
+        });
+      });
+
+      await Promise.allSettled(jwbByShard.map(async (rows, idx) => {
+        if (rows.length === 0) return;
+        const sh = targetShards[idx];
+        await this.executeWithAdminAuth(sh.client, async (c) => {
+          for (const batch of chunkArr(rows, 80)) {
+            const { error } = await c.from('jawaban_peserta').upsert(batch, { onConflict: 'peserta_id,soal_id' });
+            if (!error) shardReports[idx].jawabanOk += batch.length;
+          }
+        });
+      }));
+    }
+
+    report(100, 'Pemulihan & pembagian ke seluruh server selesai!');
+    return { ok: true, shardReports };
   }
 };
 
@@ -3628,14 +4357,42 @@ const DB_PHP = {
     });
   },
 
-  restoreBackup(backupData) {
-    return DB.api('restoreBackup', {
+  async restoreBackup(backupData, options = {}, onProgress = null) {
+    const report = (pct, msg) => {
+      if (typeof onProgress === 'function') onProgress(pct, msg);
+    };
+    report(20, 'Memulihkan bank soal & master ke server PHP/MySQL...');
+    await DB.api('restoreBackup', {
       paket_soal: Array.isArray(backupData.paket_soal) ? backupData.paket_soal : null,
       jurusan: Array.isArray(backupData.jurusan) ? backupData.jurusan : null,
       kelas: Array.isArray(backupData.kelas) ? backupData.kelas : null,
       soal: backupData.soal || [],
       pengaturan: (backupData.pengaturan_ujian && backupData.pengaturan_ujian[0]) || null
     });
+    let okCount = 0;
+    let failCount = 0;
+    if (options.restorePeserta !== false && Array.isArray(backupData.peserta) && backupData.peserta.length > 0) {
+      report(55, `Memulihkan ${backupData.peserta.length} akun peserta...`);
+      const defPass = String(options.defaultPassword || '123456').trim() || '123456';
+      for (const p of backupData.peserta) {
+        try {
+          await DB_PHP.registerPeserta(
+            p.username,
+            p.password_plain || p.password || defPass,
+            p.nama_lengkap,
+            p.jurusan || '',
+            p.kelas || '',
+            p.ruang || '',
+            p.sesi || ''
+          );
+          okCount++;
+        } catch (e) {
+          failCount++;
+        }
+      }
+    }
+    report(100, 'Pemulihan selesai.');
+    return { ok: true, shardReports: [{ id: 1, name: 'Server PHP + MySQL', pesertaOk: okCount, pesertaFail: failCount, hasilOk: 0 }] };
   },
 
   async loginAdmin(email, password) {

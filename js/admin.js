@@ -105,6 +105,7 @@ document.addEventListener("DOMContentLoaded", async () => {
     const topEmailEl = document.getElementById('admin-email');
     if (topEmailEl) topEmailEl.innerText = currentAdminUser.email || 'Administrator';
     initAdminShardSelector();
+    initBackupShardBadge();
     startTokenAutoRotateLoop();
     await refreshAllData();
     toggleAutoRefresh(true);
@@ -10054,50 +10055,136 @@ async function saveWordImportedData() {
 }
 
 // -------------------------------------------------------------
-// BACKUP & RESTORE UTILITIES
+// BACKUP & RESTORE UTILITIES (FULL MULTI-SHARD 5 SERVER)
 // -------------------------------------------------------------
 
+function initBackupShardBadge() {
+  const badge = document.getElementById('badge-backup-shard-info');
+  if (!badge) return;
+  const shards = (window.getSupabaseShards && window.getSupabaseShards()) || [];
+  if (shards.length > 1) {
+    badge.innerHTML = `<i class="bi bi-hdd-stack-fill me-1"></i>${shards.length} Server Aktif`;
+  } else if (DB.isPhp && DB.isPhp()) {
+    badge.innerHTML = `<i class="bi bi-hdd-fill me-1"></i>Mode PHP + MySQL`;
+  } else {
+    badge.innerHTML = `<i class="bi bi-server me-1"></i>1 Server`;
+  }
+}
+
 async function backupDatabaseData() {
+  initBackupShardBadge();
+  const shards = (window.getSupabaseShards && window.getSupabaseShards()) || [];
+  const serverInfo = shards.length > 1
+    ? `Data akan diambil serentak dari seluruh <strong>${shards.length} server</strong>.`
+    : 'Data akan dicadangkan dari server aktif saat ini.';
+
+  const ask = await Swal.fire({
+    title: 'Backup Seluruh Data CBT',
+    icon: 'question',
+    width: 540,
+    html: `
+      <div class="text-start small">
+        <p class="mb-2">${serverInfo}</p>
+        <div class="p-2 px-3 bg-light border rounded-3 mb-3">
+          <div class="fw-bold text-dark mb-1">Isi Cadangan Lengkap:</div>
+          <ul class="mb-0 ps-3 text-muted">
+            <li>Data Jurusan, Kelas, Pengaturan Ujian, &amp; Kop Kartu</li>
+            <li>Data Akun Guru Mapel &amp; Penugasan Mengajar</li>
+            <li>Seluruh Paket Soal, Jadwal, &amp; Bank Soal (termasuk gambar)</li>
+            <li>Seluruh Akun &amp; Password Peserta dari ${shards.length > 1 ? `ke-${shards.length}` : '1'} Server</li>
+          </ul>
+        </div>
+        <div class="form-check mb-2">
+          <input class="form-check-input" type="checkbox" id="chk-bkp-hasil" checked>
+          <label class="form-check-label fw-semibold" for="chk-bkp-hasil">Sertakan Rekap Hasil Ujian (Nilai Akhir)</label>
+        </div>
+        <div class="form-check">
+          <input class="form-check-input" type="checkbox" id="chk-bkp-answers" checked>
+          <label class="form-check-label fw-semibold" for="chk-bkp-answers">Sertakan Detail Jawaban per Soal (untuk pemulihan darurat)</label>
+        </div>
+      </div>
+    `,
+    showCancelButton: true,
+    confirmButtonColor: '#d97706',
+    confirmButtonText: '<i class="bi bi-cloud-arrow-down-fill me-1"></i> Unduh Backup Sekarang',
+    cancelButtonText: 'Batal'
+  });
+
+  if (!ask.isConfirmed) return;
+
+  const includeHasil = document.getElementById('chk-bkp-hasil')?.checked !== false;
+  const includeAnswers = document.getElementById('chk-bkp-answers')?.checked !== false;
+
   Swal.fire({
-    title: 'Mempersiapkan Backup...',
+    title: 'Mempersiapkan Backup Seluruh Data...',
+    html: `<div class="small text-muted mb-2" id="bkp-progress-msg">Menghubungi semua server...</div>
+           <div class="progress" style="height:10px;"><div id="bkp-progress-bar" class="progress-bar bg-warning progress-bar-striped progress-bar-animated" style="width:10%"></div></div>`,
     allowOutsideClick: false,
-    didOpen: () => { Swal.showLoading(); }
+    showConfirmButton: false
   });
 
   try {
-    const peserta = await DB.getPesertaList();
-    const paket = await DB.getPaketList();
-    const soal = await DB.getSoalList();
-    const hasil = await DB.getHasilList();
-    const settings = await DB.getSettings();
-    const kelas = await DB.getKelasList();
+    const backupObj = typeof DB.collectFullBackupData === 'function'
+      ? await DB.collectFullBackupData({ includeHasil, includeAnswers }, (pct, msg) => {
+          const msgEl = document.getElementById('bkp-progress-msg');
+          const barEl = document.getElementById('bkp-progress-bar');
+          if (msgEl) msgEl.innerText = msg;
+          if (barEl) barEl.style.width = `${pct}%`;
+        })
+      : {
+          version: '2.0',
+          timestamp: new Date().toISOString(),
+          school: 'SMK Negeri 1 Lempuing',
+          data: {
+            peserta: (await DB.getPesertaList()) || [],
+            paket_soal: (await DB.getPaketList()) || [],
+            jurusan: allJurusan || [],
+            kelas: (await DB.getKelasList()) || [],
+            guru: (await DB.getGuruList()) || [],
+            soal: (await DB.getSoalList()) || [],
+            hasil_ujian: includeHasil ? ((await DB.getHasilList()) || []) : [],
+            pengaturan_ujian: (await DB.getSettings()) ? [await DB.getSettings()] : []
+          }
+        };
 
-    const backupObj = {
-      version: "1.2",
-      timestamp: new Date().toISOString(),
-      school: "SMK Negeri 1 Lempuing",
-      data: {
-        peserta: peserta || [],
-        paket_soal: paket || [],
-        jurusan: allJurusan || [],
-        kelas: kelas || [],
-        soal: soal || [],
-        hasil_ujian: hasil || [],
-        pengaturan_ujian: settings ? [settings] : []
-      }
-    };
-
-    const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(backupObj, null, 2));
+    // Gunakan Blob agar ukuran cadangan besar (ratusan siswa & gambar soal) tidak gagal di browser
+    const jsonString = JSON.stringify(backupObj, null, 2);
+    const blob = new Blob([jsonString], { type: 'application/json;charset=utf-8' });
+    const blobUrl = URL.createObjectURL(blob);
     const dlAnchorElem = document.createElement('a');
-    dlAnchorElem.setAttribute("href", dataStr);
-    
-    const formattedDate = new Date().toISOString().slice(0,10);
-    dlAnchorElem.setAttribute("download", `Backup_CBT_SMKN1Lempuing_${formattedDate}.json`);
-    dlAnchorElem.click();
+    dlAnchorElem.href = blobUrl;
 
-    Swal.fire('Cadangan Berhasil', 'Berkas backup database JSON berhasil diunduh.', 'success');
+    const nowStamp = new Date().toISOString().replace(/[:T]/g, '-').slice(0, 16);
+    dlAnchorElem.download = `Backup_Lengkap_CBT_5Server_${nowStamp}.json`;
+    document.body.appendChild(dlAnchorElem);
+    dlAnchorElem.click();
+    document.body.removeChild(dlAnchorElem);
+    setTimeout(() => URL.revokeObjectURL(blobUrl), 5000);
+
+    const d = backupObj.data || {};
+    const sizeKb = (blob.size / 1024).toFixed(1);
+    const sizeTxt = blob.size >= 1048576 ? `${(blob.size / 1048576).toFixed(2)} MB` : `${sizeKb} KB`;
+
+    Swal.fire({
+      icon: 'success',
+      title: 'Backup Lengkap Berhasil!',
+      html: `
+        <div class="text-start small p-3 bg-light border rounded-3">
+          <div><i class="bi bi-file-earmark-code text-warning me-1"></i> Ukuran File: <strong>${sizeTxt}</strong></div>
+          <hr class="my-2">
+          <div class="row g-1">
+            <div class="col-6">👥 Peserta: <strong>${(d.peserta || []).length}</strong></div>
+            <div class="col-6">👩‍🏫 Guru Mapel: <strong>${(d.guru || []).length}</strong></div>
+            <div class="col-6">📚 Paket Soal: <strong>${(d.paket_soal || []).length}</strong></div>
+            <div class="col-6">📝 Butir Soal: <strong>${(d.soal || []).length}</strong></div>
+            <div class="col-6">🏫 Kelas / Jurusan: <strong>${(d.kelas || []).length} / ${(d.jurusan || []).length}</strong></div>
+            <div class="col-6">🏆 Hasil Ujian: <strong>${(d.hasil_ujian || []).length}</strong></div>
+          </div>
+        </div>
+      `
+    });
   } catch (err) {
-    Swal.fire('Gagal Backup', err.message || 'Terjadi kesalahan.', 'error');
+    Swal.fire('Gagal Backup', err.message || 'Terjadi kesalahan saat mencadangkan data.', 'error');
   }
 }
 
@@ -10105,54 +10192,260 @@ function triggerRestoreUpload() {
   document.getElementById('restore-file-input').click();
 }
 
-async function restoreDatabaseData(input) {
-  if (input.files.length === 0) return;
-  const file = input.files[0];
+function renderDistributionPreviewBoxes(pesertaList, strategy) {
+  const container = document.getElementById('restore-dist-preview');
+  if (!container || typeof DB.computePesertaShardDistribution !== 'function') return;
+  const buckets = DB.computePesertaShardDistribution(pesertaList || [], strategy);
+  container.innerHTML = buckets.map(b => `
+    <div class="col">
+      <div class="p-2 border rounded-3 bg-white text-center shadow-sm">
+        <div class="fw-bold text-primary" style="font-size:0.74rem;">${escapeHtml(b.shardName.split('(')[0].trim())}</div>
+        <div class="text-muted text-truncate" style="font-size:0.65rem;" title="${escapeHtml(b.shardName)}">${escapeHtml(b.shardName.includes('(') ? b.shardName.split('(')[1].replace(')', '') : '')}</div>
+        <div class="fs-5 fw-bold text-dark mt-1">${b.items.length}</div>
+        <div class="text-muted" style="font-size:0.65rem;">Siswa</div>
+      </div>
+    </div>
+  `).join('');
+}
 
-  const confirmRes = await Swal.fire({
-    title: 'Pulihkan Data?',
-    text: 'Tindakan ini akan menimpa data bank soal saat ini. Apakah Anda yakin ingin memulihkan data?',
-    icon: 'warning',
+async function openRestoreAndDistributeModal(backupObj, modalTitle = 'Restore Backup & Bagi ke 5 Server') {
+  const d = (backupObj && backupObj.data) ? backupObj.data : {};
+  const pesertaArr = Array.isArray(d.peserta) ? d.peserta : [];
+  const paketArr = Array.isArray(d.paket_soal) ? d.paket_soal : [];
+  const soalArr = Array.isArray(d.soal) ? d.soal : [];
+  const guruArr = Array.isArray(d.guru) ? d.guru : [];
+  const jurArr = Array.isArray(d.jurusan) ? d.jurusan : [];
+  const klsArr = Array.isArray(d.kelas) ? d.kelas : [];
+  const hasilArr = Array.isArray(d.hasil_ujian) ? d.hasil_ujian : [];
+  const jwbArr = Array.isArray(d.jawaban_peserta) ? d.jawaban_peserta : [];
+  const shards = (window.getSupabaseShards && window.getSupabaseShards()) || [];
+
+  const ask = await Swal.fire({
+    title: modalTitle,
+    width: 680,
+    html: `
+      <div class="text-start small">
+        <div class="p-2 px-3 bg-light border rounded-3 mb-3">
+          <div class="fw-bold text-dark mb-1"><i class="bi bi-archive-fill text-warning me-1"></i>Ringkasan Isi Data (${backupObj.timestamp ? new Date(backupObj.timestamp).toLocaleString('id-ID') : 'Cadangan'}):</div>
+          <div class="row g-1 text-muted">
+            <div class="col-4">👥 Peserta: <strong class="text-dark">${pesertaArr.length}</strong></div>
+            <div class="col-4">📚 Paket Soal: <strong class="text-dark">${paketArr.length}</strong></div>
+            <div class="col-4">📝 Butir Soal: <strong class="text-dark">${soalArr.length}</strong></div>
+            <div class="col-4">👩‍🏫 Guru Mapel: <strong class="text-dark">${guruArr.length}</strong></div>
+            <div class="col-4">🏫 Kelas/Jur: <strong class="text-dark">${klsArr.length}/${jurArr.length}</strong></div>
+            <div class="col-4">🏆 Hasil/Jwb: <strong class="text-dark">${hasilArr.length}/${jwbArr.length}</strong></div>
+          </div>
+        </div>
+
+        <div class="fw-bold text-dark mb-1"><i class="bi bi-check2-square text-primary me-1"></i>Pilih Data yang Akan Dipulihkan ke Semua Server:</div>
+        <div class="row g-1 mb-3 ps-1">
+          <div class="col-sm-6">
+            <div class="form-check">
+              <input class="form-check-input" type="checkbox" id="rst-chk-master" ${(jurArr.length || klsArr.length || guruArr.length || (d.pengaturan_ujian && d.pengaturan_ujian.length)) ? 'checked' : ''}>
+              <label class="form-check-label" for="rst-chk-master">Master Jurusan, Kelas, Guru &amp; Pengaturan</label>
+            </div>
+          </div>
+          <div class="col-sm-6">
+            <div class="form-check">
+              <input class="form-check-input" type="checkbox" id="rst-chk-soal" ${(paketArr.length || soalArr.length) ? 'checked' : ''}>
+              <label class="form-check-label" for="rst-chk-soal">Paket Soal &amp; Bank Soal (Sinkron 5 Server)</label>
+            </div>
+          </div>
+          <div class="col-sm-6">
+            <div class="form-check">
+              <input class="form-check-input" type="checkbox" id="rst-chk-peserta" ${pesertaArr.length ? 'checked' : ''}>
+              <label class="form-check-label fw-semibold text-primary" for="rst-chk-peserta">Akun Peserta (Bagi ke ${Math.max(1, shards.length)} Server)</label>
+            </div>
+          </div>
+          <div class="col-sm-6">
+            <div class="form-check">
+              <input class="form-check-input" type="checkbox" id="rst-chk-hasil" ${hasilArr.length ? 'checked' : ''}>
+              <label class="form-check-label" for="rst-chk-hasil">Hasil Ujian (${hasilArr.length})</label>
+            </div>
+          </div>
+          <div class="col-sm-6">
+            <div class="form-check">
+              <input class="form-check-input" type="checkbox" id="rst-chk-answers" ${jwbArr.length ? 'checked' : ''}>
+              <label class="form-check-label" for="rst-chk-answers">Detail Jawaban Siswa (${jwbArr.length})</label>
+            </div>
+          </div>
+          <div class="col-sm-6">
+            <div class="form-check">
+              <input class="form-check-input" type="checkbox" id="rst-chk-preserve-status" ${hasilArr.length ? 'checked' : ''}>
+              <label class="form-check-label" for="rst-chk-preserve-status">Pertahankan status ujian siswa sebelumnya</label>
+            </div>
+          </div>
+        </div>
+
+        ${pesertaArr.length > 0 && shards.length > 1 ? `
+        <div class="p-2 px-3 border border-primary-subtle bg-primary-subtle bg-opacity-10 rounded-3 mb-3">
+          <div class="fw-bold text-primary mb-2"><i class="bi bi-diagram-3-fill me-1"></i>Cara Membagi Peserta ke ${shards.length} Server Sekaligus:</div>
+          <div class="d-flex flex-column gap-1 mb-2">
+            <label class="form-check small mb-0" style="cursor:pointer;">
+              <input class="form-check-input" type="radio" name="rst-dist-strategy" value="auto_jurusan" checked>
+              <span class="fw-semibold">Sesuai Jurusan &amp; Sesi (Rekomendasi)</span> — jurusan lain dibagi merata otomatis
+            </label>
+            <label class="form-check small mb-0" style="cursor:pointer;">
+              <input class="form-check-input" type="radio" name="rst-dist-strategy" value="balanced_even">
+              <span class="fw-semibold">Bagi Rata Seimbang (~${Math.ceil(pesertaArr.length / shards.length)} siswa/server)</span> — dikelompokkan rapi per kelas
+            </label>
+            <label class="form-check small mb-0" style="cursor:pointer;">
+              <input class="form-check-input" type="radio" name="rst-dist-strategy" value="preserve_shard">
+              <span class="fw-semibold">Ikuti Asal Server di File Backup</span> — kembalikan ke server asalnya masing-masing
+            </label>
+          </div>
+          <div class="small fw-semibold text-muted mb-1">Estimasi Pembagian per Server:</div>
+          <div class="row row-cols-2 row-cols-md-5 g-2" id="restore-dist-preview"></div>
+        </div>
+        ` : ''}
+
+        <div class="row g-2 align-items-center bg-warning-subtle bg-opacity-25 p-2 rounded-3 border border-warning">
+          <div class="col-sm-7">
+            <div class="form-check mb-0">
+              <input class="form-check-input" type="checkbox" id="rst-chk-clear" checked>
+              <label class="form-check-label fw-semibold text-danger" for="rst-chk-clear">
+                Timpa &amp; bersihkan data lama terlebih dahulu
+              </label>
+            </div>
+          </div>
+          <div class="col-sm-5">
+            <div class="input-group input-group-sm">
+              <span class="input-group-text">Pass Cadangan</span>
+              <input type="text" class="form-control" id="rst-default-pass" value="123456" title="Dipakai jika ada peserta yang password-nya kosong di file">
+            </div>
+          </div>
+        </div>
+      </div>
+    `,
+    didOpen: () => {
+      if (pesertaArr.length > 0 && shards.length > 1) {
+        renderDistributionPreviewBoxes(pesertaArr, 'auto_jurusan');
+        document.querySelectorAll('input[name="rst-dist-strategy"]').forEach(rad => {
+          rad.addEventListener('change', (ev) => {
+            renderDistributionPreviewBoxes(pesertaArr, ev.target.value);
+          });
+        });
+      }
+    },
     showCancelButton: true,
-    confirmButtonColor: '#ffc107',
+    confirmButtonColor: '#0d6efd',
     cancelButtonColor: '#6c757d',
-    confirmButtonText: 'Ya, Timpa & Pulihkan',
-    cancelButtonText: 'Batal'
+    confirmButtonText: `<i class="bi bi-cloud-arrow-up-fill me-1"></i> Mulai Pulihkan ke ${Math.max(1, shards.length)} Server`,
+    cancelButtonText: 'Batal',
+    preConfirm: () => {
+      return {
+        restoreMaster: Boolean(document.getElementById('rst-chk-master')?.checked),
+        restoreBankSoal: Boolean(document.getElementById('rst-chk-soal')?.checked),
+        restorePeserta: Boolean(document.getElementById('rst-chk-peserta')?.checked),
+        restoreHasil: Boolean(document.getElementById('rst-chk-hasil')?.checked),
+        restoreAnswers: Boolean(document.getElementById('rst-chk-answers')?.checked),
+        preserveStudentStatus: Boolean(document.getElementById('rst-chk-preserve-status')?.checked),
+        clearExisting: Boolean(document.getElementById('rst-chk-clear')?.checked),
+        distributionStrategy: document.querySelector('input[name="rst-dist-strategy"]:checked')?.value || 'auto_jurusan',
+        defaultPassword: (document.getElementById('rst-default-pass')?.value || '123456').trim() || '123456'
+      };
+    }
   });
 
-  if (!confirmRes.isConfirmed) {
-    input.value = "";
-    return;
-  }
+  if (!ask.isConfirmed || !ask.value) return;
+  const restoreOptions = ask.value;
 
   Swal.fire({
-    title: 'Membaca Berkas Cadangan...',
+    title: `Memulihkan & Membagi ke ${Math.max(1, shards.length)} Server...`,
+    html: `<div class="small text-muted mb-2" id="rst-progress-msg">Menyiapkan koneksi server...</div>
+           <div class="progress" style="height:12px;"><div id="rst-progress-bar" class="progress-bar bg-primary progress-bar-striped progress-bar-animated" style="width:5%"></div></div>`,
     allowOutsideClick: false,
-    didOpen: () => { Swal.showLoading(); }
+    showConfirmButton: false
   });
+
+  try {
+    const res = await DB.restoreBackup(backupObj.data, restoreOptions, (pct, msg) => {
+      const msgEl = document.getElementById('rst-progress-msg');
+      const barEl = document.getElementById('rst-progress-bar');
+      if (msgEl) msgEl.innerText = msg;
+      if (barEl) barEl.style.width = `${pct}%`;
+    });
+
+    const reports = (res && Array.isArray(res.shardReports)) ? res.shardReports : [];
+    const totalOk = reports.reduce((s, r) => s + (r.pesertaOk || 0), 0);
+    const totalFail = reports.reduce((s, r) => s + (r.pesertaFail || 0), 0);
+
+    let reportHtml = `<p class="small text-muted mb-2">Seluruh data terpilih telah dipulihkan &amp; disinkronkan ke <strong>${Math.max(1, reports.length)} server</strong> sekaligus.</p>`;
+    if (reports.length > 0 && restoreOptions.restorePeserta) {
+      reportHtml += `
+        <div class="table-responsive text-start small">
+          <table class="table table-sm table-bordered mb-0">
+            <thead class="table-light">
+              <tr><th>Server</th><th class="text-center">Peserta Masuk</th><th class="text-center">Hasil</th></tr>
+            </thead>
+            <tbody>
+              ${reports.map(r => `
+                <tr>
+                  <td class="fw-semibold">${escapeHtml(r.name)}</td>
+                  <td class="text-center">
+                    <span class="badge bg-success">${r.pesertaOk || 0}</span>
+                    ${r.pesertaFail > 0 ? `<span class="badge bg-danger ms-1">${r.pesertaFail} gagal</span>` : ''}
+                  </td>
+                  <td class="text-center">${r.hasilOk || 0}</td>
+                </tr>
+              `).join('')}
+            </tbody>
+          </table>
+        </div>
+      `;
+    }
+
+    Swal.fire({
+      icon: totalFail > 0 && totalOk === 0 ? 'warning' : 'success',
+      title: 'Pemulihan 5 Server Selesai!',
+      html: reportHtml
+    });
+    await refreshAllData();
+  } catch (err) {
+    Swal.fire('Gagal Restorasi', err.message || 'Terjadi kesalahan saat memulihkan data.', 'error');
+  }
+}
+
+async function restoreDatabaseData(input) {
+  if (!input || !input.files || input.files.length === 0) return;
+  const file = input.files[0];
 
   const reader = new FileReader();
   reader.onload = async (e) => {
     try {
       const backupObj = JSON.parse(e.target.result);
-      if (!backupObj.data || !backupObj.data.soal) {
-        throw new Error("Format berkas backup JSON tidak valid.");
+      if (!backupObj || !backupObj.data || (!backupObj.data.soal && !backupObj.data.peserta && !backupObj.data.paket_soal)) {
+        throw new Error('Format berkas backup JSON tidak valid.');
       }
-
-      Swal.update({ title: 'Memulihkan data bank soal...' });
-
-      // Clean old questions & load restore (Local / Supabase / PHP-MySQL)
-      await DB.restoreBackup(backupObj.data);
-
-      Swal.fire('Pemulihan Selesai', 'Data bank soal dan konfigurasi ujian berhasil dipulihkan.', 'success');
-      await refreshAllData();
+      await openRestoreAndDistributeModal(backupObj, 'Restore Backup & Bagi ke 5 Server');
     } catch (err) {
-      Swal.fire('Gagal Restorasi', err.message || 'Terjadi kesalahan saat parsing JSON.', 'error');
+      Swal.fire('Gagal Membaca Backup', err.message || 'Berkas JSON tidak valid atau rusak.', 'error');
     } finally {
-      input.value = "";
+      input.value = '';
     }
   };
   reader.readAsText(file);
+}
+
+async function openLiveRedistribute5ServersModal() {
+  const shards = (window.getSupabaseShards && window.getSupabaseShards()) || [];
+  if (shards.length <= 1) {
+    Swal.fire('Mode 1 Server', 'Saat ini sistem terhubung ke 1 server. Fitur pembagian 5 server otomatis aktif saat terhubung ke multi-server Supabase.', 'info');
+    return;
+  }
+
+  Swal.fire({
+    title: 'Membaca Data Live dari 5 Server...',
+    allowOutsideClick: false,
+    didOpen: () => { Swal.showLoading(); }
+  });
+
+  try {
+    const liveBackup = await DB.collectFullBackupData({ includeHasil: true, includeAnswers: true });
+    await openRestoreAndDistributeModal(liveBackup, 'Sinkron & Bagi Ulang Data Live ke 5 Server');
+  } catch (err) {
+    Swal.fire('Gagal Mengumpulkan Data Live', err.message || 'Terjadi kesalahan.', 'error');
+  }
 }
 
 // -------------------------------------------------------------
@@ -12074,6 +12367,7 @@ window.saveImportedData = saveImportedData;
 window.backupDatabaseData = backupDatabaseData;
 window.triggerRestoreUpload = triggerRestoreUpload;
 window.restoreDatabaseData = restoreDatabaseData;
+window.openLiveRedistribute5ServersModal = openLiveRedistribute5ServersModal;
 window.filterPesertaList = filterPesertaList;
 window.filterPaketList = filterPaketList;
 window.toggleGuruPaketGroup = toggleGuruPaketGroup;

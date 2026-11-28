@@ -588,7 +588,7 @@
               <p class="text-muted small mb-0">Tidak perlu atur akun satu-satu. Cukup bagikan link di bawah ke grup WhatsApp Guru Pengawas.</p>
             </div>
             <div class="btn-toolbar mb-2 mb-md-0 gap-2 flex-wrap">
-              <a href="pengawas.html?v=90" target="_blank" class="btn btn-primary btn-sm rounded-pill px-3 fw-semibold shadow-sm">
+              <a href="pengawas.html?v=91" target="_blank" class="btn btn-primary btn-sm rounded-pill px-3 fw-semibold shadow-sm">
                 <i class="bi bi-box-arrow-up-right me-1"></i> Buka Aplikasi Pengawas
               </a>
               <button class="btn btn-success btn-sm rounded-pill px-3 fw-semibold shadow-sm" onclick="copyPortalPengawasUrl()">
@@ -612,7 +612,7 @@
                   </button>
                 </div>
                 <div class="d-flex flex-wrap gap-2">
-                  <a href="pengawas.html?v=90" target="_blank" class="btn btn-outline-primary btn-sm rounded-pill px-3 fw-semibold">
+                  <a href="pengawas.html?v=91" target="_blank" class="btn btn-outline-primary btn-sm rounded-pill px-3 fw-semibold">
                     <i class="bi bi-phone me-1"></i> Coba Buka Tampilan Pengawas
                   </a>
                   <button class="btn btn-warning text-dark btn-sm rounded-pill px-3 fw-bold" type="button" onclick="cetakKartuPengawasRuang()">
@@ -1476,26 +1476,38 @@
             <!-- Database Backup and Restore Utility -->
             <div class="col-md-6">
               <div class="glass-card p-4">
-                <h5 class="fw-bold mb-3 text-warning"><i class="bi bi-database-fill-gear me-2"></i>Backup & Restore</h5>
-                <p class="small text-muted mb-4">Cadangkan seluruh bank soal, data peserta, dan hasil ujian dalam format
-                  JSON, atau pulihkan dari cadangan sebelumnya.</p>
-                <div class="row g-2">
+                <div class="d-flex justify-content-between align-items-center flex-wrap gap-2 mb-2">
+                  <h5 class="fw-bold mb-0 text-warning"><i class="bi bi-database-fill-gear me-2"></i>Backup &amp; Restore (5 Server)</h5>
+                  <span class="badge bg-warning-subtle text-dark border border-warning-subtle" id="badge-backup-shard-info">Multi-Server Ready</span>
+                </div>
+                <p class="small text-muted mb-3">
+                  Cadangkan <strong>seluruh data</strong> (Peserta, Guru, Jurusan, Kelas, Paket, Bank Soal, Pengaturan, &amp; Hasil Ujian) dari ke-5 server ke 1 file JSON, lalu pulihkan sekaligus <strong>langsung membagi rata/per jurusan ke 5 server</strong>.
+                </p>
+                <div class="row g-2 mb-2">
                   <div class="col-6">
-                    <button class="btn btn-outline-warning w-100 py-3 d-flex flex-column align-items-center gap-2"
+                    <button class="btn btn-outline-warning w-100 py-3 d-flex flex-column align-items-center gap-1"
                       onclick="backupDatabaseData()">
                       <i class="bi bi-cloud-arrow-down-fill fs-3"></i>
-                      <span>Backup ke JSON</span>
+                      <span class="fw-semibold">Backup Seluruh Data</span>
+                      <small class="text-muted" style="font-size: 0.7rem;">Semua 5 Server &rarr; 1 JSON</small>
                     </button>
                   </div>
                   <div class="col-6">
-                    <button class="btn btn-warning w-100 py-3 d-flex flex-column align-items-center gap-2"
+                    <button class="btn btn-warning w-100 py-3 d-flex flex-column align-items-center gap-1 text-dark"
                       onclick="triggerRestoreUpload()">
                       <i class="bi bi-cloud-arrow-up-fill fs-3"></i>
-                      <span>Restore dari JSON</span>
+                      <span class="fw-semibold">Restore &amp; Bagi 5 Server</span>
+                      <small class="text-dark opacity-75" style="font-size: 0.7rem;">Dari File JSON Backup</small>
                     </button>
                     <input type="file" id="restore-file-input" class="d-none" accept=".json"
                       onchange="restoreDatabaseData(this)">
                   </div>
+                </div>
+                <div class="d-grid">
+                  <button class="btn btn-outline-primary btn-sm rounded-3 py-2 fw-semibold" type="button"
+                    onclick="openLiveRedistribute5ServersModal()">
+                    <i class="bi bi-hdd-network-fill me-1"></i> Sinkron &amp; Bagi Ulang Data Live ke 5 Server Sekarang
+                  </button>
                 </div>
               </div>
             </div>
@@ -2640,13 +2652,13 @@ Jawaban: B"></textarea>
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 
   <!-- CBT Modules -->
-  <script src="js/config.js?v=90"></script>
-  <script src="js/supabase-config.js?v=90"></script>
-  <script src="js/db-adapter.js?v=90"></script>
-  <script src="js/auth.js?v=90"></script>
-  <script src="js/excel-helpers.js?v=90"></script>
-  <script src="js/templates.js?v=90"></script>
-  <script src="js/admin.js?v=90"></script>
+  <script src="js/config.js?v=91"></script>
+  <script src="js/supabase-config.js?v=91"></script>
+  <script src="js/db-adapter.js?v=91"></script>
+  <script src="js/auth.js?v=91"></script>
+  <script src="js/excel-helpers.js?v=91"></script>
+  <script src="js/templates.js?v=91"></script>
+  <script src="js/admin.js?v=91"></script>
   <script>
     // Dark mode logic
     const themeToggleBtn = document.getElementById('theme-toggle-admin');
