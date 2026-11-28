@@ -93,6 +93,28 @@
       border: 2px solid #2563eb;
       background: #eff6ff;
     }
+
+    .mapel-live-banner {
+      background: linear-gradient(135deg, #eff6ff 0%, #e0f2fe 100%);
+      border: 1.5px solid #93c5fd;
+      border-left: 5px solid #2563eb;
+      border-radius: 14px;
+    }
+
+    .mapel-live-banner.is-idle {
+      background: linear-gradient(135deg, #f8fafc 0%, #f1f5f9 100%);
+      border-color: #cbd5e1;
+      border-left: 5px solid #64748b;
+    }
+
+    .pulse-dot-green {
+      display: inline-block;
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background-color: #16a34a;
+      box-shadow: 0 0 0 3px rgba(22, 163, 74, 0.22);
+    }
   </style>
 </head>
 
@@ -122,6 +144,23 @@
   </nav>
 
   <div class="container-lg py-3 px-3">
+
+    <!-- 0. BANNER KETERANGAN MATA PELAJARAN UJIAN SAAT INI (Langsung Tampil Begitu Pengawas Masuk) -->
+    <div class="mapel-live-banner p-3 mb-3 shadow-sm" id="card-proctor-mapel-info">
+      <div class="d-flex justify-content-between align-items-center flex-wrap gap-2 mb-1">
+        <div class="small fw-bold text-primary d-flex align-items-center gap-2" id="lbl-mapel-banner-title">
+          <i class="bi bi-journal-bookmark-fill"></i>
+          <span>MATA PELAJARAN UJIAN SAAT INI</span>
+        </div>
+        <span class="badge bg-white text-secondary border rounded-pill" id="badge-mapel-banner-status">
+          Memeriksa jadwal ujian...
+        </span>
+      </div>
+      <div id="proctor-mapel-banner-body" class="small text-muted">
+        <span class="spinner-border spinner-border-sm text-primary me-1" style="width:0.8rem;height:0.8rem;"></span>
+        Memuat informasi mata pelajaran aktif...
+      </div>
+    </div>
 
     <!-- 1. PANEL PILIH BEBERAPA KELAS YANG DIAWASI (Langsung Tampil Tanpa Login) -->
     <div class="card border-0 shadow-sm rounded-4 p-3 p-md-4 mb-3 border-top border-4 border-primary" id="card-kelas-picker">
@@ -288,10 +327,10 @@
   <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 
-  <script src="js/config.js?v=89"></script>
-  <script src="js/supabase-config.js?v=89"></script>
-  <script src="js/db-adapter.js?v=89"></script>
-  <script src="js/pengawas.js?v=89"></script>
+  <script src="js/config.js?v=90"></script>
+  <script src="js/supabase-config.js?v=90"></script>
+  <script src="js/db-adapter.js?v=90"></script>
+  <script src="js/pengawas.js?v=90"></script>
 </body>
 
 </html>

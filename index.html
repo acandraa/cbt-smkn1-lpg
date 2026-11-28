@@ -80,7 +80,19 @@
           </div>
         </form>
 
-       
+        <div class="text-center pt-3 border-top mt-4 d-flex justify-content-center align-items-center flex-wrap gap-2">
+          <a href="daftar-guru.html" class="text-decoration-none small text-muted">
+            <i class="bi bi-journal-bookmark me-1"></i>Daftar Guru & Mapel
+          </a>
+          <span class="text-muted opacity-50">&bull;</span>
+          <a href="login-admin.html?role=guru" class="text-decoration-none small text-muted">
+            <i class="bi bi-person-workspace me-1"></i>Login Guru Mapel
+          </a>
+          <span class="text-muted opacity-50">&bull;</span>
+          <a href="login-admin.html?v=90" class="text-decoration-none small text-muted">
+            <i class="bi bi-shield-lock me-1"></i>Portal Admin
+          </a>
+        </div>
 
       </div>
 
@@ -96,10 +108,10 @@
   <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
   <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-  <script src="js/config.js?v=89"></script>
-  <script src="js/supabase-config.js?v=89"></script>
-  <script src="js/db-adapter.js?v=89"></script>
-  <script src="js/auth.js?v=89"></script>
+  <script src="js/config.js?v=90"></script>
+  <script src="js/supabase-config.js?v=90"></script>
+  <script src="js/db-adapter.js?v=90"></script>
+  <script src="js/auth.js?v=90"></script>
 
   <script>
     // Toggle Password Visibility
@@ -178,7 +190,7 @@
             timer: 1800,
             showConfirmButton: false
           }).then(() => {
-            window.location.href = 'ujian.html?v=89';
+            window.location.href = 'ujian.html?v=90';
           });
           return true;
         } catch (takeoverErr) {
@@ -251,7 +263,7 @@
           return;
         }
 
-        window.location.href = 'ujian.html?v=89';
+        window.location.href = 'ujian.html?v=90';
       } catch (err) {
         if (err && err.code === 'MULTI_DEVICE_ACTIVE') {
           const moved = await handleMultiDeviceTakeoverModal(num, pass, err);

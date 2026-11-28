@@ -3,6 +3,7 @@
 const PENGAWAS_STATE_KEY = 'CBT_PENGAWAS_WATCH_STATE_V2';
 
 let proctorAllPeserta = [];
+let proctorAllPaket = [];
 let proctorMasterKelas = [];
 let proctorMasterJurusan = [];
 let proctorExamSettings = null;
@@ -151,8 +152,9 @@ async function refreshProctorData(showSpin = false) {
     // Pastikan autentikasi seluruh 5 shard aktif sebelum menarik peserta gabungan lintas jurusan
     await DB.ensureAllShardsAdminAuth();
 
-    const [pesertaData, settingsData, masterCat, kelasTbl, jurusanTbl] = await Promise.all([
+    const [pesertaData, paketData, settingsData, masterCat, kelasTbl, jurusanTbl] = await Promise.all([
       DB.getPesertaList({ forceAllShards: true }),
+      (typeof DB.getPaketList === 'function' ? DB.getPaketList().catch(() => []) : Promise.resolve([])),
       DB.getSettings().catch(() => null),
       (typeof DB.getMasterCatalog === 'function' ? DB.getMasterCatalog().catch(() => null) : Promise.resolve(null)),
       (typeof DB.getKelasList === 'function' ? DB.getKelasList().catch(() => []) : Promise.resolve([])),
@@ -160,6 +162,7 @@ async function refreshProctorData(showSpin = false) {
     ]);
 
     proctorAllPeserta = Array.isArray(pesertaData) ? pesertaData : [];
+    proctorAllPaket = Array.isArray(paketData) ? paketData : [];
     if (settingsData) proctorExamSettings = settingsData;
 
     // Gabungkan seluruh Master Kelas & Jurusan dari ke-5 server + Master Registry + Data Peserta agar 100% lengkap!
@@ -199,6 +202,7 @@ async function refreshProctorData(showSpin = false) {
       .sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
 
     renderKelasPickerButtons();
+    renderProctorActiveMapelBanner();
     renderWatchedStudents();
   } catch (err) {
     console.error('Gagal memuat data pengawas:', err);
@@ -232,6 +236,329 @@ function inferJurusanFromKelasName(kelasUpper, jurusanMapByKelas) {
   if (u.includes('AKUNTANSI')) return 'AKL';
   if (u.includes('TJKT')) return 'TKJ';
   return '';
+}
+
+// ==================== DETEKSI MATA PELAJARAN AKTIF UNTUK PENGAWAS ====================
+
+function normalizeJurusanAliasProctor(raw) {
+  const s = String(raw || '').toLowerCase().trim();
+  if (!s || s === 'semua' || s === 'semua jurusan') return 'semua';
+  if (s === 'akl' || s === 'akuntansi' || s.startsWith('akuntansi ')) return 'akl';
+  if (s === 'tkj' || s === 'tjkt') return 'tkj';
+  if (s === 'tkro' || s === 'tkr') return 'tkro';
+  if (s === 'tbsm' || s === 'tsm') return 'tbsm';
+  return s;
+}
+
+function checkKelasMatchProctor(pKelas, targetKelas) {
+  if (!pKelas || pKelas === '' || pKelas.toLowerCase() === 'semua') {
+    return { match: true, specificity: 0 };
+  }
+  if (!targetKelas) return { match: false, specificity: 0 };
+
+  const s = String(targetKelas).toLowerCase().replace(/\s+/g, ' ').trim();
+  const parts = String(pKelas).toLowerCase().split(',').map(x => x.replace(/\s+/g, ' ').trim()).filter(Boolean);
+
+  if (parts.includes(s)) return { match: true, specificity: 3 };
+
+  const specificGrades = new Set();
+  for (const part of parts) {
+    if (part.startsWith('tingkat:') || part.startsWith('tingkat ')) continue;
+    if (['x', 'xi', 'xii', '10', '11', '12'].includes(part)) continue;
+    const pTokens = part.split(/[\s\-_]+/);
+    let g = pTokens[0] || '';
+    if (g === 'kelas' && pTokens.length > 1) g = pTokens[1];
+    if (['x', 'xi', 'xii', '10', '11', '12'].includes(g)) specificGrades.add(g);
+  }
+
+  const sTokens = s.split(/[\s\-_]+/);
+  let sTingkat = sTokens[0] || '';
+  if (sTingkat === 'kelas' && sTokens.length > 1) sTingkat = sTokens[1];
+
+  for (const part of parts) {
+    let targetTingkat = '';
+    if (part.startsWith('tingkat:')) targetTingkat = part.replace('tingkat:', '').trim();
+    else if (part.startsWith('tingkat ')) targetTingkat = part.replace('tingkat ', '').trim();
+    else if (['x', 'xi', 'xii', '10', '11', '12'].includes(part)) targetTingkat = part;
+
+    if (targetTingkat && specificGrades.has(targetTingkat)) continue;
+    if (targetTingkat && sTingkat === targetTingkat) return { match: true, specificity: 2 };
+  }
+
+  return { match: false, specificity: 0 };
+}
+
+function formatPaketTimeRange(p) {
+  if (!p || !p.jadwal_mulai) return '';
+  const now = new Date();
+  const start = new Date(p.jadwal_mulai);
+  const end = p.jadwal_selesai ? new Date(p.jadwal_selesai) : null;
+  if (isNaN(start.getTime())) return '';
+
+  const sameDayStart = start.toDateString() === now.toDateString();
+  const tOpts = { hour: '2-digit', minute: '2-digit' };
+  const dOpts = { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' };
+  const sStr = start.toLocaleString('id-ID', sameDayStart ? tOpts : dOpts);
+
+  if (!end || isNaN(end.getTime()) || end.getFullYear() > 2090) {
+    return `Mulai ${sStr}`;
+  }
+  const sameDayEnd = end.toDateString() === start.toDateString();
+  const eStr = end.toLocaleString('id-ID', sameDayEnd ? tOpts : dOpts);
+  return `${sStr} – ${eStr}`;
+}
+
+function formatPaketTargetScope(p) {
+  const kRaw = String(p.kelas || '').trim();
+  const jRaw = String(p.jurusan || '').trim();
+  const parts = [];
+  if (kRaw && kRaw.toLowerCase() !== 'semua') {
+    const kFmt = kRaw.split(',').map(x => {
+      const t = x.trim();
+      return t.toUpperCase().startsWith('TINGKAT:') ? `Kelas ${t.split(':')[1].toUpperCase()}` : t.toUpperCase();
+    }).join(', ');
+    parts.push(kFmt);
+  } else {
+    parts.push('Semua Kelas');
+  }
+  if (jRaw && jRaw.toLowerCase() !== 'semua') {
+    parts.push(jRaw.toUpperCase());
+  }
+  return parts.join(' • ');
+}
+
+function getAllActiveAndUpcomingPakets() {
+  const now = new Date();
+  const active = [];
+  const upcoming = [];
+
+  (proctorAllPaket || []).forEach(p => {
+    if (!p || !p.jadwal_mulai) return;
+    const start = new Date(p.jadwal_mulai);
+    const end = p.jadwal_selesai ? new Date(p.jadwal_selesai) : new Date('2099-12-31');
+    if (isNaN(start.getTime())) return;
+
+    const cleanName = String(p.nama_paket || 'Mata Pelajaran').replace(/\s+/g, ' ').trim();
+    const enriched = { ...p, _cleanName: cleanName, _startMs: start.getTime(), _endMs: end.getTime() };
+
+    if (now >= start && now <= end) {
+      active.push(enriched);
+    } else if (start > now && (start.getTime() - now.getTime()) <= 18 * 3600 * 1000) {
+      upcoming.push(enriched);
+    }
+  });
+
+  active.sort((a, b) => a._cleanName.localeCompare(b._cleanName, undefined, { numeric: true }));
+  upcoming.sort((a, b) => a._startMs - b._startMs);
+  return { active, upcoming };
+}
+
+function getMatchingPaketsForKelas(kelasUpper, paketPool) {
+  const kNorm = String(kelasUpper || '').replace(/\s+/g, ' ').trim().toUpperCase();
+  if (!kNorm) return [];
+
+  // Cari jurusan dari siswa di kelas ini atau infer dari nama kelas
+  let jurGuess = '';
+  const sampleStudent = proctorAllPeserta.find(p => String(p.kelas || '').replace(/\s+/g, ' ').trim().toUpperCase() === kNorm && p.jurusan);
+  if (sampleStudent) jurGuess = sampleStudent.jurusan;
+  else jurGuess = inferJurusanFromKelasName(kNorm, null);
+  const sJur = normalizeJurusanAliasProctor(jurGuess);
+
+  return (paketPool || []).filter(p => {
+    const pJur = String(p.jurusan || '').toLowerCase().trim();
+    const jurParts = pJur.split(',').map(x => normalizeJurusanAliasProctor(x)).filter(Boolean);
+    const jurMatch = !pJur || pJur === 'semua' || jurParts.includes('semua') || !sJur || sJur === 'semua' || jurParts.includes(sJur);
+    const kRes = checkKelasMatchProctor(p.kelas, kNorm);
+    return (jurMatch || kRes.specificity === 3) && kRes.match;
+  });
+}
+
+function summarizePaketNamesCompact(pakets) {
+  if (!pakets || pakets.length === 0) return '';
+  const uniqueNames = Array.from(new Set(pakets.map(p => p._cleanName)));
+  if (uniqueNames.length <= 2) return uniqueNames.join(' / ');
+
+  // Jika merupakan varian beberapa agama pada mapel yang sama (misal PAI / Kepramukaan Islam, Protestan, Katolik, Hindu)
+  const stripped = uniqueNames.map(n =>
+    n.replace(/\b(islam|muslim|kristen|protestan|potestan|katolik|katholik|katoiik|hindu|hlndu|buddha|budha|konghucu|khonghucu)\b/gi, '')
+     .replace(/\s+/g, ' ').replace(/\-\s*$/, '').trim()
+  );
+  const uniqueBase = Array.from(new Set(stripped.map(s => s.toUpperCase())));
+  if (uniqueBase.length === 1 && stripped[0]) {
+    return `${stripped[0]} (${uniqueNames.length} Paket Agama)`;
+  }
+  return `${uniqueNames.slice(0, 2).join(', ')} (+${uniqueNames.length - 2} lainnya)`;
+}
+
+function getWatchedClassesDistinctList() {
+  if (selectedKelasSet.size > 0) {
+    return Array.from(selectedKelasSet).sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
+  }
+  if (selectedRuang) {
+    const scoped = getScopedStudentsForProctor();
+    const setK = new Set(scoped.map(p => String(p.kelas || '').replace(/\s+/g, ' ').trim().toUpperCase()).filter(Boolean));
+    return Array.from(setK).sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
+  }
+  return [];
+}
+
+function renderProctorActiveMapelBanner() {
+  const card = document.getElementById('card-proctor-mapel-info');
+  const titleEl = document.getElementById('lbl-mapel-banner-title');
+  const badgeEl = document.getElementById('badge-mapel-banner-status');
+  const bodyEl = document.getElementById('proctor-mapel-banner-body');
+  if (!card || !bodyEl) return;
+
+  const { active, upcoming } = getAllActiveAndUpcomingPakets();
+  const watchedClasses = getWatchedClassesDistinctList();
+
+  // MODE 1: Pengawas SUDAH memilih kelas/ruang yang diawasi -> Tampilkan spesifik mapel kelas tersebut!
+  if (watchedClasses.length > 0) {
+    if (titleEl) {
+      titleEl.innerHTML = `<i class="bi bi-journal-bookmark-fill"></i><span>MATA PELAJARAN RUANG YANG DIAWASI</span>`;
+    }
+
+    const perClassMapel = watchedClasses.map(kls => ({
+      kelas: kls,
+      activePakets: getMatchingPaketsForKelas(kls, active),
+      upcomingPakets: getMatchingPaketsForKelas(kls, upcoming)
+    }));
+
+    const anyActive = perClassMapel.some(item => item.activePakets.length > 0);
+
+    if (anyActive) {
+      card.classList.remove('is-idle');
+      // Cek apakah semua kelas yang diawasi memiliki daftar mapel aktif yang identik
+      const signatures = new Set(perClassMapel.map(it => it.activePakets.map(p => p._cleanName).join('||')));
+      const allSameMapel = signatures.size === 1;
+
+      const uniqueActiveMapels = new Map();
+      perClassMapel.forEach(it => it.activePakets.forEach(p => uniqueActiveMapels.set(p.id || p._cleanName, p)));
+
+      if (badgeEl) {
+        badgeEl.className = 'badge bg-success-subtle text-success border border-success-subtle rounded-pill d-inline-flex align-items-center gap-1';
+        badgeEl.innerHTML = `<span class="pulse-dot-green"></span> Sedang Berlangsung`;
+      }
+
+      if (allSameMapel) {
+        const listP = perClassMapel[0].activePakets;
+        bodyEl.innerHTML = `
+          <div class="d-flex flex-wrap gap-2 mt-1">
+            ${listP.map(p => {
+              const tStr = formatPaketTimeRange(p);
+              return `
+                <div class="bg-white border border-primary-subtle rounded-3 px-3 py-2 shadow-sm d-inline-flex flex-column">
+                  <span class="fw-bold text-dark" style="font-size: 0.92rem;"><i class="bi bi-book-half text-primary me-1"></i>${escapeHtmlP(p._cleanName)}</span>
+                  ${tStr ? `<span class="text-muted" style="font-size: 0.72rem;"><i class="bi bi-clock me-1"></i>Jadwal: ${escapeHtmlP(tStr)}</span>` : ''}
+                </div>
+              `;
+            }).join('')}
+          </div>
+        `;
+      } else {
+        // Ruangan campuran beberapa kelas dengan mapel berbeda -> tampilkan per kelas!
+        bodyEl.innerHTML = `
+          <div class="d-flex flex-column gap-1 mt-1">
+            ${perClassMapel.map(it => {
+              if (it.activePakets.length === 0) {
+                return `
+                  <div class="bg-white border rounded-3 px-2 py-1 d-flex align-items-center justify-content-between flex-wrap gap-1">
+                    <span class="badge bg-secondary">${escapeHtmlP(it.kelas)}</span>
+                    <span class="text-muted fst-italic small">Tidak ada jadwal mapel aktif saat ini</span>
+                  </div>
+                `;
+              }
+              const namesHtml = it.activePakets.map(p => {
+                const tStr = formatPaketTimeRange(p);
+                return `<strong class="text-dark">${escapeHtmlP(p._cleanName)}</strong>${tStr ? ` <span class="text-muted" style="font-size:0.72rem;">(${escapeHtmlP(tStr)})</span>` : ''}`;
+              }).join(' <span class="text-muted mx-1">•</span> ');
+              return `
+                <div class="bg-white border border-primary-subtle rounded-3 px-2 py-1 d-flex align-items-center flex-wrap gap-2">
+                  <span class="badge bg-primary">${escapeHtmlP(it.kelas)}</span>
+                  <span class="small"><i class="bi bi-book-half text-primary me-1"></i>${namesHtml}</span>
+                </div>
+              `;
+            }).join('')}
+          </div>
+        `;
+      }
+      return;
+    }
+
+    // Tidak ada mapel aktif untuk kelas yang dipilih -> cek apakah ada jadwal segera dimulai hari ini
+    card.classList.add('is-idle');
+    const upcomingMatchedMap = new Map();
+    perClassMapel.forEach(it => it.upcomingPakets.forEach(p => upcomingMatchedMap.set(p.id || p._cleanName, p)));
+    const upcomingList = Array.from(upcomingMatchedMap.values());
+
+    if (upcomingList.length > 0) {
+      if (badgeEl) {
+        badgeEl.className = 'badge bg-warning-subtle text-dark border border-warning rounded-pill';
+        badgeEl.innerHTML = `<i class="bi bi-hourglass-split me-1"></i>Menunggu Jam Mulai`;
+      }
+      bodyEl.innerHTML = `
+        <div class="text-dark small mt-1">
+          Jadwal berikutnya untuk kelas ini:
+          ${upcomingList.slice(0, 3).map(p => `<span class="badge bg-white text-dark border ms-1"><i class="bi bi-clock text-warning me-1"></i>${escapeHtmlP(p._cleanName)} (${escapeHtmlP(formatPaketTimeRange(p))})</span>`).join('')}
+        </div>
+      `;
+    } else {
+      if (badgeEl) {
+        badgeEl.className = 'badge bg-secondary-subtle text-secondary border rounded-pill';
+        badgeEl.innerHTML = `Belum Ada Jadwal Aktif`;
+      }
+      bodyEl.innerHTML = `<div class="text-muted small">Saat ini belum ada jadwal mata pelajaran yang sedang dibuka untuk kelas <strong>${escapeHtmlP(watchedClasses.join(', '))}</strong>.</div>`;
+    }
+    return;
+  }
+
+  // MODE 2: Pengawas BARU MASUK halaman pengawas (belum memilih kelas) -> Tampilkan seluruh mapel yang sedang aktif saat ini!
+  if (titleEl) {
+    titleEl.innerHTML = `<i class="bi bi-journal-bookmark-fill"></i><span>MATA PELAJARAN UJIAN SAAT INI</span>`;
+  }
+
+  if (active.length > 0) {
+    card.classList.remove('is-idle');
+    if (badgeEl) {
+      badgeEl.className = 'badge bg-success-subtle text-success border border-success-subtle rounded-pill d-inline-flex align-items-center gap-1';
+      badgeEl.innerHTML = `<span class="pulse-dot-green"></span> ${active.length} Paket Mapel Aktif`;
+    }
+    bodyEl.innerHTML = `
+      <div class="d-flex flex-wrap gap-2 mt-1">
+        ${active.map(p => {
+          const scopeStr = formatPaketTargetScope(p);
+          const timeStr = formatPaketTimeRange(p);
+          return `
+            <div class="bg-white border border-primary-subtle rounded-3 px-3 py-2 shadow-sm d-inline-flex flex-column">
+              <span class="fw-bold text-dark" style="font-size: 0.88rem;"><i class="bi bi-book-half text-primary me-1"></i>${escapeHtmlP(p._cleanName)}</span>
+              <span class="text-muted" style="font-size: 0.71rem;">
+                <i class="bi bi-mortarboard me-1"></i>${escapeHtmlP(scopeStr)}${timeStr ? ` • <i class="bi bi-clock ms-1 me-1"></i>${escapeHtmlP(timeStr)}` : ''}
+              </span>
+            </div>
+          `;
+        }).join('')}
+      </div>
+    `;
+  } else if (upcoming.length > 0) {
+    card.classList.add('is-idle');
+    if (badgeEl) {
+      badgeEl.className = 'badge bg-warning-subtle text-dark border border-warning rounded-pill';
+      badgeEl.innerHTML = `<i class="bi bi-hourglass-split me-1"></i>Menunggu Jam Mulai`;
+    }
+    bodyEl.innerHTML = `
+      <div class="text-dark small mt-1">
+        Belum masuk jam ujian. Jadwal terdekat:
+        ${upcoming.slice(0, 4).map(p => `<span class="badge bg-white text-dark border ms-1">${escapeHtmlP(p._cleanName)} (${escapeHtmlP(formatPaketTargetScope(p))} • ${escapeHtmlP(formatPaketTimeRange(p))})</span>`).join('')}
+      </div>
+    `;
+  } else {
+    card.classList.add('is-idle');
+    if (badgeEl) {
+      badgeEl.className = 'badge bg-secondary-subtle text-secondary border rounded-pill';
+      badgeEl.innerHTML = `Tidak Ada Jadwal Aktif`;
+    }
+    bodyEl.innerHTML = `<div class="text-muted small">Saat ini belum ada jadwal mata pelajaran yang sedang berlangsung.</div>`;
+  }
 }
 
 function setPickerJurusanFilter(jur) {
@@ -395,6 +722,7 @@ function toggleWatchedKelas(kelasUpper) {
   }
   saveWatchState();
   renderKelasPickerButtons();
+  renderProctorActiveMapelBanner();
   renderWatchedStudents();
 }
 
@@ -402,6 +730,7 @@ function onRuangSelectChange(val) {
   selectedRuang = String(val || '').trim();
   saveWatchState();
   renderKelasPickerButtons();
+  renderProctorActiveMapelBanner();
   renderWatchedStudents();
 }
 
@@ -422,6 +751,7 @@ function resetAllSelectedScope() {
   saveWatchState();
   setKelasPickerVisible(true);
   renderKelasPickerButtons();
+  renderProctorActiveMapelBanner();
   renderWatchedStudents();
 }
 
@@ -478,12 +808,20 @@ function renderWatchedStudents() {
   emptyPrompt?.classList.add('d-none');
   workspace?.classList.remove('d-none');
 
-  // Render badge kelas/ruang aktif
+  // Render badge kelas/ruang aktif + keterangan mapel di subtitle
+  const { active: activeGlobalPakets } = getAllActiveAndUpcomingPakets();
   const kelasArr = Array.from(selectedKelasSet).sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
   const summaryParts = [];
   if (selectedRuang) summaryParts.push(`Ruang ${selectedRuang}`);
   if (kelasArr.length > 0) summaryParts.push(kelasArr.join(', '));
   if (selectedSesi) summaryParts.push(selectedSesi);
+
+  const watchedForSub = getWatchedClassesDistinctList();
+  const watchedActiveMap = new Map();
+  watchedForSub.forEach(k => getMatchingPaketsForKelas(k, activeGlobalPakets).forEach(p => watchedActiveMap.set(p.id || p._cleanName, p)));
+  const compactMapelSub = summarizePaketNamesCompact(Array.from(watchedActiveMap.values()));
+  if (compactMapelSub) summaryParts.push(`Mapel: ${compactMapelSub}`);
+
   if (subtitle) subtitle.innerText = `Mengawasi: ${summaryParts.join(' • ')}`;
 
   if (badgesEl) {
@@ -586,9 +924,15 @@ function renderWatchedStudents() {
           </div>
         `);
       } else {
+        const klsActivePakets = getMatchingPaketsForKelas(pKelasNorm, activeGlobalPakets);
+        const klsMapelText = summarizePaketNamesCompact(klsActivePakets);
+        const klsMapelBadge = klsMapelText
+          ? `<span class="badge bg-white text-primary border border-primary-subtle fw-semibold text-wrap text-end"><i class="bi bi-book-half me-1"></i>${escapeHtmlP(klsMapelText)}</span>`
+          : `<span class="badge bg-light text-muted border fw-normal">Belum ada mapel aktif</span>`;
         htmlItems.push(`
-          <div class="px-3 py-2 mt-1 rounded-3 bg-primary-subtle border border-primary-subtle text-primary fw-bold small d-flex align-items-center justify-content-between">
+          <div class="px-3 py-2 mt-1 rounded-3 bg-primary-subtle border border-primary-subtle text-primary fw-bold small d-flex align-items-center justify-content-between flex-wrap gap-1">
             <span><i class="bi bi-mortarboard-fill me-2"></i>KELAS: ${escapeHtmlP(pKelasNorm)}</span>
+            ${klsMapelBadge}
           </div>
         `);
       }
@@ -791,11 +1135,17 @@ async function copyProctorAttendanceWA() {
     selectedSesi ? `Sesi: ${selectedSesi}` : ''
   ].filter(Boolean).join(' | ');
 
+  const { active: activeForWa } = getAllActiveAndUpcomingPakets();
+  const waMapelMap = new Map();
+  kelasUnik.forEach(k => getMatchingPaketsForKelas(k, activeForWa).forEach(p => waMapelMap.set(p.id || p._cleanName, p)));
+  const waMapelStr = summarizePaketNamesCompact(Array.from(waMapelMap.values()));
+
   const nowStr = new Date().toLocaleString('id-ID', { dateStyle: 'medium', timeStyle: 'short' });
   const lines = [
     `*LAPORAN KEHADIRAN RUANG CBT*`,
     `📅 Waktu: ${nowStr}`,
     proctorName ? `👤 Pengawas: ${proctorName}` : '',
+    waMapelStr ? `📚 Mata Pelajaran: *${waMapelStr}*` : '',
     `🏫 ${lokasiStr}`,
     ``,
     `📊 *Ringkasan (${scoped.length} Siswa):*`,
